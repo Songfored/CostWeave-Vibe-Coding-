@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "costweave"
+version = "0.1.0"
+description = "Local-first, cost-aware multi-agent orchestration prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "CostWeave Contributors" }]
+keywords = ["agent", "orchestration", "dag", "llm-router", "multi-agent"]
+
+[project.scripts]
+costweave = "costweave.server:main"
+
+[tool.setuptools.packages.find]
+include = ["costweave*"]
+
+[tool.setuptools.package-data]
+costweave = ["web/*"]

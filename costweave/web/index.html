@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CostWeave 本地优先、多模型智能编排雏形">
+  <meta name="theme-color" content="#08110f">
+  <title>CostWeave · 智能算力调度台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到任务工作区</a>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="CostWeave 首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>CostWeave</span>
+    </a>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> 本地离线演示</div>
+    <nav class="topnav" aria-label="页面导航">
+      <a href="#workspace">开始任务</a>
+      <a href="#recent-runs">最近任务</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy-wrap">
+        <p class="eyebrow">LOCAL-FIRST AGENT ORCHESTRATOR</p>
+        <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
+        <p class="hero-copy">输入目标后，本地总指挥会先评估难度和成本，再拆分任务、并行分工、逐节点验收；必要时主动升级并重新规划。</p>
+      </div>
+      <div class="hero-proof" aria-label="产品特性">
+        <span><b>01</b> 执行前判断</span>
+        <span><b>02</b> DAG 并行</span>
+        <span><b>03</b> 持续验收</span>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace" aria-label="任务工作区">
+      <aside class="control-panel panel">
+        <div class="panel-heading">
+          <div><span class="step-no">01</span><h2>定义目标</h2></div>
+          <span class="status-pill">本地规划</span>
+        </div>
+
+        <form id="run-form" novalidate>
+          <div class="label-row">
+            <label for="goal">任务目标</label>
+            <span id="goal-count" aria-live="off">46 / 2000</span>
+          </div>
+          <textarea id="goal" name="goal" rows="6" required minlength="6" maxlength="2000" aria-describedby="goal-hint goal-error">设计一个面向个人开发者的智能任务编排产品，分析需求、规划技术架构、识别风险并形成可发布方案。</textarea>
+          <p id="goal-hint" class="field-hint">写清楚希望得到什么，以及必须满足的约束。</p>
+          <p id="goal-error" class="field-error" aria-live="polite"></p>
+
+          <fieldset class="mode-fieldset">
+            <legend>运行模式</legend>
+            <div class="mode-switch">
+              <label><input type="radio" name="mode" value="economy"><span><b>经济</b><small>成本优先</small></span></label>
+              <label><input type="radio" name="mode" value="balanced" checked><span><b>均衡</b><small>推荐</small></span></label>
+              <label><input type="radio" name="mode" value="turbo"><span><b>极速</b><small>延迟优先</small></span></label>
+            </div>
+          </fieldset>
+
+          <div class="field-grid">
+            <label>预算上限 <small>模拟点数</small><input id="budget" type="number" value="1.00" min="0.05" max="100" step="0.05" required></label>
+            <label>最大并发 <small>同时执行</small><input id="concurrency" type="number" value="4" min="1" max="12" required></label>
+          </div>
+
+          <label class="range-label" for="quality">
+            <span>质量门槛 <small>低于门槛应升级</small></span>
+            <span id="quality-value" aria-hidden="true">78%</span>
+          </label>
+          <input id="quality" type="range" value="78" min="50" max="99" aria-describedby="quality-hint">
+          <p id="quality-hint" class="field-hint">数值越高，倾向选择能力更强的执行者。</p>
+
+          <label class="check-row">
+            <input id="simulate-replan" type="checkbox">
+            <span><strong>演示中途重规划</strong><small>注入一次核心假设错误，观察系统如何恢复</small></span>
+          </label>
+
+          <button id="submit-button" class="primary-button" type="submit">
+            <span class="button-main"><i class="button-spinner" aria-hidden="true"></i><b id="submit-label">生成计划并开始调度</b></span>
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+          <p id="form-error" class="form-error" role="alert"></p>
+        </form>
+
+        <details class="parameter-help">
+          <summary>这些参数怎么选？</summary>
+          <p><b>经济</b>偏向低成本，<b>均衡</b>适合大多数任务，<b>极速</b>优先减少等待。当前费用均为模拟点数，不会调用真实 API。</p>
+        </details>
+
+        <section id="recent-runs" class="recent-runs" aria-labelledby="recent-title">
+          <div class="subsection-heading">
+            <h3 id="recent-title">最近任务</h3>
+            <button id="refresh-history" class="text-button" type="button">刷新</button>
+          </div>
+          <div id="history-list" class="history-list">
+            <p class="history-empty">运行过的任务会出现在这里。</p>
+          </div>
+        </section>
+      </aside>
+
+      <section id="run-panel" class="run-panel panel" tabindex="-1" aria-labelledby="run-panel-title">
+        <div class="panel-heading run-heading">
+          <div><span class="step-no">02</span><h2 id="run-panel-title">任务结果与编排</h2></div>
+          <span id="run-status" class="status-pill muted" role="status" aria-live="polite">等待任务</span>
+        </div>
+        <p id="run-live" class="sr-only" aria-live="polite"></p>
+
+        <div id="empty-state" class="empty-state">
+          <div class="empty-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
+          <p class="empty-kicker">READY WHEN YOU ARE</p>
+          <h3>总指挥等待任务</h3>
+          <p>提交目标后，这里会优先展示最终成果；任务图、成本、验收和重规划过程仍可完整追溯。</p>
+        </div>
+
+        <div id="run-content" class="run-content hidden">
+          <section id="run-error-panel" class="run-error-panel hidden" role="alert">
+            <div>
+              <span class="section-kicker danger">运行未完成</span>
+              <h3>这次任务没有顺利结束</h3>
+              <p id="run-error-message"></p>
+              <small id="run-error-hint"></small>
+            </div>
+            <div class="inline-actions">
+              <button id="edit-and-retry" class="secondary-button" type="button">调整参数</button>
+              <button id="retry-run" class="secondary-button subtle" type="button">按当前配置重试</button>
+            </div>
+          </section>
+
+          <section id="outcome-card" class="outcome-card hidden" aria-labelledby="outcome-title">
+            <div class="outcome-heading">
+              <div>
+                <span class="section-kicker">FINAL DELIVERABLE</span>
+                <h3 id="outcome-title">最终成果</h3>
+              </div>
+              <div class="outcome-actions">
+                <button id="copy-result" class="icon-button" type="button">复制成果</button>
+                <button id="download-result" class="icon-button" type="button">下载 Markdown</button>
+              </div>
+            </div>
+            <p id="outcome-summary" class="outcome-summary"></p>
+            <div id="outcome-body" class="outcome-body"></div>
+            <details id="outcome-evidence" class="evidence-block">
+              <summary>查看证据与假设</summary>
+              <div id="outcome-evidence-body"></div>
+            </details>
+            <div class="outcome-footer">
+              <span id="outcome-confidence"></span>
+              <span class="simulation-note">离线模拟成果 · 未调用真实模型</span>
+              <span id="copy-feedback" role="status" aria-live="polite"></span>
+            </div>
+          </section>
+
+          <div class="metric-grid" aria-label="运行指标">
+            <article><span>成功概率 <small>系统估算</small></span><strong id="metric-success">—</strong><div class="meter" aria-hidden="true"><i id="success-meter"></i></div></article>
+            <article><span>模拟成本 <small>点数</small></span><strong id="metric-cost">—</strong><small id="metric-budget"></small></article>
+            <article><span>峰值并发 <small>异步节点</small></span><strong id="metric-parallel">—</strong><small>同时执行的最高数量</small></article>
+            <article><span>总耗时 <small>本次运行</small></span><strong id="metric-time">—</strong><small id="metric-replan"></small></article>
+          </div>
+
+          <div class="plan-summary">
+            <div class="difficulty-block"><span>难度判断</span><strong id="difficulty">—</strong></div>
+            <p id="rationale"></p>
+            <div id="type-tags" class="tags"></div>
+          </div>
+
+          <section class="orchestration-section" aria-labelledby="dag-title">
+            <div class="section-title"><div><span class="section-kicker">ORCHESTRATION</span><h3 id="dag-title">并行任务图</h3></div><span>选择节点查看合同与成果</span></div>
+            <div id="dag" class="dag"></div>
+          </section>
+
+          <div class="lower-grid">
+            <section aria-labelledby="events-title">
+              <div class="section-title compact"><div><h3 id="events-title">运行事件</h3><span id="event-count"></span></div><button id="events-toggle" class="text-button" type="button" aria-controls="timeline">展开全部</button></div>
+              <ol id="timeline" class="timeline"></ol>
+            </section>
+            <section aria-labelledby="contract-title">
+              <div class="section-title compact"><div><h3 id="contract-title">节点详情</h3><span>合同、预测与验收</span></div></div>
+              <div id="contract" class="contract-card"><p>请选择一个任务节点。</p></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="principles" aria-label="产品工作方式">
+      <article><span>01</span><h3>预测后执行</h3><p>先估算能力匹配、成功率、成本和延迟，再选择执行者。</p></article>
+      <article><span>02</span><h3>真正并行</h3><p>无依赖任务立即并行，关键成果通过验收后释放下游。</p></article>
+      <article><span>03</span><h3>证据驱动恢复</h3><p>识别根本错误，保留有效成果，由更强规划能力重新接管。</p></article>
+      <article><span>04</span><h3>适配器优先</h3><p>当前不绑定模型厂商，后续执行器可替换为任意模型接口。</p></article>
+    </section>
+  </main>
+
+  <footer><span>CostWeave / Agent Runtime Prototype</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
