@@ -10,6 +10,9 @@ const state = {
   phase: null,
   resultMarkdown: "",
   modelLabels: {},
+  catalogModels: [],
+  catalogMetadata: {},
+  editingModelId: null,
 };
 
 const statusLabels = {
@@ -248,9 +251,18 @@ function render(run) {
 
   $("#difficulty").textContent = `L${run.plan.difficulty} / 10`;
   $("#rationale").textContent = run.plan.rationale;
-  $("#type-tags").innerHTML = run.plan.task_types.map((type) => `<i>${escapeHtml(type)}</i>`).join("");
   const analysis = run.plan.analysis || {};
+  const classifications = analysis.classifications || [];
+  $("#type-tags").innerHTML = classifications.length
+    ? classifications.slice(0, 4).map((item) => {
+      const evidence = (item.evidence || []).join("、");
+      const title = evidence ? `触发依据：${evidence}` : "本地分类器判断";
+      return `<i title="${escapeHtml(title)}">${escapeHtml(item.label)} ${Math.round(Number(item.score || 0) * 100)}%</i>`;
+    }).join("")
+    : run.plan.task_types.map((type) => `<i>${escapeHtml(type)}</i>`).join("");
   $("#analysis-signals").innerHTML = [
+    `主意图 ${analysis.primary_intent || "analyze"}`,
+    `分类置信 ${Math.round(Number(analysis.classification_confidence || 0) * 100)}%`,
     `歧义 ${Math.round(Number(analysis.ambiguity || 0) * 100)}%`,
     `不确定性 ${Math.round(Number(analysis.uncertainty || 0) * 100)}%`,
     `风险 ${analysis.stakes || "normal"}`,
@@ -258,7 +270,7 @@ function render(run) {
   ].map((item) => `<span>${escapeHtml(item)}</span>`).join("");
   const routing = run.plan.routing_summary || {};
   $("#routing-summary").textContent = routing.strategy
-    ? `路由：${routing.strategy} · 最低可行 $${Number(routing.minimum_feasible_cost_usd || 0).toFixed(4)} · 当前组合 $${Number(routing.estimated_total_cost_usd || 0).toFixed(4)} · ${routing.frontier_assignments || 0} 个前沿模型节点`
+    ? `路由：${routing.strategy} · 目录 ${routing.catalog_revision || run.plan.model_snapshot || "未知"} · 最低可行 $${Number(routing.minimum_feasible_cost_usd || 0).toFixed(4)} · 当前组合 $${Number(routing.estimated_total_cost_usd || 0).toFixed(4)} · ${routing.independent_validators || 0} 个独立验收`
     : "等待模型组合决策";
 
   if (!state.selectedTaskId || !run.plan.tasks.some((task) => task.id === state.selectedTaskId)) {
@@ -387,7 +399,9 @@ function renderContract(task) {
     </div>` : "";
 
   const candidates = (task.routing_candidates || []).map((candidate) => `
-    <li><b>${escapeHtml(candidate.name)}</b><span>${Math.round(Number(candidate.predicted_success || 0) * 100)}% · $${Number(candidate.estimated_cost || 0).toFixed(4)}</span></li>`).join("");
+    <li><b>${escapeHtml(candidate.name)}</b><span>均值 ${Math.round(Number(candidate.predicted_success || 0) * 100)}% · 下界 ${Math.round(Number(candidate.success_lower_bound || 0) * 100)}% · $${Number(candidate.estimated_cost || 0).toFixed(4)}</span></li>`).join("");
+  const rejections = (task.routing_rejections || []).slice(0, 5).map((item) => `
+    <li><b>${escapeHtml(item.name)}</b><span>${escapeHtml((item.reasons || []).join(" · "))}</span></li>`).join("");
   $("#contract").innerHTML = `
     <div class="contract-heading">
       <div><h4>${escapeHtml(task.title)}</h4><code>${escapeHtml(task.id)} · 计划 v${task.plan_version}</code></div>
@@ -401,41 +415,284 @@ function renderContract(task) {
       <dt>输出格式</dt><dd>${list(task.output_schema)}</dd>
       <dt>选定模型</dt><dd>${escapeHtml(modelLabel(task.selected_worker))}</dd>
       <dt>路由理由</dt><dd>${escapeHtml(task.routing_rationale || "等待路由")}</dd>
-      <dt>执行预测</dt><dd>成功率 ${Math.round(task.predicted_success * 100)}% · $${Number(task.estimated_cost || 0).toFixed(4)} · ${task.estimated_latency_ms}ms</dd>
-      <dt>任务画像</dt><dd>难度 L${task.difficulty}/10 · 风险 ${escapeHtml(task.risk_level)} · 输入约 ${task.estimated_input_tokens} tokens · 输出约 ${task.estimated_output_tokens} tokens</dd>
+      <dt>执行预测</dt><dd>均值 ${Math.round(task.predicted_success * 100)}% · 保守下界 ${Math.round(Number(task.predicted_success_lower_bound || 0) * 100)}% · 路由置信 ${Math.round(Number(task.route_confidence || 0) * 100)}% · $${Number(task.estimated_cost || 0).toFixed(4)} · ${task.estimated_latency_ms}ms</dd>
+      <dt>任务画像</dt><dd>难度 L${task.difficulty}/10 · 风险 ${escapeHtml(task.risk_level)} · 不确定性 ${Math.round(Number(task.uncertainty || 0) * 100)}% · 关键度 ${Math.round(Number(task.criticality || 0) * 100)}% · 输入约 ${task.estimated_input_tokens} tokens · 输出约 ${task.estimated_output_tokens} tokens</dd>
       ${task.validation ? `<dt>最近验收</dt><dd>${escapeHtml(task.validation.findings.join("；"))}</dd>` : ""}
     </dl>
     <div class="candidate-list"><span>候选排序</span><ol>${candidates || "<li>暂无候选</li>"}</ol></div>
+    <div class="candidate-list rejected-list"><span>硬约束淘汰</span><ol>${rejections || "<li>无</li>"}</ol></div>
     <details class="handoff-prompt"><summary>查看发送给执行模型的任务合同</summary><pre>${escapeHtml(task.handoff_prompt || "暂无")}</pre></details>
     ${resultSection}`;
 }
 
-async function loadCatalog() {
+async function loadCatalog(announcement = "") {
   try {
     const response = await fetch("/api/catalog");
     const data = await readJson(response);
-    if (!response.ok) throw new Error("目录不可用");
-    const models = data.models || data.workers || [];
-    state.modelLabels = Object.fromEntries(models.map((model) => [model.id, model.name]));
-    const metadata = data.metadata || {};
-    $("#catalog-meta").textContent = `快照 ${metadata.snapshot_date || "未知"} · ${models.length} 个模型/本地执行器`;
-    $("#model-catalog").innerHTML = models.map((model) => {
-      const currency = model.pricing_currency || "USD";
-      const price = model.local
-        ? "API $0 · 本地算力另计"
-        : `${currency} ${Number(model.input_price_per_mtok).toFixed(3)} / ${Number(model.output_price_per_mtok).toFixed(3)} 每百万输入/输出`;
-      return `<article class="model-card" data-tier="${escapeHtml(model.tier)}">
-        <div class="model-card-head"><span>${escapeHtml(model.provider)}</span><i>${escapeHtml(model.tier)}</i></div>
-        <h3>${escapeHtml(model.name)}</h3><code>${escapeHtml(model.model_id || model.id)}</code>
-        <p>${escapeHtml(model.specialty)}</p>
-        <div class="model-score"><span>推理 <b>${Math.round(Number(model.reasoning) * 100)}%</b></span><span>速度 <b>${Math.round(Number(model.speed) * 100)}%</b></span></div>
-        <dl><dt>价格</dt><dd>${escapeHtml(price)}</dd><dt>上下文</dt><dd>${formatTokens(model.context_window)}</dd><dt>优势</dt><dd>${escapeHtml((model.strengths || []).join(" · "))}</dd></dl>
-        ${model.source_url ? `<a href="${escapeHtml(model.source_url)}" target="_blank" rel="noreferrer">官方资料 ↗</a>` : ""}
-      </article>`;
-    }).join("");
-  } catch (_error) {
+    if (!response.ok) throw new Error(data.message || "目录不可用");
+    state.catalogModels = data.models || data.workers || [];
+    state.catalogMetadata = data.metadata || {};
+    state.modelLabels = Object.fromEntries(state.catalogModels.map((model) => [model.id, model.name]));
+    const metadata = state.catalogMetadata;
+    $("#catalog-meta").textContent = `修订 r${metadata.catalog_revision || "?"} · ${metadata.updated_at ? formatDate(metadata.updated_at) : metadata.snapshot_date || "时间未知"}`;
+    renderCatalogStats();
+    renderProviderFilter();
+    renderCatalog();
+    if (announcement) $("#catalog-live").textContent = announcement;
+    else if (metadata.load_warning) $("#catalog-live").textContent = metadata.load_warning;
+  } catch (error) {
     $("#catalog-meta").textContent = "模型目录暂时不可用";
+    $("#catalog-live").textContent = error instanceof Error ? error.message : "目录读取失败";
     $("#model-catalog").innerHTML = '<p class="history-empty">请确认本地服务仍在运行。</p>';
+  }
+}
+
+function renderCatalogStats() {
+  const models = state.catalogModels;
+  const stale = models.filter((model) => isStale(model.verified_at)).length;
+  $("#catalog-stats").innerHTML = [
+    ["总模型", models.length],
+    ["可路由", models.filter((model) => model.routable).length],
+    ["用户修改", models.filter((model) => model.custom).length],
+    ["资料过期", stale],
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("");
+}
+
+function renderProviderFilter() {
+  const select = $("#catalog-provider-filter");
+  const current = select.value;
+  const providers = [...new Set(state.catalogModels.map((model) => model.provider))].sort();
+  select.innerHTML = '<option value="">全部</option>' + providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider)}</option>`).join("");
+  if (providers.includes(current)) select.value = current;
+}
+
+function renderCatalog() {
+  const query = $("#catalog-search").value.trim().toLowerCase();
+  const provider = $("#catalog-provider-filter").value;
+  const status = $("#catalog-status-filter").value;
+  const models = state.catalogModels.filter((model) => {
+    const haystack = `${model.name} ${model.id} ${model.model_id || ""} ${model.provider} ${model.specialty}`.toLowerCase();
+    if (query && !haystack.includes(query)) return false;
+    if (provider && model.provider !== provider) return false;
+    if (status === "routable" && !model.routable) return false;
+    if (status === "disabled" && model.routable) return false;
+    if (status === "custom" && !model.custom) return false;
+    return true;
+  });
+  $("#catalog-live").textContent = `显示 ${models.length} / ${state.catalogModels.length} 个模型`;
+  if (!models.length) {
+    $("#model-catalog").innerHTML = '<p class="history-empty">没有符合筛选条件的模型。</p>';
+    return;
+  }
+  $("#model-catalog").innerHTML = models.map((model) => {
+    const currency = model.pricing_currency || "USD";
+    const price = model.local
+      ? "API $0 · 本地算力另计"
+      : `${currency} ${Number(model.input_price_per_mtok).toFixed(3)} / ${Number(model.output_price_per_mtok).toFixed(3)} 每百万输入/输出`;
+    const source = safeSourceUrl(model.source_url);
+    const badges = [
+      model.routable ? "可路由" : "已停用",
+      model.custom ? "用户修改" : "内置基线",
+      isStale(model.verified_at) ? "资料过期" : "",
+      model.preview ? "Preview" : "",
+    ].filter(Boolean);
+    return `<article class="model-card" data-tier="${escapeHtml(model.tier)}">
+      <div class="model-card-head"><span>${escapeHtml(model.provider)}</span><i>${escapeHtml(model.tier)}</i></div>
+      <div class="model-badges">${badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}</div>
+      <h3>${escapeHtml(model.name)}</h3><code>${escapeHtml(model.model_id || model.id)}</code>
+      <p>${escapeHtml(model.specialty)}</p>
+      <div class="model-score"><span>推理 <b>${Math.round(Number(model.reasoning) * 100)}%</b></span><span>速度 <b>${Math.round(Number(model.speed) * 100)}%</b></span><span>可靠 <b>${Math.round(Number(model.reliability) * 100)}%</b></span></div>
+      <dl><dt>价格</dt><dd>${escapeHtml(price)}</dd><dt>上下文</dt><dd>${formatTokens(model.context_window)}</dd><dt>核验</dt><dd>${escapeHtml(model.verified_at || "未标注")}</dd><dt>优势</dt><dd>${escapeHtml((model.strengths || []).join(" · ") || "未填写")}</dd></dl>
+      <div class="model-card-actions">${source ? `<a href="${escapeHtml(source)}" target="_blank" rel="noopener noreferrer">资料来源 ↗</a>` : "<span></span>"}<button class="text-button edit-model" type="button" data-model-id="${escapeHtml(model.id)}">编辑</button></div>
+    </article>`;
+  }).join("");
+  $$(".edit-model").forEach((button) => button.addEventListener("click", () => openModelEditor(button.dataset.modelId)));
+}
+
+function isStale(value) {
+  if (!value) return true;
+  const checked = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(checked.getTime())) return true;
+  return Date.now() - checked.getTime() > 180 * 24 * 60 * 60 * 1000;
+}
+
+function safeSourceUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function openModelEditor(modelId = null) {
+  const model = state.catalogModels.find((item) => item.id === modelId) || null;
+  state.editingModelId = model?.id || null;
+  $("#model-editor-title").textContent = model ? `编辑 ${model.name}` : "新增模型";
+  $("#model-validation-summary").textContent = "";
+  $("#model-id").disabled = Boolean(model);
+  $("#delete-model").classList.toggle("hidden", !model);
+  const values = model || {
+    id: "", name: "", provider: "", model_id: "", tier: "custom", specialty: "",
+    reasoning: .75, speed: .75, reliability: .85, data_confidence: .6,
+    capabilities: { analysis: .7, planning: .7, writing: .7, validation: .7 },
+    pricing_currency: "USD", input_price_per_mtok: 0, cached_input_price_per_mtok: null,
+    output_price_per_mtok: 0, context_window: 128000, max_output_tokens: 16000,
+    modalities: ["text"], tools: ["function_calling", "structured_output"],
+    source_url: "", verified_at: new Date().toISOString().slice(0, 10),
+    strengths: [], limitations: [], local: false, preview: false, routable: false,
+  };
+  const mappings = {
+    "model-id": values.id, "model-name": values.name, "model-provider": values.provider,
+    "model-api-id": values.model_id || values.id, "model-tier": values.tier,
+    "model-specialty": values.specialty, "model-reasoning": values.reasoning,
+    "model-speed": values.speed, "model-reliability": values.reliability,
+    "model-data-confidence": values.data_confidence ?? .6,
+    "model-capabilities": JSON.stringify(values.capabilities || {}, null, 2),
+    "model-currency": values.pricing_currency || "USD",
+    "model-input-price": values.input_price_per_mtok ?? 0,
+    "model-cached-price": values.cached_input_price_per_mtok ?? "",
+    "model-output-price": values.output_price_per_mtok ?? 0,
+    "model-context": values.context_window, "model-max-output": values.max_output_tokens,
+    "model-modalities": (values.modalities || []).join(" | "),
+    "model-tools": (values.tools || []).join(" | "),
+    "model-source-url": values.source_url || "", "model-verified-at": values.verified_at || "",
+    "model-strengths": (values.strengths || []).join(" | "),
+    "model-limitations": (values.limitations || []).join(" | "),
+  };
+  Object.entries(mappings).forEach(([id, value]) => { $(`#${id}`).value = value; });
+  $("#model-local").checked = Boolean(values.local);
+  $("#model-preview").checked = Boolean(values.preview);
+  $("#model-routable").checked = Boolean(values.routable);
+  $("#model-editor").showModal();
+  $("#model-name").focus();
+}
+
+function splitList(value) {
+  return String(value || "").split(/[|；;]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function modelFormPayload() {
+  let capabilities;
+  try {
+    capabilities = JSON.parse($("#model-capabilities").value);
+  } catch (_error) {
+    throw new Error("能力向量必须是有效 JSON 对象。");
+  }
+  const speed = Number($("#model-speed").value);
+  const existing = state.catalogModels.find((item) => item.id === state.editingModelId);
+  return {
+    id: existing?.id || $("#model-id").value.trim(),
+    name: $("#model-name").value.trim(),
+    provider: $("#model-provider").value.trim(),
+    model_id: $("#model-api-id").value.trim() || $("#model-id").value.trim(),
+    tier: $("#model-tier").value.trim(),
+    specialty: $("#model-specialty").value.trim(),
+    capabilities,
+    cost_per_task: 0,
+    latency_factor: Math.max(.35, 1.55 - speed),
+    reliability: Number($("#model-reliability").value),
+    reasoning: Number($("#model-reasoning").value),
+    speed,
+    data_confidence: Number($("#model-data-confidence").value),
+    availability: Number(existing?.availability ?? .99),
+    context_window: Number($("#model-context").value),
+    max_output_tokens: Number($("#model-max-output").value),
+    input_price_per_mtok: Number($("#model-input-price").value),
+    cached_input_price_per_mtok: $("#model-cached-price").value === "" ? null : Number($("#model-cached-price").value),
+    output_price_per_mtok: Number($("#model-output-price").value),
+    pricing_currency: $("#model-currency").value.trim().toUpperCase(),
+    modalities: splitList($("#model-modalities").value),
+    tools: splitList($("#model-tools").value),
+    strengths: splitList($("#model-strengths").value),
+    limitations: splitList($("#model-limitations").value),
+    source_url: $("#model-source-url").value.trim(),
+    verified_at: $("#model-verified-at").value,
+    local: $("#model-local").checked,
+    preview: $("#model-preview").checked,
+    routable: $("#model-routable").checked,
+    custom: true,
+  };
+}
+
+async function saveModel(event) {
+  event.preventDefault();
+  $("#model-validation-summary").textContent = "";
+  if (!$("#model-form").reportValidity()) return;
+  try {
+    const model = modelFormPayload();
+    const editing = Boolean(state.editingModelId);
+    const response = await fetch(editing ? `/api/catalog/models/${encodeURIComponent(state.editingModelId)}` : "/api/catalog/models", {
+      method: editing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, expected_revision: state.catalogMetadata.catalog_revision }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "保存失败");
+    $("#model-editor").close();
+    await loadCatalog(`${editing ? "已更新" : "已新增"} ${model.name}；新任务将使用目录修订 r${data.metadata.catalog_revision}`);
+  } catch (error) {
+    $("#model-validation-summary").textContent = error instanceof Error ? error.message : "保存失败";
+  }
+}
+
+async function deleteEditingModel() {
+  const model = state.catalogModels.find((item) => item.id === state.editingModelId);
+  if (!model || !confirm(`确认删除“${model.name}”？历史运行不会受到影响。`)) return;
+  try {
+    const response = await fetch(`/api/catalog/models/${encodeURIComponent(model.id)}?expected_revision=${encodeURIComponent(state.catalogMetadata.catalog_revision)}`, { method: "DELETE" });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "删除失败");
+    $("#model-editor").close();
+    await loadCatalog(`已删除 ${model.name}`);
+  } catch (error) {
+    $("#model-validation-summary").textContent = error instanceof Error ? error.message : "删除失败";
+  }
+}
+
+async function importCatalog(event) {
+  event.preventDefault();
+  const file = $("#model-import-file").files[0];
+  if (!file) {
+    $("#import-errors").textContent = "请选择 JSON 或 CSV 文件。";
+    return;
+  }
+  try {
+    const format = file.name.toLowerCase().endsWith(".csv") ? "csv" : "json";
+    const response = await fetch("/api/catalog/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        format,
+        mode: $("#import-mode").value,
+        data: await file.text(),
+        expected_revision: state.catalogMetadata.catalog_revision,
+      }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "导入失败");
+    $("#import-dialog").close();
+    $("#model-import-file").value = "";
+    await loadCatalog(`导入完成：新增 ${data.result.created}，更新 ${data.result.updated}，当前共 ${data.result.total} 个模型`);
+  } catch (error) {
+    $("#import-errors").textContent = error instanceof Error ? error.message : "导入失败";
+  }
+}
+
+async function resetCatalog() {
+  if (!confirm("确认恢复内置模型目录？所有用户新增和修改都会被覆盖。")) return;
+  try {
+    const response = await fetch("/api/catalog/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "RESET", expected_revision: state.catalogMetadata.catalog_revision }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "恢复失败");
+    await loadCatalog("已恢复内置模型目录");
+  } catch (error) {
+    $("#catalog-live").textContent = error instanceof Error ? error.message : "恢复失败";
   }
 }
 
@@ -643,6 +900,24 @@ function escapeHtml(value) {
     '"': "&quot;",
   }[char]));
 }
+
+$("#catalog-search").addEventListener("input", renderCatalog);
+$("#catalog-provider-filter").addEventListener("change", renderCatalog);
+$("#catalog-status-filter").addEventListener("change", renderCatalog);
+$("#add-model").addEventListener("click", () => openModelEditor());
+$("#import-models").addEventListener("click", () => {
+  $("#import-errors").textContent = "";
+  $("#import-dialog").showModal();
+});
+$("#export-models").addEventListener("click", () => { location.href = "/api/catalog/export?format=json"; });
+$("#export-models-csv").addEventListener("click", () => { location.href = "/api/catalog/export?format=csv"; });
+$("#reset-catalog").addEventListener("click", resetCatalog);
+$("#model-form").addEventListener("submit", saveModel);
+$("#delete-model").addEventListener("click", deleteEditingModel);
+$("#close-model-editor").addEventListener("click", () => $("#model-editor").close());
+$("#cancel-model").addEventListener("click", () => $("#model-editor").close());
+$("#import-form").addEventListener("submit", importCatalog);
+$("#cancel-import").addEventListener("click", () => $("#import-dialog").close());
 
 updateGoalCount();
 loadCatalog();

@@ -1,4 +1,4 @@
-"""Versioned model facts used by the v0.2 predictive router.
+"""Built-in model facts used as the resettable v0.3 catalog baseline.
 
 Prices and hard limits come from vendor documentation. Capability scores are
 CostWeave routing estimates, not vendor benchmarks. No provider API is called.
@@ -9,7 +9,7 @@ from __future__ import annotations
 from .domain import WorkerProfile
 
 
-SNAPSHOT_DATE = "2026-07-17"
+SNAPSHOT_DATE = "2026-07-18"
 
 SOURCES = {
     "openai": "https://developers.openai.com/api/docs/models",
@@ -47,6 +47,9 @@ def _model(
     preview: bool = False,
     routable: bool = True,
 ) -> WorkerProfile:
+    def items(value: tuple[str, ...] | str) -> list[str]:
+        return [value] if isinstance(value, str) else list(value)
+
     return WorkerProfile(
         id=model_id,
         model_id=model_id,
@@ -67,10 +70,10 @@ def _model(
         cached_input_price_per_mtok=cached_price,
         output_price_per_mtok=output_price,
         pricing_currency=currency,
-        modalities=list(modalities),
-        tools=list(tools),
-        strengths=list(strengths),
-        limitations=list(limitations),
+        modalities=items(modalities),
+        tools=items(tools),
+        strengths=items(strengths),
+        limitations=items(limitations),
         source_url=SOURCES.get(provider, ""),
         verified_at=SNAPSHOT_DATE,
         preview=preview,
@@ -243,8 +246,7 @@ def catalog_metadata() -> dict:
     return {
         "snapshot_date": SNAPSHOT_DATE,
         "pricing_unit": "per 1M tokens; currency is explicit per model",
-        "capability_notice": "能力分数是 CostWeave v0.2 的启发式路由估计，不是厂商基准成绩。",
+        "capability_notice": "能力分数是 CostWeave v0.3 的可编辑路由先验，不是厂商基准成绩。",
         "execution_notice": "当前仍为离线模拟；目录用于决策演示，不会发起真实 API 调用。",
         "sources": SOURCES,
     }
-

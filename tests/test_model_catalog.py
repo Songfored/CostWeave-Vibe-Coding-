@@ -32,8 +32,9 @@ class ModelCatalogTests(unittest.TestCase):
             difficulty=10, risk_level="high", estimated_input_tokens=80_000,
             estimated_output_tokens=20_000,
         )
-        decision = PredictiveRouter().route(task, RunMode.BALANCED, .92)
+        decision = PredictiveRouter().route(task, RunMode.BALANCED, .90)
         self.assertIn(decision.worker.tier, {"frontier", "premium"})
+        self.assertGreaterEqual(decision.success_lower_bound, .90)
         with self.assertRaises(RoutingError):
             PredictiveRouter().route(task, RunMode.BALANCED, .98)
 

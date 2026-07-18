@@ -85,6 +85,9 @@ class WorkerProfile:
     verified_at: str = ""
     preview: bool = False
     routable: bool = True
+    data_confidence: float = 0.8
+    availability: float = 0.99
+    custom: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -111,13 +114,21 @@ class TaskContract:
     requires_freshness: bool = False
     estimated_input_tokens: int = 4_000
     estimated_output_tokens: int = 1_500
+    capability_weights: dict[str, float] = field(default_factory=dict)
+    uncertainty: float = 0.0
+    criticality: float = 0.5
+    classification_confidence: float = 0.75
+    escalation_policy: str = "evidence-triggered"
     handoff_prompt: str = ""
     selected_worker: str | None = None
     predicted_success: float = 0.0
+    predicted_success_lower_bound: float = 0.0
     estimated_cost: float = 0.0
     estimated_latency_ms: int = 0
     routing_rationale: str = ""
     routing_candidates: list[dict[str, Any]] = field(default_factory=list)
+    routing_rejections: list[dict[str, Any]] = field(default_factory=list)
+    route_confidence: float = 0.0
     status: TaskStatus = TaskStatus.PENDING
     attempt: int = 0
     result: dict[str, Any] | None = None

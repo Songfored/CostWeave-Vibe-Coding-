@@ -49,6 +49,14 @@ class WebUiRegressionTests(unittest.TestCase):
             "analysis-signals",
             "routing-summary",
             "model-catalog",
+            "catalog-stats",
+            "catalog-search",
+            "add-model",
+            "import-models",
+            "export-models",
+            "model-editor",
+            "model-form",
+            "import-dialog",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -59,6 +67,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("quality", inventory.labels)
         self.assertIn('aria-live="polite"', self.html)
         self.assertIn('aria-label="页面导航"', self.html)
+        self.assertNotIn('id="model-catalog" class="model-catalog" aria-live', self.html)
 
     def test_responsive_and_accessibility_guards_exist(self):
         self.assertIn("@media (max-width: 980px)", self.css)
@@ -76,8 +85,15 @@ class WebUiRegressionTests(unittest.TestCase):
             "downloadResult",
             "revealTerminalState",
             "loadCatalog",
+            "renderCatalog",
+            "openModelEditor",
+            "saveModel",
+            "importCatalog",
+            "resetCatalog",
         ):
             self.assertIn(f"function {function_name}", self.js)
+        self.assertIn("analysis.classifications", self.js)
+        self.assertIn("metadata.load_warning", self.js)
 
 
 if __name__ == "__main__":

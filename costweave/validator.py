@@ -24,6 +24,12 @@ class ContractValidator:
                 issues.append(f"{task.id} 引用了未知依赖：{sorted(unknown)}")
             if not task.objective or not task.acceptance_criteria or not task.output_schema:
                 issues.append(f"{task.id} 的任务合同不完整")
+            if not 1 <= task.difficulty <= 10:
+                issues.append(f"{task.id} 的难度不在1到10之间")
+            if not 0 <= task.uncertainty <= 1:
+                issues.append(f"{task.id} 的不确定性不在0到1之间")
+            if not 0 <= task.criticality <= 1:
+                issues.append(f"{task.id} 的关键度不在0到1之间")
         if self._has_cycle(plan.tasks):
             issues.append("任务图存在循环依赖")
         if "final-synthesis" not in known:
@@ -65,6 +71,34 @@ class ContractValidator:
         if not isinstance(evidence, list) or not any(str(item).strip() for item in evidence):
             findings.append("缺少可追溯证据")
             passed = False
+        gate_types = {"planning", "validation", "risk", "safety"}
+        if task.task_type in gate_types:
+            decision = result.get("decision")
+            if decision not in {"pass", "revise", "reject", "human_review"}:
+                findings.append("门控节点缺少有效 decision")
+                passed = False
+            elif decision != "pass":
+                findings.append(f"门控决定为 {decision}，不能解锁下游")
+                passed = False
+            criteria_results = result.get("criteria_results")
+            if not isinstance(criteria_results, list):
+                findings.append("门控节点缺少逐条验收结果")
+                passed = False
+            else:
+                covered = {
+                    str(item.get("criterion", "")).strip()
+                    for item in criteria_results
+                    if isinstance(item, dict) and item.get("passed") is True
+                }
+                missing_criteria = [
+                    criterion for criterion in task.acceptance_criteria
+                    if criterion not in covered
+                ]
+                if missing_criteria:
+                    findings.append(
+                        "未通过的验收标准：" + "；".join(missing_criteria)
+                    )
+                    passed = False
         if result.get("fatal_error"):
             findings.append(str(result["fatal_error"]))
             passed = False

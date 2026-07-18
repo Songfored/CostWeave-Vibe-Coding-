@@ -51,6 +51,16 @@ class SimulatedExecutor:
             "assumptions": ["当前为模拟执行模式", "真实模型适配器将在后续版本接入"],
             "confidence": round(confidence, 3),
         }
+        if task.task_type in {"planning", "validation", "risk", "safety"}:
+            result["decision"] = "pass"
+            result["criteria_results"] = [
+                {
+                    "criterion": criterion,
+                    "passed": True,
+                    "evidence_refs": [evidence[0]],
+                }
+                for criterion in task.acceptance_criteria
+            ]
         list_fields = {
             "requirements", "constraints", "open_questions", "plan_adjustments",
             "risks", "findings", "checks", "hazards", "human_review",
