@@ -7,7 +7,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .compat_v4 import (
+    contracts_v4_enabled,
+    set_run_status,
+    set_task_status,
+    v3_snapshot_to_v4,
+)
+from .contracts_v4 import new_run_id
 from .domain import Event, Plan, RunRequest, RunStatus, TaskContract, TaskStatus
+from .catalog_store import CATALOG_STORE, CatalogStore
 from .executor import SimulatedExecutor, utc_now
 from .planner import HeuristicPlanner
 from .router import PredictiveRouter
@@ -38,7 +46,7 @@ class RunRecord:
                 end = self.finished_at or utc_now()
                 from datetime import datetime
                 duration_ms = round((datetime.fromisoformat(end.replace("Z", "+00:00")) - datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))).total_seconds() * 1000)
-            return {
+            snapshot = {
                 "id": self.id,
                 "request": {
                     "goal": self.request.goal,
@@ -66,131 +74,271 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
             }
+            return (
+                v3_snapshot_to_v4(snapshot)
+                if contracts_v4_enabled()
+                else snapshot
+            )
 
 
 class OrchestrationEngine:
-    def __init__(self):
+    def __init__(self, catalog_store: CatalogStore | None = None):
         self.planner = HeuristicPlanner()
-        self.router = PredictiveRouter()
+        self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
         self.executor = SimulatedExecutor()
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
-        record.status = RunStatus.PLANNING
+        set_run_status(
+            record,
+            RunStatus.PLANNING,
+            source="engine.run.planning",
+        )
         self._event(record, "planning", "本地总指挥正在判断难度并生成任务图")
         try:
+            run_router = self.router.freeze()
             plan = self.planner.plan(record.request)
             issues = self.validator.validate_plan(plan)
             if issues:
                 raise PlanValidationError("；".join(issues))
-            self.router.assign(plan.tasks, record.request.mode, record.request.quality_floor)
             record.plan = plan
-            record.current_success_probability = plan.predicted_success
-            self._event(record, "plan_ready", f"生成计划v{plan.version}：难度L{plan.difficulty}，共{len(plan.tasks)}个节点")
-            self._event(record, "plan_validated", "分工合同、依赖关系与DAG循环检查通过")
-            record.status = RunStatus.EXECUTING
-            await self._execute_dag(record)
+            plan.model_snapshot = run_router.catalog_revision
+            plan.routing_summary = run_router.assign(
+                plan.tasks,
+                record.request.mode,
+                record.request.quality_floor,
+                record.request.budget,
+            )
+            self._recalculate_probability(record)
+            self._event(
+                record,
+                "plan_ready",
+                f"生成计划 v{plan.version}：难度 L{plan.difficulty}/10，共 {len(plan.tasks)} 个节点，"
+                f"预计 ${plan.routing_summary['estimated_total_cost_usd']:.4f}",
+            )
+            self._event(record, "plan_validated", "任务画像、合同字段、硬约束、模型候选和 DAG 检查通过")
+            set_run_status(
+                record,
+                RunStatus.EXECUTING,
+                source="engine.run.executing",
+            )
+            await self._execute_dag(record, run_router)
             if all(task.status in {TaskStatus.VALIDATED, TaskStatus.INVALIDATED} for task in record.plan.tasks):
-                record.status = RunStatus.COMPLETED
-                record.current_success_probability = min(.98, record.current_success_probability + .04)
+                set_run_status(
+                    record,
+                    RunStatus.COMPLETED,
+                    source="engine.run.completed",
+                )
+                self._recalculate_probability(record)
                 self._event(record, "completed", "最终成果通过全局验收，运行结束")
             else:
                 raise RuntimeError("执行结束时仍有未处理节点")
         except Exception as exc:  # final safety boundary for background runs
-            record.status = RunStatus.FAILED
+            set_run_status(
+                record,
+                RunStatus.FAILED,
+                source="engine.run.failed",
+            )
             record.error = str(exc)
             self._event(record, "failed", f"运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
 
-    async def _execute_dag(self, record: RunRecord) -> None:
+    async def _execute_dag(
+        self,
+        record: RunRecord,
+        run_router: PredictiveRouter,
+    ) -> None:
         active: dict[asyncio.Task, TaskContract] = {}
         injected = False
-        while True:
-            pending = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
-            if not pending and not active:
-                return
+        try:
+            while True:
+                pending = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
+                if not pending and not active:
+                    return
 
-            validated_ids = {task.id for task in record.plan.tasks if task.status == TaskStatus.VALIDATED}
-            ready = [task for task in pending if set(task.dependencies) <= validated_ids]
-            slots = record.request.max_concurrency - len(active)
-            for task in sorted(ready, key=lambda item: item.priority, reverse=True)[:max(0, slots)]:
-                task.status = TaskStatus.RUNNING
-                task.attempt += 1
-                task.started_at = utc_now()
-                dependency_results = [
-                    item.result for item in record.plan.tasks
-                    if item.id in task.dependencies and item.result is not None
-                ]
-                should_inject = (
-                    record.request.simulate_replan
-                    and not injected
-                    and task.id.startswith("branch-")
-                )
-                if should_inject:
-                    injected = True
-                worker = self.router.get_worker(task.selected_worker)
-                future = asyncio.create_task(self.executor.execute(task, worker, dependency_results, should_inject))
-                active[future] = task
-                self._event(record, "task_started", f"{task.title} → {worker.name}", task.id)
+                validated_ids = {task.id for task in record.plan.tasks if task.status == TaskStatus.VALIDATED}
+                ready = [task for task in pending if set(task.dependencies) <= validated_ids]
+                slots = record.request.max_concurrency - len(active)
+                reserved = sum(item.estimated_cost for item in active.values())
+                for task in sorted(ready, key=lambda item: item.priority, reverse=True)[:max(0, slots)]:
+                    if record.spent + reserved + task.estimated_cost > record.request.budget + 1e-9:
+                        raise RuntimeError(
+                            f"预算守卫拒绝启动 {task.title}：已用 ${record.spent:.4f}，"
+                            f"在途 ${reserved:.4f}，节点预计 ${task.estimated_cost:.4f}，预算 ${record.request.budget:.4f}"
+                        )
+                    set_task_status(
+                        record,
+                        task,
+                        TaskStatus.RUNNING,
+                        source="engine.task.started",
+                    )
+                    task.attempt += 1
+                    task.started_at = utc_now()
+                    dependency_results = [
+                        item.result for item in record.plan.tasks
+                        if item.id in task.dependencies and item.result is not None
+                    ]
+                    should_inject = (
+                        record.request.simulate_replan
+                        and not injected
+                        and task.id.startswith("branch-")
+                    )
+                    if should_inject:
+                        injected = True
+                    worker = run_router.get_worker(task.selected_worker)
+                    future = asyncio.create_task(self.executor.execute(task, worker, dependency_results, should_inject))
+                    active[future] = task
+                    reserved += task.estimated_cost
+                    self._event(
+                        record,
+                        "task_started",
+                        f"{task.title} → {worker.name}（预测 {task.predicted_success:.0%} / ${task.estimated_cost:.4f}）",
+                        task.id,
+                        {"routing_candidates": task.routing_candidates},
+                    )
 
-            record.peak_parallelism = max(record.peak_parallelism, len(active))
-            if not active:
-                blocked = [task.id for task in pending]
-                raise RuntimeError(f"DAG无法继续，阻塞节点：{blocked}")
+                record.peak_parallelism = max(record.peak_parallelism, len(active))
+                if not active:
+                    blocked = [task.id for task in pending]
+                    raise RuntimeError(f"DAG无法继续，阻塞节点：{blocked}")
 
-            done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
-            for future in done:
-                task = active.pop(future)
-                result = future.result()
-                task.result = result
-                task.finished_at = utc_now()
-                task.validation = self.validator.validate_result(task, result)
-                record.spent += task.estimated_cost
+                done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+                for future in done:
+                    task = active.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        task.finished_at = utc_now()
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.REJECTED,
+                            source="engine.task.adapter_rejected",
+                        )
+                        task.validation = {
+                            "passed": False,
+                            "level": "L0-adapter",
+                            "findings": [f"执行适配器异常：{exc}"],
+                            "score": 0.0,
+                        }
+                        self._recalculate_probability(record)
+                        self._event(record, "task_rejected", f"{task.title} 执行异常：{exc}", task.id)
+                        await self._global_replan(
+                            record,
+                            task,
+                            run_router,
+                            reserved_cost=sum(item.estimated_cost for item in active.values()),
+                        )
+                        continue
 
-                if task.validation["passed"]:
-                    task.status = TaskStatus.VALIDATED
-                    self._update_probability(record, positive=True, score=task.validation["score"])
-                    self._event(record, "task_validated", f"{task.title} 通过 {task.validation['level']} 验收", task.id)
-                else:
-                    task.status = TaskStatus.REJECTED
-                    self._update_probability(record, positive=False, score=task.validation["score"])
-                    self._event(record, "task_rejected", f"{task.title} 未通过验收：{'; '.join(task.validation['findings'])}", task.id)
-                    await self._global_replan(record, task)
+                    task.result = result
+                    task.finished_at = utc_now()
+                    task.validation = self.validator.validate_result(task, result)
+                    record.spent += task.estimated_cost
 
-                if record.spent > record.request.budget:
-                    raise RuntimeError(f"预算已耗尽：{record.spent:.3f} > {record.request.budget:.3f}")
+                    if task.validation["passed"]:
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.VALIDATED,
+                            source="engine.task.validated",
+                        )
+                        self._recalculate_probability(record)
+                        self._event(record, "task_validated", f"{task.title} 通过 {task.validation['level']} 验收", task.id)
+                    else:
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.REJECTED,
+                            source="engine.task.validation_rejected",
+                        )
+                        self._recalculate_probability(record)
+                        self._event(record, "task_rejected", f"{task.title} 未通过验收：{'; '.join(task.validation['findings'])}", task.id)
+                        await self._global_replan(
+                            record,
+                            task,
+                            run_router,
+                            reserved_cost=sum(item.estimated_cost for item in active.values()),
+                        )
 
-    async def _global_replan(self, record: RunRecord, failed: TaskContract) -> None:
+                    if record.spent > record.request.budget + 1e-9:
+                        raise RuntimeError(f"预算已耗尽：{record.spent:.4f} > {record.request.budget:.4f}")
+        finally:
+            if active:
+                for future in active:
+                    future.cancel()
+                await asyncio.gather(*active, return_exceptions=True)
+                for task in active.values():
+                    if task.status == TaskStatus.RUNNING:
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.REJECTED,
+                            source="engine.task.cancelled",
+                        )
+                        task.finished_at = utc_now()
+
+    async def _global_replan(
+        self,
+        record: RunRecord,
+        failed: TaskContract,
+        run_router: PredictiveRouter,
+        reserved_cost: float = 0.0,
+    ) -> None:
         if record.replans >= 1:
             raise RuntimeError("全局重规划次数已达到MVP安全上限")
-        record.status = RunStatus.REPLANNING
+        set_run_status(
+            record,
+            RunStatus.REPLANNING,
+            source="engine.run.replanning",
+        )
         record.replans += 1
         descendants = self.validator.descendants(record.plan.tasks, failed.id)
         for task in record.plan.tasks:
             if task.id in descendants and task.status != TaskStatus.VALIDATED:
-                task.status = TaskStatus.PENDING
+                set_task_status(
+                    record,
+                    task,
+                    TaskStatus.PENDING,
+                    source="engine.task.replan_reset",
+                )
                 task.result = None
                 task.validation = None
-        failed.status = TaskStatus.INVALIDATED
+        set_task_status(
+            record,
+            failed,
+            TaskStatus.INVALIDATED,
+            source="engine.task.invalidated",
+        )
         replacement = self.planner.replan(record.plan, failed.id)
-        self._event(record, "replanning", f"高级规划顾问模拟接管；保留已验收成果，替换 {failed.id}", failed.id, {
+        remaining_budget = max(0.0, record.request.budget - record.spent - reserved_cost)
+        pending_for_route = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
+        replacement_summary = run_router.assign(
+            pending_for_route, record.request.mode, record.request.quality_floor, remaining_budget
+        )
+        record.plan.routing_summary = {
+            **replacement_summary,
+            "replanned": True,
+            "reserved_in_flight_usd": round(reserved_cost, 6),
+        }
+        self._event(record, "replanning", f"高级模型候选重新规划；保留已验收成果，替换 {failed.id}", failed.id, {
             "replacement": replacement.id,
             "affected_descendants": sorted(descendants),
+            "selected_model": replacement.selected_worker,
+            "routing": replacement_summary,
         })
         await asyncio.sleep(.18)
         issues = self.validator.validate_plan(record.plan)
         if issues:
             raise PlanValidationError("重规划未通过：" + "；".join(issues))
-        # A validated replacement plan is new positive evidence. Recover the
-        # estimate without erasing the earlier failure signal completely.
-        record.current_success_probability = max(
-            record.current_success_probability,
-            record.plan.predicted_success,
-            min(.92, record.request.quality_floor + .03),
+        self._recalculate_probability(record)
+        set_run_status(
+            record,
+            RunStatus.EXECUTING,
+            source="engine.run.replan_executing",
         )
-        record.status = RunStatus.EXECUTING
         self._event(
             record,
             "replan_validated",
@@ -198,12 +346,34 @@ class OrchestrationEngine:
         )
 
     @staticmethod
-    def _update_probability(record: RunRecord, positive: bool, score: float) -> None:
-        if positive:
-            record.current_success_probability += (1 - record.current_success_probability) * (.06 + score * .025)
-        else:
-            record.current_success_probability *= max(.25, .68 - score * .2)
-        record.current_success_probability = max(.05, min(.99, record.current_success_probability))
+    def _recalculate_probability(record: RunRecord) -> None:
+        if not record.plan:
+            record.current_success_probability = 0.0
+            return
+        weighted = 0.0
+        total_weight = 0.0
+        unresolved_high_risk = 0
+        for task in record.plan.tasks:
+            if task.status == TaskStatus.INVALIDATED:
+                continue
+            weight = max(.1, task.criticality)
+            prior = task.predicted_success_lower_bound or task.predicted_success or .5
+            if task.status == TaskStatus.VALIDATED:
+                validation_score = float((task.validation or {}).get("score", prior))
+                evidence_score = prior * .45 + validation_score * .55
+            elif task.status == TaskStatus.REJECTED:
+                evidence_score = min(.25, prior * .3)
+            elif task.status == TaskStatus.SUSPECT:
+                evidence_score = prior * .58
+            else:
+                evidence_score = prior
+            if task.risk_level == "high" and task.status != TaskStatus.VALIDATED:
+                unresolved_high_risk += 1
+            weighted += evidence_score * weight
+            total_weight += weight
+        probability = weighted / total_weight if total_weight else .05
+        probability -= min(.12, unresolved_high_risk * .025)
+        record.current_success_probability = max(.05, min(.98, probability))
 
     @staticmethod
     def _event(record: RunRecord, kind: str, message: str, task_id: str | None = None, detail: dict | None = None) -> None:
@@ -212,14 +382,19 @@ class OrchestrationEngine:
 
 
 class RunManager:
-    def __init__(self):
-        self.engine = OrchestrationEngine()
+    def __init__(self, catalog_store: CatalogStore | None = None):
+        self.engine = OrchestrationEngine(catalog_store)
         self.records: dict[str, RunRecord] = {}
         self.lock = threading.RLock()
 
     def create(self, request: RunRequest) -> RunRecord:
         request = request.normalized()
-        record = RunRecord(id=uuid.uuid4().hex[:12], request=request)
+        run_id = (
+            str(new_run_id())
+            if contracts_v4_enabled()
+            else uuid.uuid4().hex[:12]
+        )
+        record = RunRecord(id=run_id, request=request)
         with self.lock:
             self.records[record.id] = record
         thread = threading.Thread(target=lambda: asyncio.run(self.engine.run(record)), daemon=True, name=f"run-{record.id}")

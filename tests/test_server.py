@@ -1,5 +1,6 @@
 import json
 import socket
+import tempfile
 import threading
 import time
 import unittest
@@ -7,12 +8,19 @@ import urllib.error
 import urllib.request
 
 from costweave.server import build_server
+from costweave.catalog_store import CatalogStore
 
 
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = build_server("127.0.0.1", 0)
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.catalog_store = CatalogStore(f"{cls.temp.name}/catalog.json")
+        cls.server = build_server(
+            "127.0.0.1",
+            0,
+            catalog_store=cls.catalog_store,
+        )
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -21,6 +29,7 @@ class ServerTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        cls.temp.cleanup()
 
     def fetch_json(self, path, payload=None):
         url = f"http://127.0.0.1:{self.port}{path}"
@@ -29,22 +38,75 @@ class ServerTests(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read())
 
-    def request_json(self, path, payload=None, headers=None):
+    def request_json(self, path, payload=None, headers=None, method=None):
         url = f"http://127.0.0.1:{self.port}{path}"
         data = None if payload is None else json.dumps(payload).encode()
-        request = urllib.request.Request(url, data=data, headers=headers or {"Content-Type": "application/json"})
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers or {"Content-Type": "application/json"},
+            method=method,
+        )
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 return response.status, json.loads(response.read())
         except urllib.error.HTTPError as error:
-            return error.code, json.loads(error.read())
+            try:
+                return error.code, json.loads(error.read())
+            finally:
+                error.close()
 
     def test_health_and_catalog(self):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
-        self.assertEqual("offline-simulation", health["runtime"])
+        self.assertEqual("offline-decision-simulation", health["runtime"])
+        self.assertEqual("0.4.1", health["version"])
+        self.assertEqual("v4.1", health["contract_schema"])
+        self.assertTrue(health["features"]["contracts_v4"])
+        self.assertFalse(health["contract_trace_persistent"])
         _, catalog = self.fetch_json("/api/catalog")
-        self.assertGreaterEqual(len(catalog["workers"]), 6)
+        self.assertGreaterEqual(len(catalog["models"]), 12)
+        self.assertIn("snapshot_date", catalog["metadata"])
+        self.assertTrue(catalog["metadata"]["editable"])
+
+    def test_catalog_crud_and_revision_conflict(self):
+        _, catalog = self.fetch_json("/api/catalog")
+        revision = catalog["metadata"]["catalog_revision"]
+        model = dict(catalog["models"][0])
+        model.update({
+            "id": "test-imported-model",
+            "model_id": "test-imported-model",
+            "name": "测试导入模型",
+            "custom": True,
+        })
+        status, created = self.request_json("/api/catalog/models", {
+            "model": model,
+            "expected_revision": revision,
+        })
+        self.assertEqual(201, status, created)
+        new_revision = created["metadata"]["catalog_revision"]
+
+        status, conflict = self.request_json(
+            "/api/catalog/models/test-imported-model",
+            {
+                "model": {"input_price_per_mtok": .25},
+                "expected_revision": revision,
+            },
+            method="PUT",
+        )
+        self.assertEqual(409, status)
+        self.assertEqual("catalog_revision_conflict", conflict["error"])
+
+        status, updated = self.request_json(
+            "/api/catalog/models/test-imported-model",
+            {
+                "model": {"input_price_per_mtok": .25},
+                "expected_revision": new_revision,
+            },
+            method="PUT",
+        )
+        self.assertEqual(200, status, updated)
+        self.assertEqual(.25, updated["model"]["input_price_per_mtok"])
 
     def test_static_paths_cannot_escape_web_root(self):
         with socket.create_connection(("127.0.0.1", self.port), timeout=2) as client:

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.1.0"
-description = "Local-first, cost-aware multi-agent orchestration prototype"
+version = "0.4.1"
+description = "Contract-versioned, state-guarded multi-model decision orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

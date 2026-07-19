@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave 本地优先、多模型智能编排雏形">
+  <meta name="description" content="CostWeave v0.3 可热更新、自适应多模型决策与智能编排原型">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
   <link rel="stylesheet" href="/styles.css">
@@ -18,19 +18,20 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> 本地离线演示</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.3 自适应决策</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
+      <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
 
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">LOCAL-FIRST AGENT ORCHESTRATOR</p>
+        <p class="eyebrow">ADAPTIVE DECISION ORCHESTRATOR · V0.3</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
-        <p class="hero-copy">输入目标后，本地总指挥会先评估难度和成本，再拆分任务、并行分工、逐节点验收；必要时主动升级并重新规划。</p>
+        <p class="hero-copy">输入目标后，本地总指挥先评估歧义、风险、时效、工具、模态与预算，再以硬约束过滤和多目标优化分配模型；每个专业分支都有独立验收。</p>
       </div>
       <div class="hero-proof" aria-label="产品特性">
         <span><b>01</b> 执行前判断</span>
@@ -65,7 +66,7 @@
           </fieldset>
 
           <div class="field-grid">
-            <label>预算上限 <small>模拟点数</small><input id="budget" type="number" value="1.00" min="0.05" max="100" step="0.05" required></label>
+            <label>预算上限 <small>估算 USD</small><input id="budget" type="number" value="1.00" min="0.05" max="100" step="0.05" required></label>
             <label>最大并发 <small>同时执行</small><input id="concurrency" type="number" value="4" min="1" max="12" required></label>
           </div>
 
@@ -90,7 +91,7 @@
 
         <details class="parameter-help">
           <summary>这些参数怎么选？</summary>
-          <p><b>经济</b>偏向低成本，<b>均衡</b>适合大多数任务，<b>极速</b>优先减少等待。当前费用均为模拟点数，不会调用真实 API。</p>
+          <p><b>经济</b>从满足质量门槛的模型中选择最低成本组合，<b>均衡</b>把剩余预算投入质量收益最大的升级，<b>极速</b>提高速度权重。费用根据官方每百万 Token 标价和任务 Token 估计计算，但不会真实扣费。</p>
         </details>
 
         <section id="recent-runs" class="recent-runs" aria-labelledby="recent-title">
@@ -158,7 +159,7 @@
 
           <div class="metric-grid" aria-label="运行指标">
             <article><span>成功概率 <small>系统估算</small></span><strong id="metric-success">—</strong><div class="meter" aria-hidden="true"><i id="success-meter"></i></div></article>
-            <article><span>模拟成本 <small>点数</small></span><strong id="metric-cost">—</strong><small id="metric-budget"></small></article>
+            <article><span>估算成本 <small>USD</small></span><strong id="metric-cost">—</strong><small id="metric-budget"></small></article>
             <article><span>峰值并发 <small>异步节点</small></span><strong id="metric-parallel">—</strong><small>同时执行的最高数量</small></article>
             <article><span>总耗时 <small>本次运行</small></span><strong id="metric-time">—</strong><small id="metric-replan"></small></article>
           </div>
@@ -167,6 +168,8 @@
             <div class="difficulty-block"><span>难度判断</span><strong id="difficulty">—</strong></div>
             <p id="rationale"></p>
             <div id="type-tags" class="tags"></div>
+            <div id="analysis-signals" class="analysis-signals"></div>
+            <p id="routing-summary" class="routing-summary"></p>
           </div>
 
           <section class="orchestration-section" aria-labelledby="dag-title">
@@ -189,14 +192,109 @@
     </section>
 
     <section class="principles" aria-label="产品工作方式">
-      <article><span>01</span><h3>预测后执行</h3><p>先估算能力匹配、成功率、成本和延迟，再选择执行者。</p></article>
-      <article><span>02</span><h3>真正并行</h3><p>无依赖任务立即并行，关键成果通过验收后释放下游。</p></article>
-      <article><span>03</span><h3>证据驱动恢复</h3><p>识别根本错误，保留有效成果，由更强规划能力重新接管。</p></article>
-      <article><span>04</span><h3>适配器优先</h3><p>当前不绑定模型厂商，后续执行器可替换为任意模型接口。</p></article>
+      <article><span>01</span><h3>约束优先</h3><p>先过滤不满足上下文、模态、工具、能力与质量门槛的模型。</p></article>
+      <article><span>02</span><h3>组合优化</h3><p>先求最低可行成本，再按质量收益与速度分配剩余预算。</p></article>
+      <article><span>03</span><h3>独立验收</h3><p>每个专业分支都有反向验证，冲突审查后才允许最终汇总。</p></article>
+      <article><span>04</span><h3>证据升级</h3><p>低置信规划或中途失败会触发更高级候选模型重新接管。</p></article>
+    </section>
+
+    <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
+      <div class="catalog-heading">
+        <div><span class="section-kicker">LIVE MODEL KNOWLEDGE BASE</span><h2 id="model-catalog-title">模型管理中心</h2></div>
+        <p id="catalog-meta">正在读取模型快照…</p>
+      </div>
+      <p class="catalog-notice">内置资料只是可恢复的基线。你可以随时新增、编辑、删除或导入 JSON/CSV；保存后的目录立即用于后续任务，正在运行的任务继续使用启动时快照。</p>
+      <div id="catalog-stats" class="catalog-stats" aria-label="模型目录状态"></div>
+      <div class="catalog-toolbar">
+        <label class="catalog-search-field" for="catalog-search"><span>搜索模型</span><input id="catalog-search" type="search" placeholder="名称、Provider、模型 ID"></label>
+        <label for="catalog-provider-filter"><span>Provider</span><select id="catalog-provider-filter"><option value="">全部</option></select></label>
+        <label for="catalog-status-filter"><span>路由状态</span><select id="catalog-status-filter"><option value="">全部</option><option value="routable">可路由</option><option value="disabled">已停用</option><option value="custom">用户修改</option></select></label>
+        <div class="catalog-actions">
+          <button id="add-model" class="secondary-button" type="button">新增模型</button>
+          <button id="import-models" class="secondary-button subtle" type="button">导入</button>
+          <button id="export-models" class="secondary-button subtle" type="button">导出 JSON</button>
+          <button id="export-models-csv" class="secondary-button subtle" type="button">导出 CSV</button>
+          <button id="reset-catalog" class="text-button danger-text" type="button">恢复默认</button>
+        </div>
+      </div>
+      <p id="catalog-live" class="catalog-live" role="status" aria-live="polite"></p>
+      <div id="model-catalog" class="model-catalog"></div>
     </section>
   </main>
 
-  <footer><span>CostWeave / Agent Runtime Prototype</span><span>MIT Licensed · 2026</span></footer>
+  <dialog id="model-editor" class="model-dialog" aria-labelledby="model-editor-title">
+    <form id="model-form" method="dialog">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">MODEL PROFILE</span><h2 id="model-editor-title">新增模型</h2></div>
+        <button id="close-model-editor" class="icon-button" type="button" aria-label="关闭模型编辑器">关闭</button>
+      </div>
+      <p id="model-validation-summary" class="form-error" role="alert"></p>
+      <fieldset>
+        <legend>身份与用途</legend>
+        <div class="editor-grid">
+          <label for="model-id">稳定 ID<input id="model-id" name="id" required pattern="[A-Za-z0-9][A-Za-z0-9._:-]{1,99}"></label>
+          <label for="model-name">显示名称<input id="model-name" name="name" required maxlength="120"></label>
+          <label for="model-provider">Provider<input id="model-provider" name="provider" required maxlength="120"></label>
+          <label for="model-api-id">API 模型 ID<input id="model-api-id" name="model_id" maxlength="160"></label>
+          <label for="model-tier">能力层级<input id="model-tier" name="tier" value="custom" required></label>
+          <label class="wide" for="model-specialty">主要优势<textarea id="model-specialty" name="specialty" required maxlength="500"></textarea></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>路由评分与能力向量</legend>
+        <div class="editor-grid four">
+          <label for="model-reasoning">推理 0–1<input id="model-reasoning" name="reasoning" type="number" min="0" max="1" step="0.01" required></label>
+          <label for="model-speed">速度 0–1<input id="model-speed" name="speed" type="number" min="0" max="1" step="0.01" required></label>
+          <label for="model-reliability">可靠性 0–1<input id="model-reliability" name="reliability" type="number" min="0" max="1" step="0.01" required></label>
+          <label for="model-data-confidence">资料可信度<input id="model-data-confidence" name="data_confidence" type="number" min="0" max="1" step="0.01" required></label>
+          <label class="wide" for="model-capabilities">能力 JSON<textarea id="model-capabilities" name="capabilities" spellcheck="false" required></textarea></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>价格、限制和功能</legend>
+        <div class="editor-grid four">
+          <label for="model-currency">币种<input id="model-currency" name="pricing_currency" value="USD" maxlength="3" required></label>
+          <label for="model-input-price">输入 / MTok<input id="model-input-price" name="input_price_per_mtok" type="number" min="0" step="0.000001" required></label>
+          <label for="model-cached-price">缓存输入 / MTok<input id="model-cached-price" name="cached_input_price_per_mtok" type="number" min="0" step="0.000001"></label>
+          <label for="model-output-price">输出 / MTok<input id="model-output-price" name="output_price_per_mtok" type="number" min="0" step="0.000001" required></label>
+          <label for="model-context">上下文 Token<input id="model-context" name="context_window" type="number" min="1" required></label>
+          <label for="model-max-output">最大输出 Token<input id="model-max-output" name="max_output_tokens" type="number" min="1" required></label>
+          <label class="wide" for="model-modalities">模态（用 | 分隔）<input id="model-modalities" name="modalities" placeholder="text | image"></label>
+          <label class="wide" for="model-tools">工具（用 | 分隔）<input id="model-tools" name="tools" placeholder="function_calling | structured_output"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>来源与说明</legend>
+        <div class="editor-grid">
+          <label class="wide" for="model-source-url">资料来源 URL<input id="model-source-url" name="source_url" type="url" placeholder="https://..."></label>
+          <label for="model-verified-at">核验日期<input id="model-verified-at" name="verified_at" type="date"></label>
+          <label class="wide" for="model-strengths">优势（用 | 分隔）<input id="model-strengths" name="strengths"></label>
+          <label class="wide" for="model-limitations">限制（用 | 分隔）<input id="model-limitations" name="limitations"></label>
+          <label class="check-row"><input id="model-local" name="local" type="checkbox"> 本地模型</label>
+          <label class="check-row"><input id="model-preview" name="preview" type="checkbox"> Preview</label>
+          <label class="check-row"><input id="model-routable" name="routable" type="checkbox" checked> 允许参与路由</label>
+        </div>
+      </fieldset>
+      <div class="dialog-actions">
+        <button id="delete-model" class="secondary-button danger hidden" type="button">删除模型</button><span></span>
+        <button id="cancel-model" class="secondary-button subtle" type="button">取消</button>
+        <button id="save-model" class="primary-button compact" type="submit">验证并保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog" class="model-dialog compact-dialog" aria-labelledby="import-dialog-title">
+    <form id="import-form" method="dialog">
+      <div class="dialog-heading"><div><span class="section-kicker">ATOMIC IMPORT</span><h2 id="import-dialog-title">导入模型目录</h2></div></div>
+      <p>支持 CostWeave JSON 或 CSV。整批数据会先校验，任何一项失败都不会修改当前目录。</p>
+      <label for="model-import-file">选择文件<input id="model-import-file" type="file" accept=".json,.csv,application/json,text/csv" required></label>
+      <label for="import-mode">导入方式<select id="import-mode"><option value="merge">合并：新增并覆盖同 ID 模型</option><option value="replace">替换：仅保留导入文件中的模型</option></select></label>
+      <p id="import-errors" class="form-error" role="alert"></p>
+      <div class="dialog-actions"><span></span><button id="cancel-import" class="secondary-button subtle" type="button">取消</button><button id="apply-import" class="primary-button compact" type="submit">校验并导入</button></div>
+    </form>
+  </dialog>
+
+  <footer><span>CostWeave v0.3 / Adaptive Decision Orchestration Prototype</span><span>MIT Licensed · 2026</span></footer>
   <script src="/app.js" defer></script>
 </body>
 </html>

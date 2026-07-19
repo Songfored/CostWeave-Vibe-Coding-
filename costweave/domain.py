@@ -66,6 +66,28 @@ class WorkerProfile:
     latency_factor: float
     reliability: float
     local: bool = True
+    provider: str = "local"
+    model_id: str | None = None
+    tier: str = "utility"
+    reasoning: float = 0.5
+    speed: float = 0.5
+    context_window: int = 32_000
+    max_output_tokens: int = 8_000
+    input_price_per_mtok: float = 0.0
+    cached_input_price_per_mtok: float | None = None
+    output_price_per_mtok: float = 0.0
+    pricing_currency: str = "USD"
+    modalities: list[str] = field(default_factory=lambda: ["text"])
+    tools: list[str] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    source_url: str = ""
+    verified_at: str = ""
+    preview: bool = False
+    routable: bool = True
+    data_confidence: float = 0.8
+    availability: float = 0.99
+    custom: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,10 +107,28 @@ class TaskContract:
     exclude: list[str] = field(default_factory=list)
     priority: int = 5
     parallel_group: str = "default"
+    difficulty: int = 1
+    risk_level: str = "normal"
+    required_modalities: list[str] = field(default_factory=lambda: ["text"])
+    requires_tools: list[str] = field(default_factory=list)
+    requires_freshness: bool = False
+    estimated_input_tokens: int = 4_000
+    estimated_output_tokens: int = 1_500
+    capability_weights: dict[str, float] = field(default_factory=dict)
+    uncertainty: float = 0.0
+    criticality: float = 0.5
+    classification_confidence: float = 0.75
+    escalation_policy: str = "evidence-triggered"
+    handoff_prompt: str = ""
     selected_worker: str | None = None
     predicted_success: float = 0.0
+    predicted_success_lower_bound: float = 0.0
     estimated_cost: float = 0.0
     estimated_latency_ms: int = 0
+    routing_rationale: str = ""
+    routing_candidates: list[dict[str, Any]] = field(default_factory=list)
+    routing_rejections: list[dict[str, Any]] = field(default_factory=list)
+    route_confidence: float = 0.0
     status: TaskStatus = TaskStatus.PENDING
     attempt: int = 0
     result: dict[str, Any] | None = None
@@ -113,6 +153,9 @@ class Plan:
     predicted_success: float
     estimate_confidence: float
     risks: list[str]
+    analysis: dict[str, Any] = field(default_factory=dict)
+    routing_summary: dict[str, Any] = field(default_factory=dict)
+    model_snapshot: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -123,6 +166,9 @@ class Plan:
             "predicted_success": round(self.predicted_success, 4),
             "estimate_confidence": round(self.estimate_confidence, 4),
             "risks": self.risks,
+            "analysis": self.analysis,
+            "routing_summary": self.routing_summary,
+            "model_snapshot": self.model_snapshot,
             "tasks": [task.to_dict() for task in self.tasks],
         }
 
@@ -137,4 +183,3 @@ class Event:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-

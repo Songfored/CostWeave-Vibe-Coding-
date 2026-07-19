@@ -48,9 +48,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         await OrchestrationEngine().run(record)
         self.assertEqual(RunStatus.COMPLETED, record.status, record.error)
         self.assertEqual(1, record.replans)
-        self.assertEqual(2, record.plan.version)
+        self.assertEqual(4, record.plan.version)
         invalidated = [task for task in record.plan.tasks if task.status == TaskStatus.INVALIDATED]
-        recovery = [task for task in record.plan.tasks if "recovery-v2" in task.id]
+        recovery = [task for task in record.plan.tasks if "recovery-v4" in task.id]
         self.assertEqual(1, len(invalidated))
         self.assertEqual(1, len(recovery))
         self.assertEqual(TaskStatus.VALIDATED, recovery[0].status)
@@ -60,7 +60,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_budget_guard_stops_run(self):
         record = RunRecord(
             id="budget",
-            request=RunRequest("开发数据报告应用", budget=.05, max_concurrency=3).normalized(),
+            request=RunRequest(
+                "开发数据报告应用", budget=.05, quality_floor=.78, max_concurrency=3
+            ).normalized(),
         )
         await OrchestrationEngine().run(record)
         self.assertEqual(RunStatus.FAILED, record.status)
