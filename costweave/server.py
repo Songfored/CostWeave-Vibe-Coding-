@@ -10,12 +10,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import parse_qs, unquote, urlparse
 
+from . import __version__
 from .catalog_store import (
     CATALOG_STORE,
     CatalogConflictError,
     CatalogError,
     CatalogStore,
 )
+from .compat_v4 import contract_health
 from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
 
@@ -32,7 +34,7 @@ class RequestError(ValueError):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.3"
+    server_version = "CostWeave/0.4.1"
 
     @property
     def manager(self) -> RunManager:
@@ -49,8 +51,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
-                "version": "0.3.0",
+                "version": __version__,
                 "catalog_revision": self.catalog_store.revision,
+                **contract_health(),
             })
             return
         if path == "/api/catalog":

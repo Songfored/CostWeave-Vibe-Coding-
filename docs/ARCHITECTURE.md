@@ -1,6 +1,24 @@
-# CostWeave v0.3 架构说明
+# CostWeave v0.4.1 架构说明
 
-CostWeave v0.3 是可热更新模型知识库驱动的离线多模型决策 Runtime。控制面分为目录、画像、规划、路由、执行、验收和恢复七层。
+CostWeave v0.4.1 是带版本化合同和确定性状态守卫的离线多模型决策 Runtime。v0.3 的目录、画像、规划、路由、执行、验收和恢复七层保持可用，外围增加一个不持久化的合同兼容层。
+
+```text
+HTTP / RunManager / Engine
+            │
+            ▼
+compat_v4：功能开关、v0.3 快照适配、进程内踪迹
+            │
+     ┌──────┴──────┐
+     ▼             ▼
+contracts_v4   state_guard
+统一 ID/Envelope   合法转换表
+```
+
+- `contracts_v4.py` 冻结 `v4.1` Schema、统一 ID 和 JSON Envelope。
+- `state_guard.py` 是无 I/O 的纯确定性校验层，终态不能回退。
+- `compat_v4.py` 保留现有 API 字段，并在开启时附加 `contract` 元数据。
+- `COSTWEAVE_CONTRACTS_V4=0` 会恢复 v0.3 直接赋值和快照形状。
+- 转换踪迹只用于当前进程调试，不是 EventStore，也不提供重启恢复。
 
 ## 1. 模型知识库
 

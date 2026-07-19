@@ -1,12 +1,25 @@
 # CostWeave
 
-**可编辑模型知识库、保守质量预测与并行验收驱动的多模型 Agent 决策编排原型。**
+**版本化合同、确定性状态守卫、可编辑模型知识库与并行验收驱动的多模型 Agent 决策编排原型。**
 
-CostWeave v0.3 把模型信息从源码常量升级成可热更新、可持久化、可导入导出的知识库；把任务分类从“命中关键词就发包”升级成分层意图、专业域、交付物、约束、风险和复杂度画像；把路由质量从单一主观分数升级成带不确定性的保守成功率下界，并在组合路由中考虑预算、关键度、目录可信度和验收独立性。
+CostWeave v0.4.1 在完整保留 v0.3 决策能力的基础上，冻结统一 ID、`CommandEnvelope`、`EventEnvelope` 和状态转换合同；运行与任务状态变更经过确定性守卫，并留下带来源与拒绝原因的进程内调试踪迹。
 
-> v0.3 仍是离线决策与编排原型，不调用真实模型 API。模型选择、成本计算、目录热更新、DAG、验收和重规划是真实逻辑；最终领域成果仍由模拟执行器产生。
+> v0.4.1 仍是离线决策与编排原型，不调用真实模型 API。合同、状态守卫、模型选择、成本计算、目录热更新、DAG、验收和重规划是真实逻辑；最终领域成果仍由模拟执行器产生。状态踪迹不持久化，重启恢复属于 v0.4.2。
 
-## v0.3 的核心升级
+## v0.4.1 新增：合同与状态守卫
+
+- `RunId`、`TaskId`、`EventId`、`ArtifactId` 使用可校验的统一格式
+- 旧语义 ID 通过确定性哈希映射为稳定 v4 ID，不破坏 v0.3 顶层 API
+- `CommandEnvelope` 与 `EventEnvelope` 使用 `schema_version: "v4.1"`
+- Envelope 严格校验字段、ID、时间、事件类型和有限 JSON 数据
+- 运行与任务状态使用显式合法转换表；终态不能回退
+- 重复写入同一状态按无副作用操作处理
+- 所有引擎状态赋值都经过兼容守卫
+- 接受和拒绝的转换都会记录来源、前后状态与拒绝原因
+- `COSTWEAVE_CONTRACTS_V4=0` 可关闭守卫并恢复 v0.3 行为
+- 不新增数据库、迁移器、调度器、模型调用或页面主流程
+
+## 继承的 v0.3 核心能力
 
 ### 可维护的模型知识库
 
@@ -57,6 +70,13 @@ CostWeave v0.3 把模型信息从源码常量升级成可热更新、可持久�
 需要 Python 3.11 或更高版本，不需要第三方依赖。
 
 ```bash
+python -m costweave.server
+```
+
+v0.4.1 默认启用合同守卫。临时回退到 v0.3 状态赋值语义：
+
+```powershell
+$env:COSTWEAVE_CONTRACTS_V4="0"
 python -m costweave.server
 ```
 
@@ -146,6 +166,9 @@ costweave
 
 ```text
 costweave/
+├── contracts_v4.py    # 统一 ID、版本化命令与事件 Envelope
+├── state_guard.py     # 运行/任务状态转换表与纯函数守卫
+├── compat_v4.py       # v0.3 快照兼容、功能开关与进程内踪迹
 ├── domain.py          # 运行、模型、任务画像、合同与计划
 ├── model_catalog.py   # 可恢复的内置模型基线
 ├── catalog_store.py   # 校验、CRUD、导入导出、版本与持久化
@@ -162,7 +185,7 @@ costweave/
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/api/health` | 运行状态、版本和目录修订 |
+| `GET` | `/api/health` | 运行状态、版本、合同 Schema、功能开关和目录修订 |
 | `GET` | `/api/catalog` | 当前模型目录和元数据 |
 | `GET` | `/api/catalog/schema` | 字段与导入格式 |
 | `GET` | `/api/catalog/export?format=json` | 导出 JSON |
@@ -184,6 +207,8 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
+当前基线为 60 / 60 通过，其中 19 项专门覆盖 v0.4.1 合同、状态守卫和兼容回滚。
+
 测试覆盖：
 
 - 模型 CRUD、JSON/CSV 往返、原子导入和 revision 冲突
@@ -191,6 +216,7 @@ python -B -m unittest discover -s tests -v
 - 分类消歧、六维复杂度和任务级难度
 - 显式工具约束、保守质量门槛和验收模型独立性
 - `reject` 门控、安全边界、预算、异步并行和重规划
+- 统一 ID、Envelope JSON 往返、非法转换、终态保护和开关回滚
 - 页面结构、响应式基础规则和管理交互绑定
 
 ## 当前边界
@@ -199,8 +225,13 @@ python -B -m unittest discover -s tests -v
 - 能力、速度、可靠性和资料可信度是可校准先验，不是厂商官方基准成绩。
 - 当前没有汇率服务、阶梯价格、批处理折扣和本地硬件成本折算。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
+- v0.4.1 的合同踪迹只存在于当前进程；重启恢复和 EventStore 属于 v0.4.2。
 - 高级规划节点已经具备严格门控，但模拟执行器不会生成真正的外部模型 `PlanPatch`。
 - 当前服务只允许回环地址，不应直接暴露到公网。
+
+下一版本 v0.4.2 将实现 SQLite EventStore、幂等命令、快照重放和启动恢复；后续结果分布预测、资源经济联合优化、媒体 DAG、准入调度和学习闭环设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
+
+为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1“合同与状态守卫”已经完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 
 ## License
 
