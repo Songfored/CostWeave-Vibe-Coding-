@@ -37,12 +37,27 @@ class TransitionDecision:
 
 RUN_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = MappingProxyType(
     {
-        RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.FAILED}),
-        RunStatus.PLANNING: frozenset({RunStatus.EXECUTING, RunStatus.FAILED}),
-        RunStatus.EXECUTING: frozenset(
-            {RunStatus.REPLANNING, RunStatus.COMPLETED, RunStatus.FAILED}
+        RunStatus.CREATED: frozenset(
+            {RunStatus.PLANNING, RunStatus.CANCELLING, RunStatus.FAILED}
         ),
-        RunStatus.REPLANNING: frozenset({RunStatus.EXECUTING, RunStatus.FAILED}),
+        RunStatus.PLANNING: frozenset(
+            {RunStatus.EXECUTING, RunStatus.CANCELLING, RunStatus.FAILED}
+        ),
+        RunStatus.EXECUTING: frozenset(
+            {
+                RunStatus.REPLANNING,
+                RunStatus.CANCELLING,
+                RunStatus.COMPLETED,
+                RunStatus.FAILED,
+            }
+        ),
+        RunStatus.REPLANNING: frozenset(
+            {RunStatus.EXECUTING, RunStatus.CANCELLING, RunStatus.FAILED}
+        ),
+        RunStatus.CANCELLING: frozenset(
+            {RunStatus.CANCELLED, RunStatus.FAILED}
+        ),
+        RunStatus.CANCELLED: frozenset(),
         RunStatus.COMPLETED: frozenset(),
         RunStatus.FAILED: frozenset(),
     }

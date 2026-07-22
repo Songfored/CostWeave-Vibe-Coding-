@@ -20,10 +20,11 @@ TaskId = NewType("TaskId", str)
 EventId = NewType("EventId", str)
 ArtifactId = NewType("ArtifactId", str)
 CommandId = NewType("CommandId", str)
+AttemptId = NewType("AttemptId", str)
 
-_ID_KINDS = frozenset({"run", "task", "event", "artifact", "command"})
+_ID_KINDS = frozenset({"run", "task", "event", "artifact", "command", "attempt"})
 _ID_PATTERN = re.compile(
-    r"^(?P<kind>run|task|event|artifact|command)_(?P<value>[0-9a-f]{32})$"
+    r"^(?P<kind>run|task|event|artifact|command|attempt)_(?P<value>[0-9a-f]{32})$"
 )
 _KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 
@@ -92,6 +93,10 @@ def new_artifact_id() -> ArtifactId:
 
 def new_command_id() -> CommandId:
     return CommandId(new_identifier("command"))
+
+
+def new_attempt_id() -> AttemptId:
+    return AttemptId(new_identifier("attempt"))
 
 
 def _validate_kind(kind: str) -> str:

@@ -16,6 +16,8 @@ class RunStatus(StrEnum):
     PLANNING = "planning"
     EXECUTING = "executing"
     REPLANNING = "replanning"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
 

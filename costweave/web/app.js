@@ -21,6 +21,8 @@ const statusLabels = {
   executing: "并行执行中",
   replanning: "重新规划中",
   completed: "已完成",
+  cancelling: "正在取消",
+  cancelled: "已取消",
   failed: "失败",
 };
 
@@ -158,10 +160,10 @@ async function poll() {
     if (!response.ok) throw new Error(data.message || "无法获取任务状态");
     state.currentRun = data;
     render(data);
-    if (previousStatus !== data.status && ["completed", "failed"].includes(data.status)) {
+    if (previousStatus !== data.status && ["completed", "failed", "cancelled"].includes(data.status)) {
       revealTerminalState(data.status);
     }
-    if (["completed", "failed"].includes(data.status)) {
+    if (["completed", "failed", "cancelled"].includes(data.status)) {
       clearInterval(state.timer);
       state.timer = null;
       setSubmitState(false);
@@ -192,7 +194,7 @@ async function loadRun(runId, shouldScroll = true) {
     updateHistorySelection(data.id);
     revealRunContent();
     render(data);
-    if (["completed", "failed"].includes(data.status)) setSubmitState(false);
+    if (["completed", "failed", "cancelled"].includes(data.status)) setSubmitState(false);
     else {
       setSubmitState(true, "任务运行中…");
       startPolling();
@@ -213,7 +215,7 @@ async function refreshHistory(options = {}) {
     if (options.restore) {
       const params = new URLSearchParams(location.hash.replace(/^#/, ""));
       const requestedId = params.get("run");
-      const active = runs.find((run) => !["completed", "failed"].includes(run.status));
+      const active = runs.find((run) => !["completed", "failed", "cancelled"].includes(run.status));
       const target = requestedId || active?.id || runs[0]?.id;
       if (target) await loadRun(target, false);
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import threading
 import time
 import uuid
@@ -9,12 +10,21 @@ from typing import Any, Callable
 
 from .compat_v4 import (
     contracts_v4_enabled,
+    runtime_v4_enabled,
     set_run_status,
     set_task_status,
     v3_snapshot_to_v4,
 )
 from .contracts_v4 import new_run_id
-from .domain import Event, Plan, RunRequest, RunStatus, TaskContract, TaskStatus
+from .domain import (
+    Event,
+    Plan,
+    RunRequest,
+    RunStatus,
+    TaskContract,
+    TaskStatus,
+    WorkerProfile,
+)
 from .catalog_store import CATALOG_STORE, CatalogStore
 from .executor import SimulatedExecutor, utc_now
 from .planner import HeuristicPlanner
@@ -37,9 +47,15 @@ class RunRecord:
     replans: int = 0
     peak_parallelism: int = 0
     error: str | None = None
+    runtime_revision: int = 0
+    recovered: bool = False
+    cancel_requested: bool = False
+    retry_of: str | None = None
+    worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    control_kernel: Any = field(default=None, repr=False)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, include_internal: bool = False) -> dict[str, Any]:
         with self.lock:
             duration_ms = None
             if self.started_at:
@@ -73,23 +89,49 @@ class RunRecord:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "error": self.error,
+                "runtime": {
+                    "schema_version": "v4.2",
+                    "revision": self.runtime_revision,
+                    "persistent": self.control_kernel is not None,
+                    "recovered": self.recovered,
+                    "cancel_requested": self.cancel_requested,
+                    "retry_of": self.retry_of,
+                },
             }
+            if include_internal:
+                snapshot["_runtime_internal"] = {
+                    "worker_snapshot": self.worker_snapshot,
+                }
             return (
-                v3_snapshot_to_v4(snapshot)
+                v3_snapshot_to_v4(
+                    snapshot,
+                    trace_persistent=self.control_kernel is not None,
+                )
                 if contracts_v4_enabled()
                 else snapshot
             )
 
 
+class RunCancelled(RuntimeError):
+    """Raised internally when a persisted cancellation stops execution."""
+
+
 class OrchestrationEngine:
-    def __init__(self, catalog_store: CatalogStore | None = None):
+    def __init__(
+        self,
+        catalog_store: CatalogStore | None = None,
+        *,
+        control_kernel: Any = None,
+    ):
         self.planner = HeuristicPlanner()
         self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
         self.executor = SimulatedExecutor()
+        self.control_kernel = control_kernel
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
+        self._raise_if_cancelled(record)
         set_run_status(
             record,
             RunStatus.PLANNING,
@@ -98,6 +140,7 @@ class OrchestrationEngine:
         self._event(record, "planning", "本地总指挥正在判断难度并生成任务图")
         try:
             run_router = self.router.freeze()
+            record.worker_snapshot = [worker.to_dict() for worker in run_router.workers]
             plan = self.planner.plan(record.request)
             issues = self.validator.validate_plan(plan)
             if issues:
@@ -124,6 +167,7 @@ class OrchestrationEngine:
                 source="engine.run.executing",
             )
             await self._execute_dag(record, run_router)
+            self._raise_if_cancelled(record)
             if all(task.status in {TaskStatus.VALIDATED, TaskStatus.INVALIDATED} for task in record.plan.tasks):
                 set_run_status(
                     record,
@@ -134,16 +178,91 @@ class OrchestrationEngine:
                 self._event(record, "completed", "最终成果通过全局验收，运行结束")
             else:
                 raise RuntimeError("执行结束时仍有未处理节点")
+        except RunCancelled:
+            record.error = "运行已取消"
+            self._event(record, "cancelled", "运行已取消；未启动新的任务节点")
         except Exception as exc:  # final safety boundary for background runs
-            set_run_status(
-                record,
-                RunStatus.FAILED,
-                source="engine.run.failed",
-            )
-            record.error = str(exc)
-            self._event(record, "failed", f"运行失败：{exc}")
+            if record.status != RunStatus.CANCELLED:
+                set_run_status(
+                    record,
+                    RunStatus.FAILED,
+                    source="engine.run.failed",
+                )
+                record.error = str(exc)
+                self._event(record, "failed", f"运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
+            self._checkpoint(record, "engine.run.finished")
+
+    async def resume(self, record: RunRecord) -> None:
+        """Resume a persisted non-terminal run without redoing validated work."""
+
+        if record.status in {RunStatus.CREATED, RunStatus.PLANNING}:
+            await self.run(record)
+            return
+        if record.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            return
+        if record.plan is None:
+            raise RuntimeError("无法恢复没有持久化计划的运行")
+        if record.status == RunStatus.REPLANNING:
+            set_run_status(
+                record,
+                RunStatus.EXECUTING,
+                source="engine.recovery.replanning_to_executing",
+            )
+        record.recovered = True
+        record.finished_at = None
+        record.cancel_requested = False
+        for task in record.plan.tasks:
+            if task.status == TaskStatus.RUNNING:
+                set_task_status(
+                    record,
+                    task,
+                    TaskStatus.SUSPECT,
+                    source="engine.recovery.interrupted",
+                )
+                set_task_status(
+                    record,
+                    task,
+                    TaskStatus.PENDING,
+                    source="engine.recovery.retry_pending",
+                )
+                task.started_at = None
+                task.finished_at = None
+        workers = tuple(WorkerProfile(**item) for item in record.worker_snapshot)
+        run_router = (
+            PredictiveRouter(workers=workers, catalog_revision=record.plan.model_snapshot)
+            if workers
+            else self.router.freeze()
+        )
+        self._event(record, "recovered", "从持久事件投影恢复运行；保留已验收节点")
+        try:
+            await self._execute_dag(record, run_router)
+            self._raise_if_cancelled(record)
+            if all(
+                task.status in {TaskStatus.VALIDATED, TaskStatus.INVALIDATED}
+                for task in record.plan.tasks
+            ):
+                set_run_status(
+                    record,
+                    RunStatus.COMPLETED,
+                    source="engine.recovery.completed",
+                )
+                self._recalculate_probability(record)
+                self._event(record, "completed", "恢复后的运行通过全局验收")
+            else:
+                raise RuntimeError("恢复执行结束时仍有未处理节点")
+        except RunCancelled:
+            record.error = "运行已取消"
+            self._event(record, "cancelled", "恢复运行已取消")
+        except Exception as exc:
+            if record.status != RunStatus.CANCELLED:
+                set_run_status(record, RunStatus.FAILED, source="engine.recovery.failed")
+                record.error = str(exc)
+                self._event(record, "failed", f"恢复运行失败：{exc}")
+        finally:
+            record.finished_at = utc_now()
+            self._checkpoint(record, "engine.recovery.finished")
 
     async def _execute_dag(
         self,
@@ -154,6 +273,7 @@ class OrchestrationEngine:
         injected = False
         try:
             while True:
+                self._raise_if_cancelled(record)
                 pending = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
                 if not pending and not active:
                     return
@@ -163,6 +283,7 @@ class OrchestrationEngine:
                 slots = record.request.max_concurrency - len(active)
                 reserved = sum(item.estimated_cost for item in active.values())
                 for task in sorted(ready, key=lambda item: item.priority, reverse=True)[:max(0, slots)]:
+                    self._raise_if_cancelled(record)
                     if record.spent + reserved + task.estimated_cost > record.request.budget + 1e-9:
                         raise RuntimeError(
                             f"预算守卫拒绝启动 {task.title}：已用 ${record.spent:.4f}，"
@@ -206,6 +327,7 @@ class OrchestrationEngine:
 
                 done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
                 for future in done:
+                    self._raise_if_cancelled(record)
                     task = active.pop(future)
                     try:
                         result = future.result()
@@ -376,30 +498,148 @@ class OrchestrationEngine:
         record.current_success_probability = max(.05, min(.98, probability))
 
     @staticmethod
+    def _raise_if_cancelled(record: RunRecord) -> None:
+        if record.cancel_requested or record.status == RunStatus.CANCELLED:
+            raise RunCancelled("run cancellation requested")
+
+    @staticmethod
+    def _checkpoint(record: RunRecord, source: str) -> None:
+        kernel = record.control_kernel
+        if kernel is not None:
+            kernel.checkpoint(record, source=source)
+
+    @staticmethod
     def _event(record: RunRecord, kind: str, message: str, task_id: str | None = None, detail: dict | None = None) -> None:
         with record.lock:
-            record.events.append(Event(utc_now(), kind, message, task_id, detail or {}))
+            event = Event(utc_now(), kind, message, task_id, detail or {})
+            record.events.append(event)
+            kernel = record.control_kernel
+            if kernel is not None:
+                kernel.record_runtime_event(record, event, source=f"engine.event.{kind}")
 
 
 class RunManager:
-    def __init__(self, catalog_store: CatalogStore | None = None):
-        self.engine = OrchestrationEngine(catalog_store)
+    def __init__(
+        self,
+        catalog_store: CatalogStore | None = None,
+        *,
+        runtime_db_path: str | None = None,
+        recover: bool = True,
+    ):
+        self.control_kernel = None
+        if runtime_v4_enabled():
+            from .control_kernel import ControlKernel
+
+            self.control_kernel = ControlKernel(runtime_db_path)
+        self.engine = OrchestrationEngine(
+            catalog_store,
+            control_kernel=self.control_kernel,
+        )
         self.records: dict[str, RunRecord] = {}
         self.lock = threading.RLock()
+        self.threads: dict[str, threading.Thread] = {}
+        if self.control_kernel is not None:
+            for record in self.control_kernel.load_records():
+                self.records[record.id] = record
+            if recover:
+                for record in list(self.records.values()):
+                    if record.status == RunStatus.CANCELLING:
+                        self.control_kernel.set_run_status(
+                            record,
+                            RunStatus.CANCELLED,
+                            source="run_manager.startup_cancel_finalize",
+                        )
+                    elif record.status not in {
+                        RunStatus.COMPLETED,
+                        RunStatus.FAILED,
+                        RunStatus.CANCELLED,
+                    }:
+                        self._start(record, resume=True)
 
-    def create(self, request: RunRequest) -> RunRecord:
+    def create(
+        self,
+        request: RunRequest,
+        *,
+        idempotency_key: str | None = None,
+        retry_of: str | None = None,
+    ) -> RunRecord:
         request = request.normalized()
-        run_id = (
-            str(new_run_id())
-            if contracts_v4_enabled()
-            else uuid.uuid4().hex[:12]
-        )
-        record = RunRecord(id=run_id, request=request)
+        if self.control_kernel is not None:
+            key = idempotency_key or f"legacy-create:{uuid.uuid4().hex}"
+            record, replayed = self.control_kernel.create_run(
+                request,
+                idempotency_key=key,
+                retry_of=retry_of,
+            )
+        else:
+            run_id = (
+                str(new_run_id())
+                if contracts_v4_enabled()
+                else uuid.uuid4().hex[:12]
+            )
+            record = RunRecord(id=run_id, request=request, retry_of=retry_of)
+            replayed = False
         with self.lock:
+            if replayed and record.id in self.records:
+                return self.records[record.id]
             self.records[record.id] = record
-        thread = threading.Thread(target=lambda: asyncio.run(self.engine.run(record)), daemon=True, name=f"run-{record.id}")
-        thread.start()
+        if not replayed and record.status == RunStatus.CREATED:
+            self._start(record, resume=False)
         return record
+
+    def _start(self, record: RunRecord, *, resume: bool) -> None:
+        with self.lock:
+            existing = self.threads.get(record.id)
+            if existing is not None and existing.is_alive():
+                return
+            target = self.engine.resume if resume else self.engine.run
+            thread = threading.Thread(
+                target=lambda: asyncio.run(target(record)),
+                daemon=True,
+                name=f"run-{record.id}",
+            )
+            self.threads[record.id] = thread
+            thread.start()
+
+    def cancel(
+        self,
+        run_id: str,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+    ) -> RunRecord:
+        record = self.get(run_id)
+        if record is None:
+            raise KeyError(run_id)
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        return self.control_kernel.cancel_run(
+            record,
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+        )
+
+    def retry(
+        self,
+        run_id: str,
+        *,
+        idempotency_key: str,
+    ) -> RunRecord:
+        original = self.get(run_id)
+        if original is None:
+            raise KeyError(run_id)
+        if original.status not in {RunStatus.FAILED, RunStatus.CANCELLED}:
+            raise ValueError("only failed or cancelled runs can be retried")
+        return self.create(
+            original.request,
+            idempotency_key=(
+                "retry:"
+                + hashlib.sha256(
+                    f"{run_id}:{idempotency_key}".encode("utf-8")
+                ).hexdigest()
+            ),
+            retry_of=run_id,
+        )
 
     def get(self, run_id: str) -> RunRecord | None:
         with self.lock:
@@ -409,3 +649,36 @@ class RunManager:
         with self.lock:
             records = list(self.records.values())
         return [record.snapshot() for record in reversed(records[-20:])]
+
+    def events(
+        self,
+        run_id: str,
+        *,
+        after_revision: int = 0,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            record = self.get(run_id)
+            return [] if record is None else [event.to_dict() for event in record.events]
+        return self.control_kernel.events(
+            run_id,
+            after_revision=after_revision,
+            limit=limit,
+        )
+
+    def health(self) -> dict[str, Any]:
+        if self.control_kernel is None:
+            return {"persistent": False, "runtime_schema": None}
+        return self.control_kernel.health()
+
+    def shutdown(self, *, wait_timeout: float = 10.0) -> None:
+        """Let in-flight simulated work reach a persisted checkpoint on shutdown."""
+
+        deadline = time.time() + max(0.0, float(wait_timeout))
+        with self.lock:
+            threads = list(self.threads.values())
+        for thread in threads:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)

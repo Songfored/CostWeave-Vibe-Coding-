@@ -17,12 +17,13 @@ from .catalog_store import (
     CatalogError,
     CatalogStore,
 )
-from .compat_v4 import contract_health
+from .compat_v4 import contract_health, runtime_v4_enabled
 from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
+from .event_store import IdempotencyConflictError, RevisionConflictError
 
 
-MANAGER = RunManager(CATALOG_STORE)
+MANAGER: RunManager | None = None
 WEB_ROOT = files("costweave").joinpath("web")
 
 
@@ -33,12 +34,23 @@ class RequestError(ValueError):
         self.code = code
 
 
+class CostWeaveServer(ThreadingHTTPServer):
+    def server_close(self) -> None:
+        manager = getattr(self, "manager", None)
+        if manager is not None:
+            manager.shutdown(wait_timeout=10)
+        super().server_close()
+
+
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.1"
+    server_version = "CostWeave/0.4.2"
 
     @property
     def manager(self) -> RunManager:
-        return getattr(self.server, "manager", MANAGER)
+        manager = getattr(self.server, "manager", MANAGER)
+        if manager is None:
+            raise RuntimeError("run manager is not configured")
+        return manager
 
     @property
     def catalog_store(self) -> CatalogStore:
@@ -48,12 +60,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/health":
+            runtime_health = self.manager.health()
+            contracts = contract_health()
+            contracts["features"]["runtime_v4"] = runtime_v4_enabled()
+            contracts["contract_trace_persistent"] = bool(
+                runtime_health.get("persistent")
+            )
             self._json({
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 "version": __version__,
                 "catalog_revision": self.catalog_store.revision,
-                **contract_health(),
+                **contracts,
+                "control_kernel": runtime_health,
             })
             return
         if path == "/api/catalog":
@@ -88,8 +107,43 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
             return
-        if path == "/api/runs":
+        if path in {"/api/runs", "/api/v1/runs"}:
             self._json({"runs": self.manager.list()})
+            return
+        if path.startswith("/api/v1/runs/"):
+            suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/events"):
+                run_id = suffix.removesuffix("/events").strip("/")
+                record = self.manager.get(run_id)
+                if not record:
+                    self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    query = parse_qs(parsed.query)
+                    after = int(query.get("after_revision", ["0"])[0])
+                    limit = int(query.get("limit", ["200"])[0])
+                    if after < 0 or not 1 <= limit <= 1000:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    self._json(
+                        {"error": "invalid_pagination"}, HTTPStatus.BAD_REQUEST
+                    )
+                    return
+                events = self.manager.events(
+                    run_id, after_revision=after, limit=limit
+                )
+                self._json({
+                    "run_id": run_id,
+                    "events": events,
+                    "after_revision": after,
+                    "next_revision": events[-1].get("revision", after) if events else after,
+                })
+                return
+            record = self.manager.get(suffix)
+            if not record:
+                self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                return
+            self._json(record.snapshot())
             return
         if path.startswith("/api/runs/"):
             run_id = path.removeprefix("/api/runs/").strip("/")
@@ -106,8 +160,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/api/v1/runs":
+            self._create_run(v1=True)
+            return
+        if path.startswith("/api/v1/runs/"):
+            suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/cancel"):
+                self._cancel_run(suffix.removesuffix("/cancel").strip("/"))
+                return
+            if suffix.endswith("/retry"):
+                self._retry_run(suffix.removesuffix("/retry").strip("/"))
+                return
         if path == "/api/runs":
-            self._create_run()
+            self._create_run(v1=False)
             return
         if path == "/api/catalog/models":
             self._catalog_create()
@@ -174,7 +239,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._catalog_error(exc)
 
-    def _create_run(self) -> None:
+    def _create_run(self, *, v1: bool = False) -> None:
         try:
             payload = self._read_write_json()
             goal = str(payload.get("goal", "")).strip()
@@ -195,8 +260,17 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 max_concurrency=int(payload.get("max_concurrency", 4)),
                 simulate_replan=simulate_replan,
             )
-            record = self.manager.create(request)
+            key = self.headers.get("Idempotency-Key")
+            if v1 and not key:
+                raise RequestError(
+                    "v1 创建运行必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            record = self.manager.create(request, idempotency_key=key)
             self._json(record.snapshot(), HTTPStatus.ACCEPTED)
+        except (RevisionConflictError, IdempotencyConflictError) as exc:
+            self._runtime_conflict(exc)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -204,6 +278,72 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 {"error": "invalid_request", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
+
+    def _cancel_run(self, run_id: str) -> None:
+        try:
+            payload = self._read_write_json()
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "取消运行必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            expected = payload.get("expected_revision")
+            if isinstance(expected, bool) or expected is None:
+                raise ValueError("expected_revision 必须是整数")
+            record = self.manager.cancel(
+                run_id,
+                idempotency_key=key,
+                expected_revision=int(expected),
+            )
+            self._json(record.snapshot(), HTTPStatus.ACCEPTED)
+        except KeyError:
+            self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+        except (RevisionConflictError, IdempotencyConflictError) as exc:
+            self._runtime_conflict(exc)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "invalid_request", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _retry_run(self, run_id: str) -> None:
+        try:
+            self._read_write_json()
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "重试运行必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            record = self.manager.retry(run_id, idempotency_key=key)
+            self._json(record.snapshot(), HTTPStatus.ACCEPTED)
+        except KeyError:
+            self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+        except (RevisionConflictError, IdempotencyConflictError) as exc:
+            self._runtime_conflict(exc)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "invalid_request", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _runtime_conflict(self, exc: Exception) -> None:
+        code = (
+            "runtime_revision_conflict"
+            if isinstance(exc, RevisionConflictError)
+            else "idempotency_conflict"
+        )
+        payload = {"error": code, "message": str(exc)}
+        if isinstance(exc, RevisionConflictError):
+            payload.update({"expected_revision": exc.expected, "current_revision": exc.actual})
+        self._json(payload, HTTPStatus.CONFLICT)
 
     def _catalog_create(self) -> None:
         try:
@@ -390,21 +530,27 @@ def build_server(
     *,
     manager: RunManager | None = None,
     catalog_store: CatalogStore | None = None,
+    runtime_db_path: str | None = None,
 ) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError(
             "离线原型仅允许绑定本机回环地址；公开监听需要先实现身份认证"
         )
     store = catalog_store or CATALOG_STORE
-    server = ThreadingHTTPServer((host, port), CostWeaveHandler)
+    server = CostWeaveServer((host, port), CostWeaveHandler)
     server.catalog_store = store  # type: ignore[attr-defined]
-    server.manager = manager or RunManager(store)  # type: ignore[attr-defined]
+    if runtime_db_path is None and store is not CATALOG_STORE:
+        runtime_db_path = str(store.path.with_name("runtime-v4.sqlite3"))
+    server.manager = manager or RunManager(  # type: ignore[attr-defined]
+        store,
+        runtime_db_path=runtime_db_path,
+    )
     return server
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.3 offline decision prototype"
+        description="Run the CostWeave v0.4.2 persistent offline decision prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

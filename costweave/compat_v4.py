@@ -18,6 +18,7 @@ from .state_guard import StateTransitionError, validate_transition
 
 
 FEATURE_FLAG = "COSTWEAVE_CONTRACTS_V4"
+RUNTIME_FEATURE_FLAG = "COSTWEAVE_RUNTIME_V4"
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 _TRACE_LIMIT = 2048
 _TRACE: deque[EventEnvelope] = deque(maxlen=_TRACE_LIMIT)
@@ -27,6 +28,11 @@ _TRACE_LOCK = threading.RLock()
 def contracts_v4_enabled() -> bool:
     raw = os.environ.get(FEATURE_FLAG, "1")
     return raw.strip().lower() not in _FALSE_VALUES
+
+
+def runtime_v4_enabled() -> bool:
+    raw = os.environ.get(RUNTIME_FEATURE_FLAG, "1")
+    return contracts_v4_enabled() and raw.strip().lower() not in _FALSE_VALUES
 
 
 def contract_health() -> dict[str, Any]:
@@ -87,6 +93,7 @@ def v3_snapshot_to_v4(
     snapshot: Mapping[str, Any],
     *,
     include_trace: bool = True,
+    trace_persistent: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(snapshot, Mapping):
         raise TypeError("v0.3 snapshot must be an object")
@@ -100,7 +107,7 @@ def v3_snapshot_to_v4(
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "run_id": run_id,
         "legacy_run_id": legacy_id,
-        "trace_persistent": False,
+        "trace_persistent": bool(trace_persistent),
     }
     if include_trace:
         contract["trace"] = list(trace_snapshot(legacy_id))
@@ -130,6 +137,13 @@ def _set_status(
     source: str,
     task_id: str | None,
 ) -> None:
+    kernel = getattr(record, "control_kernel", None)
+    if runtime_v4_enabled() and kernel is not None:
+        if task_id is None:
+            kernel.set_run_status(record, target, source=source)
+        else:
+            kernel.set_task_status(record, owner, target, source=source)
+        return
     if not contracts_v4_enabled():
         owner.status = target
         return
