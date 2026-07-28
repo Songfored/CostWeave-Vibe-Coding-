@@ -3,7 +3,7 @@
 This tag was reconstructed from the preserved wheel artifact:
 
 `
-costweave-0.4.2-py3-none-any.whl
+costweave-0.4.3-py3-none-any.whl
 `
 
 The original source distribution was not preserved. This commit therefore

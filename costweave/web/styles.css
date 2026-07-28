@@ -557,6 +557,19 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .task-card[data-status="rejected"], .task-card[data-status="invalidated"] { border-color: rgba(255, 142, 135, .32); opacity: .76; }
 .task-card[data-status="rejected"] .task-state::before, .task-card[data-status="invalidated"] .task-state::before { background: var(--danger); }
 
+.artifact-section { padding-top: 3px; }
+.artifact-graph { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.artifact-graph > p { margin: 0; padding: 13px; color: var(--muted); background: rgba(4, 12, 10, .35); border: 1px dashed var(--line); border-radius: 11px; font-size: 12px; }
+.artifact-graph article { min-width: 0; padding: 12px; background: rgba(4, 12, 10, .48); border: 1px solid var(--line); border-radius: 11px; }
+.artifact-graph article[data-status="validated"] { border-color: rgba(112, 240, 181, .22); }
+.artifact-graph article[data-status="stale"], .artifact-graph article[data-status="rejected"] { border-color: rgba(255, 142, 135, .28); opacity: .76; }
+.artifact-graph article > div { display: flex; justify-content: space-between; gap: 8px; }
+.artifact-graph strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-graph article span { color: var(--accent); font-size: 9px; text-transform: uppercase; }
+.artifact-graph article p { margin: 8px 0 5px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-graph code { display: block; color: var(--accent-2); font-size: 10px; }
+.artifact-graph small { display: block; margin-top: 7px; color: var(--faint); font-size: 9px; }
+
 .lower-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 14px; padding-top: 2px; }
 .lower-grid > section { min-width: 0; }
 .timeline { list-style: none; margin: 0; padding: 2px 0 0 13px; border-left: 1px solid var(--line); }

@@ -102,6 +102,15 @@ class TaskContract:
     objective: str
     task_type: str
     dependencies: list[str] = field(default_factory=list)
+    dependency_types: dict[str, str] = field(default_factory=dict)
+    input_artifact_refs: list[str] = field(default_factory=list)
+    input_artifact_schemas: dict[str, str] = field(default_factory=dict)
+    output_artifact_specs: list[dict[str, Any]] = field(default_factory=list)
+    artifact_ids: list[str] = field(default_factory=list)
+    handoff_message_id: str | None = None
+    data_permissions: list[str] = field(
+        default_factory=lambda: ["public", "internal"]
+    )
     required_capabilities: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
     output_schema: list[str] = field(default_factory=list)

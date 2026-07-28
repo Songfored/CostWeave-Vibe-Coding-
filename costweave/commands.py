@@ -1,4 +1,4 @@
-"""Command helpers for the CostWeave v0.4.2 control kernel."""
+"""Command helpers for the CostWeave v0.4.3 control kernel."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ class CommandKind(StrEnum):
     RECORD_EVENT = "runtime.record-event"
     CHECKPOINT = "runtime.checkpoint"
     RECOVER_RUN = "run.recover"
+    PUBLISH_ARTIFACT = "artifact.publish"
+    INVALIDATE_ARTIFACTS = "artifact.invalidate"
+    RECORD_HANDOFF = "message.record"
 
 
 _KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$")

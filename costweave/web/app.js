@@ -282,9 +282,22 @@ function render(run) {
 
   renderOutcome(run);
   renderDag(run.plan.tasks);
+  renderArtifacts(run);
   renderTimeline(run.events || []);
   const selected = run.plan.tasks.find((task) => task.id === state.selectedTaskId) || run.plan.tasks[0];
   renderContract(selected);
+}
+
+function renderArtifacts(run) {
+  const artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
+  $("#artifact-count").textContent = `${artifacts.length} 个不可变成果`;
+  $("#artifact-graph").innerHTML = artifacts.length ? artifacts.map((artifact) => `
+    <article data-status="${escapeHtml(artifact.status)}">
+      <div><strong>${escapeHtml(artifact.artifact_type)}</strong><span>${escapeHtml(artifact.status)}</span></div>
+      <p>${escapeHtml(artifact.producer_task_id)}</p>
+      <code title="${escapeHtml(artifact.content_hash)}">${escapeHtml(artifact.content_hash.slice(0, 16))}…</code>
+      <small>${escapeHtml(artifact.producer_model || "未记录模型")} · 输入 ${artifact.input_artifact_refs.length} · 计划 v${artifact.plan_revision}</small>
+    </article>`).join("") : "<p>暂无 Artifact；节点只有通过结构化验收后才会解锁下游。</p>";
 }
 
 function renderRunError(run) {
@@ -404,6 +417,10 @@ function renderContract(task) {
     <li><b>${escapeHtml(candidate.name)}</b><span>均值 ${Math.round(Number(candidate.predicted_success || 0) * 100)}% · 下界 ${Math.round(Number(candidate.success_lower_bound || 0) * 100)}% · $${Number(candidate.estimated_cost || 0).toFixed(4)}</span></li>`).join("");
   const rejections = (task.routing_rejections || []).slice(0, 5).map((item) => `
     <li><b>${escapeHtml(item.name)}</b><span>${escapeHtml((item.reasons || []).join(" · "))}</span></li>`).join("");
+  const typedDependencies = (task.dependencies || []).map((dependency) =>
+    `${dependency} [${task.dependency_types?.[dependency] || "hard"}]`);
+  const artifactOutputs = (task.output_artifact_specs || []).map((spec) =>
+    `${spec.artifact_type} · ${spec.schema_ref}`);
   $("#contract").innerHTML = `
     <div class="contract-heading">
       <div><h4>${escapeHtml(task.title)}</h4><code>${escapeHtml(task.id)} · 计划 v${task.plan_version}</code></div>
@@ -411,7 +428,11 @@ function renderContract(task) {
     </div>
     <dl>
       <dt>目标</dt><dd>${escapeHtml(task.objective)}</dd>
-      <dt>依赖</dt><dd>${list(task.dependencies)}</dd>
+      <dt>依赖</dt><dd>${list(typedDependencies)}</dd>
+      <dt>输入 Artifact</dt><dd>${list(task.input_artifact_refs)}</dd>
+      <dt>输出 Artifact</dt><dd>${list(artifactOutputs)}</dd>
+      <dt>成果 ID</dt><dd>${list(task.artifact_ids)}</dd>
+      <dt>交接消息</dt><dd>${escapeHtml(task.handoff_message_id || "尚未发送")}</dd>
       <dt>所需能力</dt><dd>${list(task.required_capabilities)}</dd>
       <dt>验收标准</dt><dd>${list(task.acceptance_criteria)}</dd>
       <dt>输出格式</dt><dd>${list(task.output_schema)}</dd>

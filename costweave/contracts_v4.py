@@ -19,12 +19,15 @@ RunId = NewType("RunId", str)
 TaskId = NewType("TaskId", str)
 EventId = NewType("EventId", str)
 ArtifactId = NewType("ArtifactId", str)
+MessageId = NewType("MessageId", str)
 CommandId = NewType("CommandId", str)
 AttemptId = NewType("AttemptId", str)
 
-_ID_KINDS = frozenset({"run", "task", "event", "artifact", "command", "attempt"})
+_ID_KINDS = frozenset(
+    {"run", "task", "event", "artifact", "message", "command", "attempt"}
+)
 _ID_PATTERN = re.compile(
-    r"^(?P<kind>run|task|event|artifact|command|attempt)_(?P<value>[0-9a-f]{32})$"
+    r"^(?P<kind>run|task|event|artifact|message|command|attempt)_(?P<value>[0-9a-f]{32})$"
 )
 _KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 
@@ -89,6 +92,10 @@ def new_event_id() -> EventId:
 
 def new_artifact_id() -> ArtifactId:
     return ArtifactId(new_identifier("artifact"))
+
+
+def new_message_id() -> MessageId:
+    return MessageId(new_identifier("message"))
 
 
 def new_command_id() -> CommandId:

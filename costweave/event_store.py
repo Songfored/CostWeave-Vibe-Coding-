@@ -1,4 +1,4 @@
-"""SQLite event store and deterministic projections for CostWeave v0.4.2."""
+"""SQLite event store and deterministic projections for CostWeave v0.4.3."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .contracts_v4 import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = "v4.2"
+RUNTIME_SCHEMA_VERSION = "v4.3"
 
 
 class EventStoreError(RuntimeError):
@@ -102,24 +102,39 @@ class EventStore:
             connection.close()
 
     def _migrate(self) -> None:
-        resource = files("costweave.migrations").joinpath("001_runtime.sql")
-        sql = resource.read_text(encoding="utf-8")
-        checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
         with self._lock, self._connection() as connection:
             mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()[0]
             if str(mode).lower() != "wal":
                 raise EventStoreError("SQLite refused WAL mode")
             connection.execute("PRAGMA synchronous=FULL")
-            connection.executescript(sql)
-            existing = connection.execute(
-                "SELECT checksum FROM schema_migrations WHERE version=1"
-            ).fetchone()
-            if existing is not None and existing["checksum"] != checksum:
-                raise EventStoreError("runtime migration checksum mismatch")
             connection.execute(
-                "INSERT OR IGNORE INTO schema_migrations(version, checksum, applied_at) VALUES(1, ?, ?)",
-                (checksum, utc_now()),
+                "CREATE TABLE IF NOT EXISTS schema_migrations("
+                "version INTEGER PRIMARY KEY,checksum TEXT NOT NULL,"
+                "applied_at TEXT NOT NULL)"
             )
+            migration_root = files("costweave.migrations")
+            for version, filename in (
+                (1, "001_runtime.sql"),
+                (2, "002_artifacts.sql"),
+            ):
+                sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
+                checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+                existing = connection.execute(
+                    "SELECT checksum FROM schema_migrations WHERE version=?",
+                    (version,),
+                ).fetchone()
+                if existing is not None:
+                    if existing["checksum"] != checksum:
+                        raise EventStoreError(
+                            f"runtime migration {version} checksum mismatch"
+                        )
+                    continue
+                connection.executescript(sql)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version,checksum,applied_at) "
+                    "VALUES(?,?,?)",
+                    (version, checksum, utc_now()),
+                )
 
     def health(self) -> dict[str, Any]:
         with self._connection() as connection:
@@ -315,12 +330,14 @@ class EventStore:
             ),
         )
         connection.execute("DELETE FROM attempts WHERE run_id=?", (run_id,))
-        connection.execute("DELETE FROM tasks WHERE run_id=?", (run_id,))
         for task in ((state.get("plan") or {}).get("tasks") or []):
             legacy_task_id = str(task["id"])
             task_id = canonical_identifier("task", f"{run_id}:{legacy_task_id}")
             connection.execute(
-                "INSERT INTO tasks(run_id,task_id,legacy_task_id,revision,status,task_json) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO tasks(run_id,task_id,legacy_task_id,revision,status,task_json) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(run_id,task_id) DO UPDATE SET "
+                "legacy_task_id=excluded.legacy_task_id,revision=excluded.revision,"
+                "status=excluded.status,task_json=excluded.task_json",
                 (
                     run_id,
                     task_id,
@@ -397,6 +414,26 @@ class EventStore:
             for row in rows
         ]
 
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT run_id,task_id,legacy_task_id,revision,status,task_json "
+                "FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        contract = json.loads(row["task_json"])
+        contract.pop("result", None)
+        return {
+            "run_id": row["run_id"],
+            "task_id": row["task_id"],
+            "legacy_task_id": row["legacy_task_id"],
+            "revision": int(row["revision"]),
+            "status": row["status"],
+            "contract": contract,
+        }
+
     def replay(self, run_id: str) -> dict[str, Any] | None:
         """Rebuild the run projection solely from the append-only event stream."""
 
@@ -428,5 +465,12 @@ class EventStore:
         with self._connection() as connection:
             return {
                 table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-                for table in ("commands", "events", "runs", "tasks", "attempts", "projections")
+                for table in (
+                    "commands",
+                    "events",
+                    "runs",
+                    "tasks",
+                    "attempts",
+                    "projections",
+                )
             }

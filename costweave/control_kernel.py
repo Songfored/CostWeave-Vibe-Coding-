@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.2."""
+"""Persistent command/event/projection owner for CostWeave v0.4.3."""
 
 from __future__ import annotations
 
@@ -8,9 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .commands import CommandKind
+from .artifact_store import ArtifactStore
+from .artifacts import Artifact, ArtifactStatus
 from .contracts_v4 import CommandEnvelope, EventEnvelope, canonical_identifier, new_command_id
 from .domain import Event, RunRequest, RunStatus, TaskStatus
 from .event_store import EventStore, ProjectionUpdate
+from .graph_compiler import GraphCompiler
+from .messages import MessageEnvelope
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
 from .state_guard import is_terminal, validate_transition
 
@@ -23,6 +27,8 @@ class ControlKernel:
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.store = EventStore(path or self.default_path())
+        self.artifact_store = ArtifactStore(self.store.path)
+        self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
 
     @staticmethod
@@ -238,7 +244,178 @@ class ControlKernel:
         )
 
     def health(self) -> dict[str, Any]:
-        return {**self.store.health(), "persistent": True}
+        return {
+            **self.store.health(),
+            **self.artifact_store.counts(),
+            "artifact_dag": True,
+            "persistent": True,
+        }
+
+    def compile_graph(self, record: Any) -> dict[str, Any]:
+        if record.plan is None:
+            raise ValueError("cannot compile a run without a plan")
+        graph = self.graph_compiler.compile(str(record.id), record.plan)
+        self.artifact_store.sync_graph(graph)
+        return graph.to_dict()
+
+    def prepare_handoff(self, record: Any, task: Any) -> list[dict[str, Any]]:
+        if record.plan is None:
+            raise ValueError("cannot hand off a task without a plan")
+        inputs = self.artifact_store.task_artifacts(
+            str(record.id),
+            task.dependencies,
+            validated_only=True,
+        )
+        found_producers = {artifact.producer_task_id for artifact in inputs}
+        required = {
+            canonical_identifier("task", f"{record.id}:{dependency}")
+            for dependency in task.dependencies
+            if task.dependency_types.get(dependency, "hard") != "soft"
+        }
+        missing = required - found_producers
+        if missing:
+            raise ValueError(
+                f"handoff is missing validated producer artifacts: {sorted(missing)}"
+            )
+        task.input_artifact_refs = [artifact.artifact_id for artifact in inputs]
+        message = MessageEnvelope.create(
+            run_id=str(record.id),
+            recipient_task_id=canonical_task_id(str(record.id), str(task.id)),
+            plan_revision=record.plan.version,
+            attempt=task.attempt,
+            goal=record.request.goal,
+            objective=task.objective,
+            input_artifact_refs=task.input_artifact_refs,
+            output_artifact_specs=task.output_artifact_specs,
+            acceptance_criteria=task.acceptance_criteria,
+            include=task.include,
+            exclude=task.exclude,
+        )
+        stored, replayed = self.artifact_store.put_message(message)
+        task.handoff_message_id = stored.message_id
+        if not replayed:
+            self._persist(
+                record,
+                kind=CommandKind.RECORD_HANDOFF,
+                event_kind="message.handoff.recorded",
+                source="control_kernel.prepare_handoff",
+                task_id=str(task.id),
+                payload={
+                    "message_id": stored.message_id,
+                    "input_artifact_refs": list(stored.input_artifact_refs),
+                    "plan_revision": stored.plan_revision,
+                },
+                idempotency_key=(
+                    f"internal:{record.id}:handoff:{stored.message_id}"
+                ),
+            )
+        return [dict(artifact.content) for artifact in inputs]
+
+    def publish_task_artifacts(
+        self,
+        record: Any,
+        task: Any,
+        result: dict[str, Any],
+        *,
+        validated: bool,
+    ) -> list[Artifact]:
+        if record.plan is None:
+            raise ValueError("cannot publish an artifact without a plan")
+        status = (
+            ArtifactStatus.VALIDATED if validated else ArtifactStatus.REJECTED
+        )
+        published: list[Artifact] = []
+        for spec in task.output_artifact_specs:
+            artifact = Artifact.create(
+                run_id=str(record.id),
+                producer_task_id=canonical_task_id(
+                    str(record.id), str(task.id)
+                ),
+                artifact_type=str(spec["artifact_type"]),
+                schema_ref=str(spec["schema_ref"]),
+                content=result,
+                plan_revision=record.plan.version,
+                status=status,
+                producer_model=task.selected_worker,
+                input_artifact_refs=task.input_artifact_refs,
+                attempt=task.attempt,
+                sensitivity=str(spec.get("sensitivity", "internal")),
+            )
+            artifact, _ = self.artifact_store.put(artifact)
+            if artifact.artifact_id not in task.artifact_ids:
+                task.artifact_ids.append(artifact.artifact_id)
+            published.append(artifact)
+        self._persist(
+            record,
+            kind=CommandKind.PUBLISH_ARTIFACT,
+            event_kind="artifact.published",
+            source="control_kernel.publish_task_artifacts",
+            task_id=str(task.id),
+            payload={
+                "artifact_ids": [artifact.artifact_id for artifact in published],
+                "status": status.value,
+                "plan_revision": record.plan.version,
+            },
+            idempotency_key=(
+                f"internal:{record.id}:artifacts:{task.id}:"
+                f"{task.attempt}:{status.value}"
+            ),
+        )
+        return published
+
+    def invalidate_tasks(
+        self,
+        record: Any,
+        task_ids: set[str] | list[str],
+        *,
+        reason: str,
+    ) -> list[str]:
+        invalidated = self.artifact_store.mark_stale_for_tasks(
+            str(record.id), task_ids
+        )
+        if invalidated:
+            self._persist(
+                record,
+                kind=CommandKind.INVALIDATE_ARTIFACTS,
+                event_kind="artifact.invalidated",
+                source="control_kernel.invalidate_tasks",
+                payload={
+                    "artifact_ids": invalidated,
+                    "affected_tasks": sorted(task_ids),
+                    "reason": reason,
+                },
+                idempotency_key=(
+                    f"internal:{record.id}:invalidate:"
+                    f"{record.runtime_revision + 1}"
+                ),
+            )
+        return invalidated
+
+    def artifacts(self, run_id: str, *, include_content: bool = False) -> list[dict[str, Any]]:
+        return self.artifact_store.list_run(
+            run_id, include_content=include_content
+        )
+
+    def artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        artifact = self.artifact_store.get(artifact_id)
+        return (
+            artifact.to_dict(include_content=False)
+            if artifact is not None
+            else None
+        )
+
+    def task(self, task_id: str) -> dict[str, Any] | None:
+        return self.store.get_task(task_id)
+
+    def graph(self, record: Any) -> dict[str, Any]:
+        if record.plan is None:
+            return {
+                "run_id": str(record.id),
+                "plan_revision": None,
+                "tasks": [],
+                "artifact_links": [],
+            }
+        return self.artifact_store.graph(str(record.id), record.plan)
 
     def _persist(
         self,

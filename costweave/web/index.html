@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.3 可热更新、自适应多模型决策与智能编排原型">
+  <meta name="description" content="CostWeave v0.4.3 可追溯 Artifact Graph 多模型智能编排原型">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
   <link rel="stylesheet" href="/styles.css">
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.3 自适应决策</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.4.3 Artifact Graph</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,7 +29,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">ADAPTIVE DECISION ORCHESTRATOR · V0.3</p>
+        <p class="eyebrow">ARTIFACT-DRIVEN ORCHESTRATOR · V0.4.3</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，本地总指挥先评估歧义、风险、时效、工具、模态与预算，再以硬约束过滤和多目标优化分配模型；每个专业分支都有独立验收。</p>
       </div>
@@ -177,13 +177,23 @@
             <div id="dag" class="dag"></div>
           </section>
 
+          <section class="artifact-section" aria-labelledby="artifact-title">
+            <div class="section-title">
+              <div><span class="section-kicker">PROVENANCE</span><h3 id="artifact-title">成果与血缘</h3></div>
+              <span id="artifact-count">0 个不可变成果</span>
+            </div>
+            <div id="artifact-graph" class="artifact-graph">
+              <p>任务完成后，这里会显示内容哈希、生产节点、模型和输入血缘。</p>
+            </div>
+          </section>
+
           <div class="lower-grid">
             <section aria-labelledby="events-title">
               <div class="section-title compact"><div><h3 id="events-title">运行事件</h3><span id="event-count"></span></div><button id="events-toggle" class="text-button" type="button" aria-controls="timeline">展开全部</button></div>
               <ol id="timeline" class="timeline"></ol>
             </section>
             <section aria-labelledby="contract-title">
-              <div class="section-title compact"><div><h3 id="contract-title">节点详情</h3><span>合同、预测与验收</span></div></div>
+              <div class="section-title compact"><div><h3 id="contract-title">节点详情</h3><span>合同、交接、Artifact 与验收</span></div></div>
               <div id="contract" class="contract-card"><p>请选择一个任务节点。</p></div>
             </section>
           </div>

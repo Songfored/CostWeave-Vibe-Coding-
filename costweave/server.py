@@ -43,7 +43,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.2"
+    server_version = "CostWeave/0.4.3"
 
     @property
     def manager(self) -> RunManager:
@@ -110,8 +110,62 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path in {"/api/runs", "/api/v1/runs"}:
             self._json({"runs": self.manager.list()})
             return
+        if path.startswith("/api/v1/tasks/"):
+            task_id = unquote(path.removeprefix("/api/v1/tasks/").strip("/"))
+            task = self.manager.task(task_id)
+            if task is None:
+                self._json({"error": "task_not_found"}, HTTPStatus.NOT_FOUND)
+                return
+            self._json(task)
+            return
+        if path.startswith("/api/v1/artifacts/"):
+            artifact_id = unquote(
+                path.removeprefix("/api/v1/artifacts/").strip("/")
+            )
+            try:
+                artifact = self.manager.artifact(artifact_id)
+            except Exception as exc:
+                self._json(
+                    {
+                        "error": "artifact_integrity_failed",
+                        "message": str(exc),
+                    },
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            if artifact is None:
+                self._json(
+                    {"error": "artifact_not_found"}, HTTPStatus.NOT_FOUND
+                )
+                return
+            self._json(artifact)
+            return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/graph"):
+                run_id = suffix.removesuffix("/graph").strip("/")
+                graph = self.manager.graph(run_id)
+                if graph is None:
+                    self._json(
+                        {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
+                    )
+                    return
+                self._json(graph)
+                return
+            if suffix.endswith("/artifacts"):
+                run_id = suffix.removesuffix("/artifacts").strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
+                    )
+                    return
+                self._json(
+                    {
+                        "run_id": run_id,
+                        "artifacts": self.manager.artifacts(run_id),
+                    }
+                )
+                return
             if suffix.endswith("/events"):
                 run_id = suffix.removesuffix("/events").strip("/")
                 record = self.manager.get(run_id)
@@ -550,7 +604,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.2 persistent offline decision prototype"
+        description="Run the CostWeave v0.4.3 Artifact Graph prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

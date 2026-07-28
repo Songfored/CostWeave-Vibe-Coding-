@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .compat_v4 import (
+    artifact_dag_enabled,
     contracts_v4_enabled,
     runtime_v4_enabled,
     set_run_status,
@@ -27,6 +28,7 @@ from .domain import (
 )
 from .catalog_store import CATALOG_STORE, CatalogStore
 from .executor import SimulatedExecutor, utc_now
+from .graph_compiler import GraphCompiler
 from .planner import HeuristicPlanner
 from .router import PredictiveRouter
 from .validator import ContractValidator, PlanValidationError
@@ -90,13 +92,25 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "runtime": {
-                    "schema_version": "v4.2",
+                    "schema_version": "v4.3",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
+                    "artifact_dag": (
+                        artifact_dag_enabled()
+                        and self.control_kernel is not None
+                    ),
                     "recovered": self.recovered,
                     "cancel_requested": self.cancel_requested,
                     "retry_of": self.retry_of,
                 },
+                "artifacts": (
+                    self.control_kernel.artifacts(
+                        str(self.id), include_content=False
+                    )
+                    if artifact_dag_enabled()
+                    and self.control_kernel is not None
+                    else []
+                ),
             }
             if include_internal:
                 snapshot["_runtime_internal"] = {
@@ -128,6 +142,7 @@ class OrchestrationEngine:
         self.validator = ContractValidator()
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
+        self.graph_compiler = GraphCompiler()
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
@@ -153,6 +168,8 @@ class OrchestrationEngine:
                 record.request.quality_floor,
                 record.request.budget,
             )
+            if artifact_dag_enabled() and record.control_kernel is not None:
+                record.control_kernel.compile_graph(record)
             self._recalculate_probability(record)
             self._event(
                 record,
@@ -204,6 +221,9 @@ class OrchestrationEngine:
             return
         if record.plan is None:
             raise RuntimeError("无法恢复没有持久化计划的运行")
+        if artifact_dag_enabled() and record.control_kernel is not None:
+            record.control_kernel.compile_graph(record)
+            self._materialize_legacy_artifacts(record)
         if record.status == RunStatus.REPLANNING:
             set_run_status(
                 record,
@@ -215,6 +235,12 @@ class OrchestrationEngine:
         record.cancel_requested = False
         for task in record.plan.tasks:
             if task.status == TaskStatus.RUNNING:
+                if artifact_dag_enabled() and record.control_kernel is not None:
+                    record.control_kernel.invalidate_tasks(
+                        record,
+                        {task.id},
+                        reason="interrupted producer attempt",
+                    )
                 set_task_status(
                     record,
                     task,
@@ -278,8 +304,21 @@ class OrchestrationEngine:
                 if not pending and not active:
                     return
 
-                validated_ids = {task.id for task in record.plan.tasks if task.status == TaskStatus.VALIDATED}
-                ready = [task for task in pending if set(task.dependencies) <= validated_ids]
+                validated_ids = {
+                    task.id
+                    for task in record.plan.tasks
+                    if task.status == TaskStatus.VALIDATED
+                }
+                ready = [
+                    task
+                    for task in pending
+                    if {
+                        dependency
+                        for dependency in task.dependencies
+                        if task.dependency_types.get(dependency, "hard") != "soft"
+                    }
+                    <= validated_ids
+                ]
                 slots = record.request.max_concurrency - len(active)
                 reserved = sum(item.estimated_cost for item in active.values())
                 for task in sorted(ready, key=lambda item: item.priority, reverse=True)[:max(0, slots)]:
@@ -297,10 +336,17 @@ class OrchestrationEngine:
                     )
                     task.attempt += 1
                     task.started_at = utc_now()
-                    dependency_results = [
-                        item.result for item in record.plan.tasks
-                        if item.id in task.dependencies and item.result is not None
-                    ]
+                    if artifact_dag_enabled() and record.control_kernel is not None:
+                        dependency_results = record.control_kernel.prepare_handoff(
+                            record, task
+                        )
+                    else:
+                        dependency_results = [
+                            item.result
+                            for item in record.plan.tasks
+                            if item.id in task.dependencies
+                            and item.result is not None
+                        ]
                     should_inject = (
                         record.request.simulate_replan
                         and not injected
@@ -360,6 +406,14 @@ class OrchestrationEngine:
                     task.validation = self.validator.validate_result(task, result)
                     record.spent += task.estimated_cost
 
+                    if artifact_dag_enabled() and record.control_kernel is not None:
+                        record.control_kernel.publish_task_artifacts(
+                            record,
+                            task,
+                            result,
+                            validated=bool(task.validation["passed"]),
+                        )
+
                     if task.validation["passed"]:
                         set_task_status(
                             record,
@@ -418,6 +472,16 @@ class OrchestrationEngine:
         )
         record.replans += 1
         descendants = self.validator.descendants(record.plan.tasks, failed.id)
+        affected = {failed.id, *descendants}
+        if artifact_dag_enabled() and record.control_kernel is not None:
+            affected = self.graph_compiler.affected_subgraph(
+                record.plan, {failed.id}
+            )
+            record.control_kernel.invalidate_tasks(
+                record,
+                affected,
+                reason=f"task {failed.id} failed validation",
+            )
         for task in record.plan.tasks:
             if task.id in descendants and task.status != TaskStatus.VALIDATED:
                 set_task_status(
@@ -428,6 +492,8 @@ class OrchestrationEngine:
                 )
                 task.result = None
                 task.validation = None
+                task.input_artifact_refs = []
+                task.handoff_message_id = None
         set_task_status(
             record,
             failed,
@@ -435,6 +501,8 @@ class OrchestrationEngine:
             source="engine.task.invalidated",
         )
         replacement = self.planner.replan(record.plan, failed.id)
+        if artifact_dag_enabled() and record.control_kernel is not None:
+            record.control_kernel.compile_graph(record)
         remaining_budget = max(0.0, record.request.budget - record.spent - reserved_cost)
         pending_for_route = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
         replacement_summary = run_router.assign(
@@ -447,7 +515,7 @@ class OrchestrationEngine:
         }
         self._event(record, "replanning", f"高级模型候选重新规划；保留已验收成果，替换 {failed.id}", failed.id, {
             "replacement": replacement.id,
-            "affected_descendants": sorted(descendants),
+            "affected_descendants": sorted(affected - {failed.id}),
             "selected_model": replacement.selected_worker,
             "routing": replacement_summary,
         })
@@ -507,6 +575,27 @@ class OrchestrationEngine:
         kernel = record.control_kernel
         if kernel is not None:
             kernel.checkpoint(record, source=source)
+
+    def _materialize_legacy_artifacts(self, record: RunRecord) -> None:
+        """Upgrade validated v0.4.2 results without re-executing their tasks."""
+
+        kernel = record.control_kernel
+        if kernel is None or record.plan is None:
+            return
+        for task in record.plan.tasks:
+            if (
+                task.status != TaskStatus.VALIDATED
+                or task.result is None
+                or task.artifact_ids
+            ):
+                continue
+            kernel.prepare_handoff(record, task)
+            kernel.publish_task_artifacts(
+                record,
+                task,
+                task.result,
+                validated=True,
+            )
 
     @staticmethod
     def _event(record: RunRecord, kind: str, message: str, task_id: str | None = None, detail: dict | None = None) -> None:
@@ -670,6 +759,34 @@ class RunManager:
         if self.control_kernel is None:
             return {"persistent": False, "runtime_schema": None}
         return self.control_kernel.health()
+
+    def task(self, task_id: str) -> dict[str, Any] | None:
+        if self.control_kernel is None:
+            return None
+        return self.control_kernel.task(task_id)
+
+    def artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        if self.control_kernel is None:
+            return None
+        return self.control_kernel.artifact(artifact_id)
+
+    def artifacts(
+        self,
+        run_id: str,
+        *,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.artifacts(
+            run_id, include_content=include_content
+        )
+
+    def graph(self, run_id: str) -> dict[str, Any] | None:
+        record = self.get(run_id)
+        if record is None or self.control_kernel is None:
+            return None
+        return self.control_kernel.graph(record)
 
     def shutdown(self, *, wait_timeout: float = 10.0) -> None:
         """Let in-flight simulated work reach a persisted checkpoint on shutdown."""
