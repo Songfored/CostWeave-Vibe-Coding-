@@ -60,15 +60,16 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.4.6", health["version"])
+        self.assertEqual("0.4.7", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v4.6", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v4.7", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
+        self.assertTrue(health["features"]["outcome_forecast"])
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -289,6 +290,15 @@ class ServerTests(unittest.TestCase):
             f"/api/v1/runs/{run['id']}/failures"
         )
         self.assertEqual([], failures["failures"])
+        _, forecast = self.fetch_json(
+            f"/api/v1/runs/{run['id']}/forecast"
+        )
+        self.assertEqual(1200, forecast["sample_size"])
+        self.assertAlmostEqual(
+            1.0, sum(forecast["probabilities"].values())
+        )
+        _, evaluations = self.fetch_json("/api/v1/evaluations")
+        self.assertTrue(evaluations["evaluations"][0]["passed"])
 
         _, resources = self.fetch_json("/api/v1/resources")
         self.assertGreater(len(resources["resources"]), 0)

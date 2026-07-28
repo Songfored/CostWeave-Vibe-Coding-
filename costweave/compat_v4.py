@@ -23,6 +23,7 @@ ARTIFACT_FEATURE_FLAG = "COSTWEAVE_ARTIFACT_DAG"
 PARALLEL_RUNTIME_FEATURE_FLAG = "COSTWEAVE_PARALLEL_RUNTIME"
 PLACEMENT_FEATURE_FLAG = "COSTWEAVE_PLACEMENT_V4"
 EVIDENCE_RECOVERY_FEATURE_FLAG = "COSTWEAVE_EVIDENCE_RECOVERY"
+OUTCOME_FORECAST_FEATURE_FLAG = "COSTWEAVE_OUTCOME_FORECAST"
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 _TRACE_LIMIT = 2048
 _TRACE: deque[EventEnvelope] = deque(maxlen=_TRACE_LIMIT)
@@ -63,6 +64,13 @@ def evidence_recovery_enabled() -> bool:
         and raw.strip().lower() not in _FALSE_VALUES
     )
 
+def outcome_forecast_enabled() -> bool:
+    raw = os.environ.get(OUTCOME_FORECAST_FEATURE_FLAG, "1")
+    return (
+        runtime_v4_enabled()
+        and raw.strip().lower() not in _FALSE_VALUES
+    )
+
 
 def contract_health() -> dict[str, Any]:
     return {
@@ -73,6 +81,7 @@ def contract_health() -> dict[str, Any]:
             "parallel_runtime": parallel_runtime_enabled(),
             "placement_v4": placement_v4_enabled(),
             "evidence_recovery": evidence_recovery_enabled(),
+            "outcome_forecast": outcome_forecast_enabled(),
         },
         "contract_trace_persistent": False,
     }

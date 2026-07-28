@@ -44,7 +44,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.6"
+    server_version = "CostWeave/0.4.7"
 
     @property
     def manager(self) -> RunManager:
@@ -142,6 +142,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 {"approvals": self.manager.approvals(status=status)}
             )
             return
+        if path == "/api/v1/evaluations":
+            self._json({"evaluations": self.manager.evaluations()})
+            return
         if path.startswith("/api/v1/tasks/"):
             task_id = unquote(path.removeprefix("/api/v1/tasks/").strip("/"))
             task = self.manager.task(task_id)
@@ -174,6 +177,28 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/forecast"):
+                run_id = suffix.removesuffix(
+                    "/forecast"
+                ).strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                forecast = self.manager.forecast(run_id)
+                if forecast is None:
+                    self._json(
+                        {
+                            "error": "forecast_unavailable",
+                            "run_id": run_id,
+                        },
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json(forecast)
+                return
             if suffix.endswith("/validations"):
                 run_id = suffix.removesuffix(
                     "/validations"
@@ -764,7 +789,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.6 Evidence Recovery prototype"
+        description="Run the CostWeave v0.4.7 Outcome Forecast prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

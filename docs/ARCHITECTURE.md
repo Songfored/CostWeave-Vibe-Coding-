@@ -1,6 +1,6 @@
-# CostWeave v0.4.6 架构说明
+# CostWeave v0.4.7 架构说明
 
-CostWeave v0.4.6 是以成功契约、独立证据、端到端成本、资源准入和不可变 Artifact 为任务边界，带确定性失败分类、分级恢复、版本化合同、状态机和 SQLite EventStore 的离线多模型决策 Runtime。`RunManager` 作为兼容 Facade 转发到持久化 `ControlKernel`。
+CostWeave v0.4.7 是以多结局预测、Outcome 归因、成功契约、独立证据、端到端成本和不可变 Artifact 为边界，带可复现 DAG 仿真、分层 Beta 后验、确定性恢复和 SQLite EventStore 的离线多模型决策 Runtime。
 
 ```text
 HTTP / RunManager Facade / Engine
@@ -30,6 +30,9 @@ SuccessContract + Validator：关键标准、逐条证据与误验风险
 FailureClassifier + RecoveryPolicy：节点 / 子图 / 全局恢复
                     │
                     ▼
+DagMonteCarlo + OutcomeStore：结局分布 / 归因 / 校准
+                    │
+                    ▼
 ControlKernel：状态所有权、Artifact、幂等与恢复审计
                     │
      ┌──────────────┼──────────────┬────────────┐
@@ -47,6 +50,7 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_PARALLEL_RUNTIME=0` 关闭资源准入与租约，回到 v0.4.3 兼容执行路径。
 - `COSTWEAVE_PLACEMENT_V4=0` 关闭联合 Placement，回到 v0.3 风险调整路由。
 - `COSTWEAVE_EVIDENCE_RECOVERY=0` 关闭高级恢复并失败即终止，不放宽验收。
+- `COSTWEAVE_OUTCOME_FORECAST=0` 停止新预测和学习写入，旧预测保持可读。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
 
 ## 0.3 成功契约、证据与恢复边界
@@ -73,6 +77,29 @@ limit_exceeded        → stop
 ```
 
 `PlanPatch` 只能由规划层生成，并且从当前修订精确推进到下一修订。恢复前计算受影响任务集合；已验证且与失败无关的兄弟 Artifact 保持 `validated`。`validation_results`、`criterion_results`、`failure_records` 和 `plan_revisions` 记录完整审计链。
+
+## 0.4 Outcome 预测与校准边界
+
+预测在任务执行前冻结，不控制运行状态：
+
+```text
+Task DAG + Placement 先验 + 恢复合同
+→ 固定种子 Monte Carlo
+→ 五种互斥 Outcome
+→ 质量 / 成本 / 时间 P50、P95
+→ OOD、置信度、关键误放与主要失败模式
+```
+
+运行终止后生成一个幂等 `OutcomeRecord`，要求模型、Prompt、工具、策略、数据和计划版本归因完整率为 100%。能力后验按四级键更新：
+
+```text
+model × task × risk
+→ model × task
+→ model
+→ global
+```
+
+样本达到门槛前只进行有限权重校准；单次运行不会直接修改生产路由。`forecast_snapshots` 保存执行前预测，`outcomes` 保存事实标签，`capability_posteriors` 与 `forecast_calibrators` 保存可回滚统计状态，`evaluation_runs` 保存冻结基准结果。
 
 ## 0.2 Placement 与成本账本
 

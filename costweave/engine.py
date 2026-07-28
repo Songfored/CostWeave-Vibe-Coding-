@@ -13,6 +13,7 @@ from .compat_v4 import (
     artifact_dag_enabled,
     contracts_v4_enabled,
     evidence_recovery_enabled,
+    outcome_forecast_enabled,
     parallel_runtime_enabled,
     placement_v4_enabled,
     runtime_v4_enabled,
@@ -45,6 +46,7 @@ from .recovery import (
 from .router import PredictiveRouter
 from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
+from .dag_simulation import DagMonteCarlo
 
 
 @dataclass
@@ -120,8 +122,13 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "recovery_history": list(self.recovery_history),
+                "forecast": (
+                    self.control_kernel.forecast(str(self.id))
+                    if self.control_kernel is not None
+                    else None
+                ),
                 "runtime": {
-                    "schema_version": "v4.6",
+                    "schema_version": "v4.7",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -192,6 +199,7 @@ class OrchestrationEngine:
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
         self.recovery_policy = RecoveryPolicy()
+        self.forecaster = DagMonteCarlo()
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
         self.graph_compiler = GraphCompiler()
@@ -247,6 +255,24 @@ class OrchestrationEngine:
             ):
                 self._checkpoint(record, "engine.plan.placements")
                 record.control_kernel.sync_placements(record)
+            if (
+                outcome_forecast_enabled()
+                and record.control_kernel is not None
+            ):
+                forecast = self.forecaster.simulate(
+                    run_id=str(record.id),
+                    plan=plan,
+                    request=record.request,
+                    calibrated_probabilities={
+                        task.id: float(
+                            record.control_kernel.calibrated_probability(
+                                task
+                            )["probability"]
+                        )
+                        for task in plan.tasks
+                    },
+                )
+                record.control_kernel.record_forecast(forecast)
             self._recalculate_probability(record)
             self._event(
                 record,
@@ -288,6 +314,17 @@ class OrchestrationEngine:
                 self._event(record, "failed", f"运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
+            if (
+                outcome_forecast_enabled()
+                and record.control_kernel is not None
+                and record.plan is not None
+                and record.status in {
+                    RunStatus.COMPLETED,
+                    RunStatus.FAILED,
+                    RunStatus.CANCELLED,
+                }
+            ):
+                record.control_kernel.record_outcome(record)
             self._checkpoint(record, "engine.run.finished")
 
     async def resume(self, record: RunRecord) -> None:
@@ -377,6 +414,17 @@ class OrchestrationEngine:
                 self._event(record, "failed", f"恢复运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
+            if (
+                outcome_forecast_enabled()
+                and record.control_kernel is not None
+                and record.plan is not None
+                and record.status in {
+                    RunStatus.COMPLETED,
+                    RunStatus.FAILED,
+                    RunStatus.CANCELLED,
+                }
+            ):
+                record.control_kernel.record_outcome(record)
             self._checkpoint(record, "engine.recovery.finished")
 
     async def _execute_dag(
@@ -1294,6 +1342,16 @@ class RunManager:
         if self.get(run_id) is None or self.control_kernel is None:
             return []
         return self.control_kernel.failures(run_id)
+
+    def forecast(self, run_id: str) -> dict[str, Any] | None:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return None
+        return self.control_kernel.forecast(run_id)
+
+    def evaluations(self) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.evaluations()
 
     def approvals(
         self, *, status: str | None = None

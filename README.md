@@ -2,11 +2,26 @@
 
 **以端到端成本、资源准入和不可变成果为边界，可解释、可恢复且由证据验收驱动的多模型 Agent 编排原型。**
 
-CostWeave v0.4.6 把“模型说完成了”升级为“成功契约逐条得到证据证明”。系统区分关键标准与普通质量标准，按风险提升验证等级，并把失败映射为节点重试、节点升级、子图重规划或全局重规划；恢复过程同时受次数、时间与预算上限约束。
+CostWeave v0.4.7 把单一“成功概率”升级为可复现、可校准的多结局预测：首次成功、修复后成功、升级后成功、人工介入和最终失败。系统同时预测质量、成本与完成时间区间，标记分布外任务和关键误放风险，并用完整归因的 Outcome 更新分层能力后验。
 
-> v0.4.6 仍是离线决策与编排原型，不调用真实模型 API，也不读取真实 GPU 遥测。成功契约、证据验收、失败分类、恢复策略、成本模型、Placement、调度、Artifact 和持久化是真实逻辑；最终领域内容、Provider 行为和资源遥测仍由模拟器产生。
+> v0.4.7 仍是离线决策与编排原型，不调用真实模型 API。多结局仿真、评估指标、Outcome 归因、Beta 后验、成功契约、恢复和成本账本是真实逻辑；当前校准结论来自冻结仿真基准，不能等同于真实生产校准。
 
-## v0.4.6 新增：证据驱动验收与分级恢复
+## v0.4.7 新增：多结局预测、校准与评估闭环
+
+- 用五种互斥结局替代伪精确单点成功率，概率总和严格为 1
+- 显示首次、修复、升级和人工介入后的单调累计成功率
+- 可设种子的 DAG 蒙特卡洛覆盖串行、并行、恢复和共同故障因子
+- 同时输出质量、成本、完成时间 P50/P95，以及关键错误放行概率
+- 显示预测置信度、样本量、OOD 标记、OOD 原因和主要失败模式
+- `OutcomeRecord` 强制归因模型、Prompt、工具、策略、目录数据和计划版本
+- 模型能力按“模型×任务×风险 → 模型×任务 → 模型 → 全局”四级 Beta 后验学习
+- 样本不足时保守回退，不允许单次运行直接覆盖生产先验
+- 正式指标包含 Brier、ECE、Log Loss 和区间覆盖率
+- 冻结基准比较 CostWeave v0.4.7、v0.3 未校准、固定模型和人工阈值
+- 新增预测与评估 API；页面显示五结局、区间、置信度和分布外提醒
+- `COSTWEAVE_OUTCOME_FORECAST=0` 可停止新预测与学习写入，核心运行不受影响
+
+## 继承的 v0.4.6 证据驱动验收与分级恢复
 
 - 每个任务生成版本化 `SuccessContract`，明确关键标准、普通质量标准、最低分数和证据要求
 - 关键标准失败不能被其他高分标准平均掉；执行模型自评不能单独解锁关键下游
@@ -144,7 +159,14 @@ CostWeave v0.4.6 把“模型说完成了”升级为“成功契约逐条得到
 python -m costweave.server
 ```
 
-v0.4.6 默认启用证据恢复、Placement、合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭 v0.4.6 高级恢复并保留严格拒绝：
+v0.4.7 默认启用 Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭 v0.4.7 新预测与学习写入：
+
+```powershell
+$env:COSTWEAVE_OUTCOME_FORECAST="0"
+python -m costweave.server
+```
+
+只关闭 v0.4.6 高级恢复并保留严格拒绝：
 
 ```powershell
 $env:COSTWEAVE_EVIDENCE_RECOVERY="0"
@@ -331,6 +353,8 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/graph` | 读取任务依赖与 Artifact 血缘图 |
 | `GET` | `/api/v1/runs/{id}/validations` | 读取逐标准验收、证据和误验风险 |
 | `GET` | `/api/v1/runs/{id}/failures` | 读取失败分类、影响范围与恢复决策 |
+| `GET` | `/api/v1/runs/{id}/forecast` | 读取五结局、质量/成本/时间区间与 OOD |
+| `GET` | `/api/v1/evaluations` | 读取冻结基准、Brier、ECE、Log Loss 与覆盖率 |
 | `GET` | `/api/v1/runs/{id}/placements` | 读取选定与备用资源组合及成本预测 |
 | `GET` | `/api/v1/tasks/{task_id}` | 读取持久任务合同和状态 |
 | `GET` | `/api/v1/artifacts/{artifact_id}` | 校验并读取 Artifact 元数据与血缘（不返回内容） |
@@ -349,7 +373,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 204 项自动化测试。v0.4.6 新增测试覆盖成功契约、关键标准硬门、独立证据、逐标准验收、误验风险、失败分类、局部重试、节点升级、子图/全局 PlanPatch、Artifact 非相关失效为零、恢复上限、持久化、API 与功能回滚。
+当前基线为 244 项自动化测试。v0.4.7 新增测试覆盖互斥概率守恒、累计成功单调、固定种子复现、并行/串行 DAG、恢复关闭、OOD、多分位区间、Outcome 归因、Beta 后验、分层回退、历史后验参与后续预测、Brier、ECE、Log Loss、覆盖率、基准比较、持久化、API 和功能回滚。
 
 测试覆盖：
 
@@ -367,6 +391,8 @@ python -B -m unittest discover -s tests -v
 - 非阻塞审批、暂时性错误重试、启动租约恢复和调度策略回滚
 - 关键标准不可平均、自评不可解锁、失败分类与分级恢复
 - 恢复次数、尝试次数、时间、预算上限和 PlanPatch 持久化
+- 多结局概率守恒、固定种子、DAG 时间结构和分布外检测
+- Outcome 完整归因、幂等学习、四级 Beta 后验与正式评估指标
 - 页面结构、响应式基础规则和管理交互绑定
 
 ## 当前边界
@@ -376,16 +402,18 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.4.6 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.4.7 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
 - 真实外部 Provider 尚未接入，因此幂等保证目前覆盖控制状态和模拟执行；真实外部副作用仍需 Provider 幂等协议。
 - 失败分类与 PlanPatch 当前采用可审计确定性规则；尚未用真实生产失败数据完成统计校准。
+- 固定基准中的 ECE、Brier 和 95% 覆盖率只证明评估实现与仿真数据一致，不代表真实模型生产表现。
+- 当前后验只记录和校准，不根据单次 Outcome 自动修改生产路由。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-下一版本 v0.4.7 将实现校准后的多结局预测、Outcome 数据和正式评估闭环；后续媒体 DAG 与学习闭环设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
+下一版本 v0.4.8 将实现图像、视频和 AI 电影的媒体制作 DAG、提示词编译、镜头并行与局部返工；总体设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
 
-为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.6 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
+为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.7 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 
 ## License
 

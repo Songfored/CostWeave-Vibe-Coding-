@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.4.6"
-description = "Evidence-validated recoverable multi-model decision orchestrator"
+version = "0.4.7"
+description = "Calibrated outcome forecasting and evaluation for multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

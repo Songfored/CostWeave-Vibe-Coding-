@@ -461,6 +461,25 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .secondary-button:hover { border-color: rgba(255, 142, 135, .4); background: rgba(255, 255, 255, .05); }
 .secondary-button.subtle { color: var(--muted); }
 
+.forecast-card {
+  padding: 18px;
+  background: linear-gradient(135deg, rgba(58, 118, 150, .13), rgba(14, 38, 44, .55));
+  border: 1px solid rgba(106, 199, 232, .2);
+  border-radius: 16px;
+}
+.forecast-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.forecast-heading h3 { margin: 5px 0 0; font-size: 19px; }
+#forecast-confidence { color: var(--blue); font-size: 11px; font-weight: 750; }
+.forecast-probabilities { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; margin-top: 14px; }
+.forecast-probabilities article { padding: 10px; background: rgba(3, 12, 14, .35); border: 1px solid rgba(150, 218, 235, .12); border-radius: 11px; }
+.forecast-probabilities span { display: block; color: var(--muted); font-size: 10px; }
+.forecast-probabilities strong { display: block; margin-top: 4px; font-size: 20px; }
+.forecast-probabilities [data-outcome="final_failure"] strong { color: var(--danger); }
+.forecast-intervals { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.forecast-intervals span { padding: 6px 8px; color: var(--soft); background: rgba(255, 255, 255, .025); border-radius: 8px; font-size: 11px; }
+.forecast-intervals b { margin-right: 5px; color: var(--muted); }
+#forecast-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+
 .outcome-card {
   padding: 22px;
   background:
@@ -712,6 +731,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 
 @media (max-width: 700px) {
+  .forecast-probabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topbar, main, footer { width: min(100% - 28px, 1380px); }
   .topbar { min-height: 64px; gap: 12px; }
   .runtime { font-size: 11px; }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.4.6 证据驱动验收与分级恢复多模型智能编排原型">
+  <meta name="description" content="CostWeave v0.4.7 多结局预测、校准与正式评估多模型智能编排原型">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
   <link rel="stylesheet" href="/styles.css">
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.4.6 Evidence Recovery</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.4.7 Outcome Forecast</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,9 +29,9 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">EVIDENCE-DRIVEN ORCHESTRATOR · V0.4.6</p>
+        <p class="eyebrow">CALIBRATED OUTCOME ORCHESTRATOR · V0.4.7</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
-        <p class="hero-copy">输入目标后，总指挥先建立关键成功标准与证据合同，再按风险分配验收强度；失败时只修复受影响节点或子图，并受恢复次数、时间和预算上限约束。</p>
+        <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
       <div class="hero-proof" aria-label="产品特性">
         <span><b>01</b> 执行前判断</span>
@@ -131,6 +131,19 @@
               <button id="edit-and-retry" class="secondary-button" type="button">调整参数</button>
               <button id="retry-run" class="secondary-button subtle" type="button">按当前配置重试</button>
             </div>
+          </section>
+
+          <section id="forecast-card" class="forecast-card hidden" aria-labelledby="forecast-title">
+            <div class="forecast-heading">
+              <div>
+                <span class="section-kicker">OUTCOME FORECAST</span>
+                <h3 id="forecast-title">多结局预测</h3>
+              </div>
+              <span id="forecast-confidence"></span>
+            </div>
+            <div id="forecast-probabilities" class="forecast-probabilities"></div>
+            <div id="forecast-intervals" class="forecast-intervals"></div>
+            <p id="forecast-note"></p>
           </section>
 
           <section id="outcome-card" class="outcome-card hidden" aria-labelledby="outcome-title">

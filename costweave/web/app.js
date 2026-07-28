@@ -249,6 +249,7 @@ function render(run) {
   $("#metric-replan").textContent = `${metrics.replans || 0} 次重规划`;
 
   renderRunError(run);
+  renderForecast(run.forecast);
   if (!run.plan) return;
 
   $("#difficulty").textContent = `L${run.plan.difficulty} / 10`;
@@ -290,6 +291,36 @@ function render(run) {
   renderTimeline(run.events || []);
   const selected = run.plan.tasks.find((task) => task.id === state.selectedTaskId) || run.plan.tasks[0];
   renderContract(selected);
+}
+
+function renderForecast(forecast) {
+  const card = $("#forecast-card");
+  if (!forecast) {
+    card.classList.add("hidden");
+    return;
+  }
+  const labels = {
+    first_pass_success: "首次成功",
+    success_after_repair: "修复后成功",
+    success_after_upgrade: "升级后成功",
+    human_intervention: "人工介入",
+    final_failure: "最终失败",
+  };
+  $("#forecast-probabilities").innerHTML = Object.entries(forecast.probabilities || {})
+    .map(([key, value]) => `<article data-outcome="${escapeHtml(key)}"><span>${escapeHtml(labels[key] || key)}</span><strong>${Math.round(Number(value) * 100)}%</strong></article>`)
+    .join("");
+  $("#forecast-intervals").innerHTML = [
+    ["质量", `${Math.round(Number(forecast.quality?.p50 || 0) * 100)}% / ${Math.round(Number(forecast.quality?.p95 || 0) * 100)}%`],
+    ["成本 P50 / P95", `$${Number(forecast.cost?.p50 || 0).toFixed(4)} / $${Number(forecast.cost?.p95 || 0).toFixed(4)}`],
+    ["时间 P50 / P95", `${Number(forecast.completion_seconds?.p50 || 0).toFixed(2)}s / ${Number(forecast.completion_seconds?.p95 || 0).toFixed(2)}s`],
+    ["关键误放", `${(Number(forecast.critical_false_pass_probability || 0) * 100).toFixed(2)}%`],
+  ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  $("#forecast-confidence").textContent = `预测置信 ${Math.round(Number(forecast.confidence || 0) * 100)}% · ${Number(forecast.sample_size || 0)} 次仿真`;
+  const ood = forecast.out_of_distribution
+    ? `分布外提醒：${(forecast.ood_reasons || []).join("、")}`
+    : "当前任务位于已知策略范围内";
+  $("#forecast-note").textContent = `${ood} · 固定种子 ${forecast.seed} · ${forecast.policy_revision}`;
+  card.classList.remove("hidden");
 }
 
 function renderArtifacts(run) {

@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.6."""
+"""Persistent command/event/projection owner for CostWeave v0.4.7."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ from .graph_compiler import GraphCompiler
 from .messages import MessageEnvelope
 from .placements import PlacementStore
 from .recovery import EvidenceRecoveryStore
+from .outcome_store import OutcomeStore
+from .calibration import HierarchicalCalibrator
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
 from .reservations import ReservationManager
 from .state_guard import is_terminal, validate_transition
@@ -36,6 +38,8 @@ class ControlKernel:
         self.approval_store = ApprovalStore(self.store.path)
         self.placement_store = PlacementStore(self.store.path)
         self.evidence_store = EvidenceRecoveryStore(self.store.path)
+        self.outcome_store = OutcomeStore(self.store.path)
+        self.calibrator = HierarchicalCalibrator()
         self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
@@ -268,6 +272,7 @@ class ControlKernel:
         from .compat_v4 import (
             artifact_dag_enabled,
             evidence_recovery_enabled,
+            outcome_forecast_enabled,
             parallel_runtime_enabled,
             placement_v4_enabled,
         )
@@ -278,10 +283,12 @@ class ControlKernel:
             **self.reservations.counts(),
             **self.placement_store.counts(),
             **self.evidence_store.counts(),
+            **self.outcome_store.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
             "placement_v4": placement_v4_enabled(),
             "evidence_recovery": evidence_recovery_enabled(),
+            "outcome_forecast": outcome_forecast_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
@@ -472,6 +479,32 @@ class ControlKernel:
                 for item in approvals
             ),
         }
+
+    def record_forecast(self, forecast: Any) -> None:
+        self.outcome_store.record_forecast(forecast)
+
+    def calibrated_probability(self, task: Any) -> dict[str, Any]:
+        candidates = self.outcome_store.capabilities.candidates(
+            model_id=task.selected_worker or "unassigned",
+            task_type=task.task_type,
+            risk_level=task.risk_level,
+        )
+        return self.calibrator.calibrate(
+            task.predicted_success,
+            candidates,
+        )
+
+    def forecast(self, run_id: str) -> dict[str, Any] | None:
+        return self.outcome_store.forecast(run_id)
+
+    def record_outcome(self, record: Any) -> dict[str, Any]:
+        return self.outcome_store.record_outcome(record).to_dict()
+
+    def outcomes(self) -> list[dict[str, Any]]:
+        return self.outcome_store.outcomes()
+
+    def evaluations(self) -> list[dict[str, Any]]:
+        return self.outcome_store.evaluations()
 
     def sync_placements(self, record: Any) -> int:
         if record.plan is None:
