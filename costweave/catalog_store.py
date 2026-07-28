@@ -528,10 +528,18 @@ class CatalogStore:
             document = json.loads(self.path.read_text(encoding="utf-8"))
             models = [model_from_payload(item) for item in document["models"]]
             self._validate_catalog(models)
-        except (OSError, KeyError, TypeError, json.JSONDecodeError, CatalogError) as exc:
+            revision = max(1, int(document.get("revision", 1)))
+        except (
+            OSError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+            CatalogError,
+        ) as exc:
             raise CatalogError(f"无法加载模型目录 {self.path.name}：{exc}") from exc
         self._models = {item.id: item for item in models}
-        self._revision = max(1, int(document.get("revision", 1)))
+        self._revision = revision
         self._updated_at = str(document.get("updated_at") or _utc_now())
         self._source_note = str(document.get("source_note") or "从持久化目录加载")
 

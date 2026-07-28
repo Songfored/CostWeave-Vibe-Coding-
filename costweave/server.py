@@ -4,6 +4,7 @@ import argparse
 import json
 import mimetypes
 import posixpath
+import socket
 from dataclasses import fields
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +23,7 @@ from .compat_v4 import contract_health, runtime_v4_enabled
 from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
 from .event_store import IdempotencyConflictError, RevisionConflictError
+from .runtime_maintenance import RuntimeMaintenance
 
 
 MANAGER: RunManager | None = None
@@ -36,6 +38,10 @@ class RequestError(ValueError):
 
 
 class CostWeaveServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 64
+
     def server_close(self) -> None:
         manager = getattr(self, "manager", None)
         if manager is not None:
@@ -44,7 +50,12 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.8"
+    server_version = "CostWeave/0.4.9"
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(10.0)
+        self._legacy_api = False
 
     @property
     def manager(self) -> RunManager:
@@ -59,7 +70,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = self._normalise_api_path(parsed.path)
         if path == "/api/health":
             runtime_health = self.manager.health()
             contracts = contract_health()
@@ -107,6 +118,25 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     {"error": "unsupported_format", "message": "format 必须是 json 或 csv"},
                     HTTPStatus.BAD_REQUEST,
                 )
+            return
+        if path == "/api/v1/system/diagnostics":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            maintenance = RuntimeMaintenance(kernel.store.path)
+            self._json({
+                "runtime": maintenance.diagnostics(),
+                "backups": maintenance.list_backups(),
+                "security": {
+                    "listener": "loopback-only",
+                    "request_timeout_seconds": 10,
+                    "artifact_access": "metadata-only",
+                },
+            })
             return
         if path in {"/api/runs", "/api/v1/runs"}:
             self._json({"runs": self.manager.list()})
@@ -368,7 +398,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._static(path)
 
     def do_POST(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        path = self._normalise_api_path(urlparse(self.path).path)
+        if path == "/api/v1/system/backups":
+            self._create_runtime_backup()
+            return
         if path == "/api/v1/runs":
             self._create_run(v1=True)
             return
@@ -421,7 +454,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
 
     def do_PUT(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        path = self._normalise_api_path(urlparse(self.path).path)
         prefix = "/api/catalog/models/"
         if not path.startswith(prefix):
             self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -453,6 +486,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        parsed = parsed._replace(path=self._normalise_api_path(parsed.path))
         prefix = "/api/catalog/models/"
         if not parsed.path.startswith(prefix):
             self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -614,7 +648,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "idempotency_key_required",
                 )
             self._json(
-                self.manager.approve_media_project(run_id),
+                self.manager.approve_media_project(
+                    run_id,
+                    idempotency_key=self.headers.get("Idempotency-Key"),
+                ),
                 HTTPStatus.ACCEPTED,
             )
         except KeyError:
@@ -642,7 +679,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "idempotency_key_required",
                 )
             self._json(
-                self.manager.approve_media_shot(shot_id),
+                self.manager.approve_media_shot(
+                    shot_id,
+                    idempotency_key=self.headers.get("Idempotency-Key"),
+                ),
                 HTTPStatus.ACCEPTED,
             )
         except KeyError:
@@ -807,6 +847,20 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "cross_origin_forbidden",
                 )
 
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            raise RequestError(
+                "cross-site write requests are forbidden",
+                HTTPStatus.FORBIDDEN,
+                "cross_origin_forbidden",
+            )
+        host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
+        if host and host not in {"127.0.0.1", "localhost", "::1"}:
+            raise RequestError(
+                "invalid local Host header",
+                HTTPStatus.FORBIDDEN,
+                "host_forbidden",
+            )
+
     def _read_json(self, *, max_bytes: int = 64_000) -> object:
         if self.headers.get("Transfer-Encoding"):
             raise ValueError("不支持分块请求体")
@@ -822,8 +876,61 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             raise ValueError("Content-Length不能为负数")
         if length > max_bytes:
             raise ValueError("请求体过大")
-        raw = self.rfile.read(length)
-        return json.loads(raw or b"{}")
+        try:
+            raw = self.rfile.read(length)
+        except (TimeoutError, socket.timeout) as exc:
+            raise RequestError(
+                "request body timed out",
+                HTTPStatus.REQUEST_TIMEOUT,
+                "request_timeout",
+            ) from exc
+        if len(raw) != length:
+            raise ValueError("request body ended before Content-Length")
+        payload = json.loads(raw or b"{}")
+        self._validate_json_shape(payload)
+        return payload
+
+    @staticmethod
+    def _validate_json_shape(value: object) -> None:
+        nodes = 0
+        stack: list[tuple[object, int]] = [(value, 1)]
+        while stack:
+            current, depth = stack.pop()
+            nodes += 1
+            if nodes > 10_000:
+                raise ValueError("JSON contains too many values")
+            if depth > 32:
+                raise ValueError("JSON nesting is too deep")
+            if isinstance(current, dict):
+                stack.extend((item, depth + 1) for item in current.values())
+            elif isinstance(current, list):
+                stack.extend((item, depth + 1) for item in current)
+
+    def _normalise_api_path(self, path: str) -> str:
+        self._legacy_api = (
+            path.startswith("/api/")
+            and not path.startswith("/api/v1/")
+            and path != "/api/health"
+        )
+        if path == "/api/v1/catalog":
+            return "/api/catalog"
+        if path.startswith("/api/v1/catalog/"):
+            return "/api/catalog/" + path.removeprefix("/api/v1/catalog/")
+        return path
+
+    def _security_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+        )
+        if self._legacy_api:
+            self.send_header("Deprecation", "true")
+            self.send_header("Sunset", "Wed, 31 Dec 2026 23:59:59 GMT")
+            self.send_header("Link", '</api/v1>; rel="successor-version"')
 
     def _json(
         self,
@@ -835,6 +942,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -848,8 +956,37 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         )
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def _create_runtime_backup(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=8_000)
+            if payload.get("confirm") != "BACKUP":
+                raise ValueError("confirm must equal BACKUP")
+            if not self.headers.get("Idempotency-Key"):
+                raise RequestError(
+                    "backup requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            result = RuntimeMaintenance(kernel.store.path).create_backup()
+            self._json(result, HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "backup_failed", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def _static(self, request_path: str) -> None:
         if "\\" in request_path or ".." in request_path.split("/"):
@@ -870,6 +1007,11 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             f"{mime or 'application/octet-stream'}; charset=utf-8",
         )
         self.send_header("Content-Length", str(len(data)))
+        self.send_header(
+            "Cache-Control",
+            "no-cache" if clean == "index.html" else "public, max-age=300",
+        )
+        self._security_headers()
         self.end_headers()
         self.wfile.write(data)
 
@@ -903,7 +1045,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.8 Media Workflow prototype"
+        description="Run the CostWeave v0.4.9 hardened orchestration prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

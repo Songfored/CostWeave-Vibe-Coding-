@@ -1,4 +1,4 @@
-"""SQLite event store and deterministic projections for CostWeave v0.4.8."""
+"""SQLite event store and deterministic projections for CostWeave v0.4.9."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .contracts_v4 import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = "v4.8"
+RUNTIME_SCHEMA_VERSION = "v4.9"
 
 
 class EventStoreError(RuntimeError):
@@ -121,6 +121,7 @@ class EventStore:
                 (5, "005_evidence_recovery.sql"),
                 (6, "006_outcome_evaluation.sql"),
                 (7, "007_media_workflow.sql"),
+                (8, "008_release_hardening.sql"),
             ):
                 sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
                 checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
@@ -140,6 +141,25 @@ class EventStore:
                     "VALUES(?,?,?)",
                     (version, checksum, utc_now()),
                 )
+            self._backfill_event_integrity(connection)
+
+    @staticmethod
+    def _backfill_event_integrity(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT event_id,payload_json,envelope_json FROM events "
+            "WHERE event_id NOT IN (SELECT event_id FROM event_integrity)"
+        ).fetchall()
+        for row in rows:
+            connection.execute(
+                "INSERT INTO event_integrity(event_id,payload_hash,envelope_hash,"
+                "recorded_at) VALUES(?,?,?,?)",
+                (
+                    row["event_id"],
+                    _state_hash(str(row["payload_json"])),
+                    _state_hash(str(row["envelope_json"])),
+                    utc_now(),
+                ),
+            )
 
     def health(self) -> dict[str, Any]:
         with self._connection() as connection:
@@ -173,12 +193,18 @@ class EventStore:
         key = validate_idempotency_key(idempotency_key)
         fingerprint = command_fingerprint(command)
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT request_hash,result_json FROM commands WHERE command_id=? OR idempotency_key=?",
+            rows = connection.execute(
+                "SELECT command_id,idempotency_key,request_hash,result_json "
+                "FROM commands WHERE command_id=? OR idempotency_key=?",
                 (command.command_id, key),
-            ).fetchone()
-        if row is None:
+            ).fetchall()
+        if not rows:
             return None
+        if len(rows) != 1:
+            raise IdempotencyConflictError(
+                "command_id and idempotency key refer to different commands"
+            )
+        row = rows[0]
         if row["request_hash"] != fingerprint:
             raise IdempotencyConflictError(
                 "command_id or idempotency key was reused for different content"
@@ -214,10 +240,16 @@ class EventStore:
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                existing = connection.execute(
-                    "SELECT command_id, request_hash, result_json FROM commands WHERE command_id=? OR idempotency_key=?",
+                existing_rows = connection.execute(
+                    "SELECT command_id,idempotency_key,request_hash,result_json "
+                    "FROM commands WHERE command_id=? OR idempotency_key=?",
                     (command.command_id, key),
-                ).fetchone()
+                ).fetchall()
+                if len(existing_rows) > 1:
+                    raise IdempotencyConflictError(
+                        "command_id and idempotency key refer to different commands"
+                    )
+                existing = existing_rows[0] if existing_rows else None
                 if existing is not None:
                     if existing["request_hash"] != fingerprint:
                         raise IdempotencyConflictError(
@@ -256,6 +288,8 @@ class EventStore:
                 for offset, event in enumerate(event_list, start=1):
                     revision = actual + offset
                     attempt_id = (attempt_ids or {}).get(event.event_id)
+                    payload_json = _canonical_json(event.to_dict()["payload"])
+                    envelope_json = event.to_json()
                     connection.execute(
                         "INSERT INTO events(event_id,run_id,stream_revision,task_id,attempt_id,command_id,schema_version,kind,occurred_at,source,payload_json,envelope_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
@@ -269,8 +303,18 @@ class EventStore:
                             event.kind,
                             event.occurred_at,
                             event.source,
-                            _canonical_json(event.to_dict()["payload"]),
-                            event.to_json(),
+                            payload_json,
+                            envelope_json,
+                        ),
+                    )
+                    connection.execute(
+                        "INSERT INTO event_integrity(event_id,payload_hash,"
+                        "envelope_hash,recorded_at) VALUES(?,?,?,?)",
+                        (
+                            event.event_id,
+                            _state_hash(payload_json),
+                            _state_hash(envelope_json),
+                            now,
                         ),
                     )
                 for update in updates:
@@ -406,18 +450,32 @@ class EventStore:
     ) -> list[dict[str, Any]]:
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT stream_revision,command_id,attempt_id,envelope_json FROM events WHERE run_id=? AND stream_revision>? ORDER BY stream_revision LIMIT ?",
+                "SELECT e.stream_revision,e.command_id,e.attempt_id,"
+                "e.payload_json,e.envelope_json,i.payload_hash,i.envelope_hash "
+                "FROM events e LEFT JOIN event_integrity i USING(event_id) "
+                "WHERE e.run_id=? AND e.stream_revision>? "
+                "ORDER BY e.stream_revision LIMIT ?",
                 (run_id, max(0, int(after_revision)), max(1, min(int(limit), 1000))),
             ).fetchall()
-        return [
-            {
+        result = []
+        for row in rows:
+            revision = int(row["stream_revision"])
+            if (
+                row["payload_hash"] is None
+                or row["envelope_hash"] is None
+                or _state_hash(str(row["payload_json"])) != row["payload_hash"]
+                or _state_hash(str(row["envelope_json"])) != row["envelope_hash"]
+            ):
+                raise ProjectionIntegrityError(
+                    f"event integrity check failed at revision {revision}"
+                )
+            result.append({
                 **json.loads(row["envelope_json"]),
-                "revision": int(row["stream_revision"]),
+                "revision": revision,
                 "command_id": row["command_id"],
                 "attempt_id": row["attempt_id"],
-            }
-            for row in rows
-        ]
+            })
+        return result
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:
@@ -444,7 +502,10 @@ class EventStore:
 
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT stream_revision,payload_json FROM events WHERE run_id=? ORDER BY stream_revision",
+                "SELECT e.event_id,e.stream_revision,e.payload_json,e.envelope_json,"
+                "i.payload_hash,i.envelope_hash FROM events e "
+                "LEFT JOIN event_integrity i USING(event_id) "
+                "WHERE e.run_id=? ORDER BY e.stream_revision",
                 (run_id,),
             ).fetchall()
         state: dict[str, Any] | None = None
@@ -455,6 +516,15 @@ class EventStore:
             if actual != expected:
                 raise ProjectionIntegrityError(
                     f"event stream revision gap: expected {expected}, got {actual}"
+                )
+            if (
+                row["payload_hash"] is None
+                or row["envelope_hash"] is None
+                or _state_hash(str(row["payload_json"])) != row["payload_hash"]
+                or _state_hash(str(row["envelope_json"])) != row["envelope_hash"]
+            ):
+                raise ProjectionIntegrityError(
+                    f"event integrity check failed at revision {actual}"
                 )
             payload = json.loads(row["payload_json"])
             projection = payload.get("projection")

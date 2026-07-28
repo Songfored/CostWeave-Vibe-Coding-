@@ -59,6 +59,7 @@ class ReservationManager:
 
     def register_pool(self, pool: ResourcePool) -> None:
         with self._lock, self._connection() as connection:
+            self._expire_leases(connection)
             connection.execute(
                 "INSERT INTO resource_pools(pool_id,provider,local,"
                 "slots_total,cpu_cores_total,gpu_count_total,vram_mb_total,"
@@ -118,7 +119,8 @@ class ReservationManager:
             )
 
     def availability(self, pool_id: str) -> dict[str, Any]:
-        with self._connection() as connection:
+        with self._lock, self._connection() as connection:
+            self._expire_leases(connection)
             pool = connection.execute(
                 "SELECT * FROM resource_pools WHERE pool_id=?", (pool_id,)
             ).fetchone()
@@ -170,6 +172,7 @@ class ReservationManager:
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                self._expire_leases(connection)
                 existing = connection.execute(
                     "SELECT rr.*,cr.amount FROM resource_reservations rr "
                     "JOIN cost_reservations cr USING(reservation_id) "
@@ -177,6 +180,21 @@ class ReservationManager:
                     (reservation_id,),
                 ).fetchone()
                 if existing is not None:
+                    if existing["status"] != "active":
+                        raise ReservationError(
+                            "reservation attempt was already released or expired"
+                        )
+                    if (
+                        existing["run_id"] != run_id
+                        or existing["task_id"] != canonical_task
+                        or int(existing["attempt"]) != int(attempt)
+                        or existing["pool_id"] != pool.pool_id
+                        or abs(float(existing["amount"]) - float(estimated_cost))
+                        > 1e-9
+                    ):
+                        raise ReservationError(
+                            "reservation identity was reused for different content"
+                        )
                     connection.rollback()
                     return Reservation(
                         reservation_id,
@@ -330,7 +348,8 @@ class ReservationManager:
         return result
 
     def summary(self, run_id: str) -> dict[str, Any]:
-        with self._connection() as connection:
+        with self._lock, self._connection() as connection:
+            self._expire_leases(connection)
             row = connection.execute(
                 "SELECT COUNT(*) total,"
                 "COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) active "
@@ -350,6 +369,31 @@ class ReservationManager:
             "reserved_cost": float(costs["reserved"]),
             "released_actual_cost": float(costs["actual"]),
         }
+
+    @staticmethod
+    def _expire_leases(connection: sqlite3.Connection) -> int:
+        now = utc_now()
+        rows = connection.execute(
+            "SELECT reservation_id FROM resource_reservations "
+            "WHERE status='active' AND lease_expires_at<=?",
+            (now,),
+        ).fetchall()
+        if not rows:
+            return 0
+        ids = [str(row["reservation_id"]) for row in rows]
+        placeholders = ",".join("?" for _ in ids)
+        connection.execute(
+            f"UPDATE resource_reservations SET status='expired',"
+            f"released_at=?,release_reason='lease-expired' "
+            f"WHERE reservation_id IN ({placeholders})",
+            (now, *ids),
+        )
+        connection.execute(
+            f"UPDATE cost_reservations SET status='released',released_at=? "
+            f"WHERE reservation_id IN ({placeholders})",
+            (now, *ids),
+        )
+        return len(ids)
 
     def save_circuit(self, provider: str, snapshot: dict[str, Any]) -> None:
         with self._lock, self._connection() as connection:

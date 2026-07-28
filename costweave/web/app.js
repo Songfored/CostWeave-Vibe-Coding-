@@ -602,7 +602,7 @@ function renderContract(task) {
 
 async function loadCatalog(announcement = "") {
   try {
-    const response = await fetch("/api/catalog");
+    const response = await fetch("/api/v1/catalog");
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.message || "目录不可用");
     state.catalogModels = data.models || data.workers || [];
@@ -798,7 +798,7 @@ async function saveModel(event) {
   try {
     const model = modelFormPayload();
     const editing = Boolean(state.editingModelId);
-    const response = await fetch(editing ? `/api/catalog/models/${encodeURIComponent(state.editingModelId)}` : "/api/catalog/models", {
+    const response = await fetch(editing ? `/api/v1/catalog/models/${encodeURIComponent(state.editingModelId)}` : "/api/v1/catalog/models", {
       method: editing ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, expected_revision: state.catalogMetadata.catalog_revision }),
@@ -816,7 +816,7 @@ async function deleteEditingModel() {
   const model = state.catalogModels.find((item) => item.id === state.editingModelId);
   if (!model || !confirm(`确认删除“${model.name}”？历史运行不会受到影响。`)) return;
   try {
-    const response = await fetch(`/api/catalog/models/${encodeURIComponent(model.id)}?expected_revision=${encodeURIComponent(state.catalogMetadata.catalog_revision)}`, { method: "DELETE" });
+    const response = await fetch(`/api/v1/catalog/models/${encodeURIComponent(model.id)}?expected_revision=${encodeURIComponent(state.catalogMetadata.catalog_revision)}`, { method: "DELETE" });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.message || "删除失败");
     $("#model-editor").close();
@@ -835,7 +835,7 @@ async function importCatalog(event) {
   }
   try {
     const format = file.name.toLowerCase().endsWith(".csv") ? "csv" : "json";
-    const response = await fetch("/api/catalog/import", {
+    const response = await fetch("/api/v1/catalog/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -858,7 +858,7 @@ async function importCatalog(event) {
 async function resetCatalog() {
   if (!confirm("确认恢复内置模型目录？所有用户新增和修改都会被覆盖。")) return;
   try {
-    const response = await fetch("/api/catalog/reset", {
+    const response = await fetch("/api/v1/catalog/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ confirm: "RESET", expected_revision: state.catalogMetadata.catalog_revision }),
@@ -1084,8 +1084,8 @@ $("#import-models").addEventListener("click", () => {
   $("#import-errors").textContent = "";
   $("#import-dialog").showModal();
 });
-$("#export-models").addEventListener("click", () => { location.href = "/api/catalog/export?format=json"; });
-$("#export-models-csv").addEventListener("click", () => { location.href = "/api/catalog/export?format=csv"; });
+$("#export-models").addEventListener("click", () => { location.href = "/api/v1/catalog/export?format=json"; });
+$("#export-models-csv").addEventListener("click", () => { location.href = "/api/v1/catalog/export?format=csv"; });
 $("#reset-catalog").addEventListener("click", resetCatalog);
 $("#model-form").addEventListener("submit", saveModel);
 $("#delete-model").addEventListener("click", deleteEditingModel);

@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v4.8"
+PROJECTION_SCHEMA_VERSION = "v4.9"
 
 
 class ProjectionError(ValueError):

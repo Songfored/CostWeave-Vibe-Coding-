@@ -367,6 +367,30 @@ class MediaRuntime:
         self,
         run_id: str,
         *,
+        idempotency_key: str | None = None,
+        fail_shot_id: str | None = None,
+        failure_kind: str = "identity",
+    ) -> dict[str, Any]:
+        with self._lock:
+            replay = self._media_command_replay(
+                idempotency_key, "approve_project", run_id
+            )
+            if replay is not None:
+                return replay
+            result = self._approve_project_once(
+                run_id,
+                fail_shot_id=fail_shot_id,
+                failure_kind=failure_kind,
+            )
+            self._record_media_command(
+                idempotency_key, "approve_project", run_id, result
+            )
+            return result
+
+    def _approve_project_once(
+        self,
+        run_id: str,
+        *,
         fail_shot_id: str | None = None,
         failure_kind: str = "identity",
     ) -> dict[str, Any]:
@@ -426,7 +450,22 @@ class MediaRuntime:
             )
         return self.project(run_id) or {}
 
-    def approve_shot(self, shot_id: str) -> dict[str, Any]:
+    def approve_shot(
+        self, shot_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        with self._lock:
+            replay = self._media_command_replay(
+                idempotency_key, "approve_shot", shot_id
+            )
+            if replay is not None:
+                return replay
+            result = self._approve_shot_once(shot_id)
+            self._record_media_command(
+                idempotency_key, "approve_shot", shot_id, result
+            )
+            return result
+
+    def _approve_shot_once(self, shot_id: str) -> dict[str, Any]:
         with self._connection() as connection:
             row = connection.execute(
                 "SELECT project_id FROM shot_contracts WHERE shot_id=?",
@@ -450,6 +489,48 @@ class MediaRuntime:
         if not self._accepted_final_exists(project.project_id, shot_id):
             self._render_final(project, shot, approved=True)
         return self.shot(shot_id) or {}
+
+    def _media_command_replay(
+        self,
+        key: str | None,
+        operation: str,
+        target_id: str,
+    ) -> dict[str, Any] | None:
+        if key is None:
+            return None
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT operation,target_id,result_json FROM media_commands "
+                "WHERE idempotency_key=?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        if row["operation"] != operation or row["target_id"] != target_id:
+            raise ValueError("media idempotency key was reused for another command")
+        return json.loads(row["result_json"])
+
+    def _record_media_command(
+        self,
+        key: str | None,
+        operation: str,
+        target_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        if key is None:
+            return
+        with self._connection() as connection:
+            connection.execute(
+                "INSERT INTO media_commands(idempotency_key,operation,target_id,"
+                "result_json,completed_at) VALUES(?,?,?,?,?)",
+                (
+                    key,
+                    operation,
+                    target_id,
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    utc_now(),
+                ),
+            )
 
     def _hydrate_project(self, data: dict[str, Any]) -> MediaProject:
         from .media.bibles import (
@@ -506,14 +587,17 @@ class MediaRuntime:
     def _previous_artifact(
         self, project: MediaProject, shot: ShotContract
     ) -> dict[str, Any] | None:
-        if not shot.reference_dependencies:
+        previous_id = shot.generation_policy.get("boundary_predecessor")
+        if previous_id is None and shot.reference_dependencies:
+            previous_id = shot.reference_dependencies[-1]
+        if previous_id is None:
             return None
-        previous_id = shot.reference_dependencies[-1]
         with self._connection() as connection:
             row = connection.execute(
                 "SELECT artifact_json FROM media_render_attempts "
-                "WHERE project_id=? AND shot_id=? AND stage='final' "
-                "AND status='accepted' ORDER BY attempt DESC LIMIT 1",
+                "WHERE project_id=? AND shot_id=? AND stage IN ('final','animatic') "
+                "AND status='accepted' ORDER BY "
+                "CASE stage WHEN 'final' THEN 0 ELSE 1 END,attempt DESC LIMIT 1",
                 (project.project_id, previous_id),
             ).fetchone()
         return json.loads(row["artifact_json"]) if row else None

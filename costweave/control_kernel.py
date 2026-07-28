@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.8."""
+"""Persistent command/event/projection owner for CostWeave v0.4.9."""
 
 from __future__ import annotations
 
@@ -523,11 +523,19 @@ class ControlKernel:
     def media_shots(self, run_id: str) -> list[dict[str, Any]]:
         return self.media_runtime.shots(run_id)
 
-    def approve_media_shot(self, shot_id: str) -> dict[str, Any]:
-        return self.media_runtime.approve_shot(shot_id)
+    def approve_media_shot(
+        self, shot_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        return self.media_runtime.approve_shot(
+            shot_id, idempotency_key=idempotency_key
+        )
 
-    def approve_media_project(self, run_id: str) -> dict[str, Any]:
-        return self.media_runtime.approve_project(run_id)
+    def approve_media_project(
+        self, run_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        return self.media_runtime.approve_project(
+            run_id, idempotency_key=idempotency_key
+        )
 
     def sync_placements(self, record: Any) -> int:
         if record.plan is None:

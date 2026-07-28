@@ -226,6 +226,7 @@ class PlacementStore:
                     ),
                     placement=placement,
                     phase="actual",
+                    attempt=max(1, int(getattr(task, "attempt", 1))),
                 )
                 connection.commit()
             except Exception:
@@ -240,12 +241,14 @@ class PlacementStore:
         task_id: str,
         placement: dict[str, Any],
         phase: str,
+        attempt: int | None = None,
     ) -> None:
         components = placement["forecast_cost"]["p50"]
         for category in COST_CATEGORIES:
             amount = float(components.get(category, 0.0))
             attribution = (
                 f"{run_id}:{task_id}:{phase}:"
+                f"{attempt if attempt is not None else 'plan'}:"
                 f"{placement['placement_id']}:{category}"
             )
             entry_id = "ledger_" + hashlib.sha256(

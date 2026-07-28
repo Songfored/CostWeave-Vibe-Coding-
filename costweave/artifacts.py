@@ -154,6 +154,12 @@ class Artifact:
             "attempt": self.attempt,
             "created_at": self.created_at,
             "sensitivity": self.sensitivity,
+            "content_included": bool(include_content),
+            "access_policy": (
+                "internal-runtime"
+                if include_content
+                else "metadata-only"
+            ),
         }
         if include_content:
             payload["content"] = copy.deepcopy(dict(self.content))

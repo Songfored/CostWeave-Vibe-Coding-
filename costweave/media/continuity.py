@@ -53,7 +53,6 @@ class ContinuityValidator:
         action = artifact.get("action") == shot.action
         boundary = (
             previous_artifact is None
-            or not shot.reference_dependencies
             or previous_artifact.get("end_state")
             == artifact.get("start_state")
         )
@@ -70,7 +69,11 @@ class ContinuityValidator:
         )
         suspects = []
         if "boundary_discontinuity" in defects:
-            suspects.extend(shot.reference_dependencies)
+            predecessor = shot.generation_policy.get("boundary_predecessor")
+            if predecessor:
+                suspects.append(str(predecessor))
+            else:
+                suspects.extend(shot.reference_dependencies)
             if next_shot_id:
                 suspects.append(next_shot_id)
         raw = {
@@ -110,4 +113,3 @@ class ContinuityValidator:
             if shot.shot_id == failed_shot_id:
                 affected.update(shot.reference_dependencies)
         return affected
-

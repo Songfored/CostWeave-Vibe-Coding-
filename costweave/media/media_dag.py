@@ -73,7 +73,7 @@ class MediaProjectBuilder:
                 if index > 1 and index % 3 == 0
                 else ()
             )
-            start_state = previous_end if dependencies else f"beat-{index}-start"
+            start_state = previous_end if index > 1 else f"beat-{index}-start"
             end_state = f"beat-{index}-end"
             shots.append(
                 ShotContract(
@@ -120,6 +120,11 @@ class MediaProjectBuilder:
                         "preview_required": profile.requires_film_dag,
                         "final_render_requires_approval": (
                             profile.strategy != "auto_director"
+                        ),
+                        "boundary_predecessor": (
+                            f"shot_{shot_prefix}_{index - 1:03d}"
+                            if index > 1
+                            else None
                         ),
                     },
                 )

@@ -134,7 +134,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v4.8",
+                    "schema_version": "v4.9",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -1395,17 +1395,25 @@ class RunManager:
             return []
         return self.control_kernel.media_shots(run_id)
 
-    def approve_media_shot(self, shot_id: str) -> dict[str, Any]:
+    def approve_media_shot(
+        self, shot_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
-        return self.control_kernel.approve_media_shot(shot_id)
+        return self.control_kernel.approve_media_shot(
+            shot_id, idempotency_key=idempotency_key
+        )
 
-    def approve_media_project(self, run_id: str) -> dict[str, Any]:
+    def approve_media_project(
+        self, run_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         if self.get(run_id) is None:
             raise KeyError(run_id)
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
-        return self.control_kernel.approve_media_project(run_id)
+        return self.control_kernel.approve_media_project(
+            run_id, idempotency_key=idempotency_key
+        )
 
     def approvals(
         self, *, status: str | None = None
