@@ -17,6 +17,7 @@ from .catalog_store import (
     CatalogError,
     CatalogStore,
 )
+from .approvals import ApprovalConflictError, ApprovalError
 from .compat_v4 import contract_health, runtime_v4_enabled
 from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
@@ -43,7 +44,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.3"
+    server_version = "CostWeave/0.4.4"
 
     @property
     def manager(self) -> RunManager:
@@ -109,6 +110,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path in {"/api/runs", "/api/v1/runs"}:
             self._json({"runs": self.manager.list()})
+            return
+        if path == "/api/v1/resources":
+            self._json({"resources": self.manager.resources()})
+            return
+        if path == "/api/v1/approvals":
+            status = parse_qs(parsed.query).get("status", [None])[0]
+            if status not in {None, "pending", "approved", "rejected"}:
+                self._json(
+                    {"error": "invalid_approval_status"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._json(
+                {"approvals": self.manager.approvals(status=status)}
+            )
             return
         if path.startswith("/api/v1/tasks/"):
             task_id = unquote(path.removeprefix("/api/v1/tasks/").strip("/"))
@@ -225,6 +241,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             if suffix.endswith("/retry"):
                 self._retry_run(suffix.removesuffix("/retry").strip("/"))
                 return
+        if path.startswith("/api/v1/approvals/") and path.endswith(
+            "/resolve"
+        ):
+            approval_id = path.removeprefix(
+                "/api/v1/approvals/"
+            ).removesuffix("/resolve").strip("/")
+            self._resolve_approval(approval_id)
+            return
         if path == "/api/runs":
             self._create_run(v1=False)
             return
@@ -313,6 +337,11 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 quality_floor=float(payload.get("quality_floor", .78)),
                 max_concurrency=int(payload.get("max_concurrency", 4)),
                 simulate_replan=simulate_replan,
+                deadline_seconds=(
+                    float(payload["deadline_seconds"])
+                    if payload.get("deadline_seconds") is not None
+                    else None
+                ),
             )
             key = self.headers.get("Idempotency-Key")
             if v1 and not key:
@@ -398,6 +427,44 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if isinstance(exc, RevisionConflictError):
             payload.update({"expected_revision": exc.expected, "current_revision": exc.actual})
         self._json(payload, HTTPStatus.CONFLICT)
+
+    def _resolve_approval(self, approval_id: str) -> None:
+        try:
+            payload = self._read_write_json()
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "审批决议必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            expected = payload.get("expected_revision")
+            if isinstance(expected, bool) or expected is None:
+                raise ValueError("expected_revision 必须是整数")
+            approval = self.manager.resolve_approval(
+                approval_id,
+                decision=str(payload.get("decision", "")),
+                note=str(payload.get("note", ""))[:2000],
+                expected_revision=int(expected),
+                idempotency_key=key,
+            )
+            self._json(approval)
+        except KeyError:
+            self._json(
+                {"error": "approval_not_found"}, HTTPStatus.NOT_FOUND
+            )
+        except ApprovalConflictError as exc:
+            self._json(
+                {"error": "approval_revision_conflict", "message": str(exc)},
+                HTTPStatus.CONFLICT,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (ApprovalError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "invalid_request", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def _catalog_create(self) -> None:
         try:
@@ -604,7 +671,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.3 Artifact Graph prototype"
+        description="Run the CostWeave v0.4.4 Parallel Runtime prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

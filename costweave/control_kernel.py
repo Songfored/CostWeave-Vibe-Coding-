@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.3."""
+"""Persistent command/event/projection owner for CostWeave v0.4.4."""
 
 from __future__ import annotations
 
@@ -10,12 +10,14 @@ from typing import Any
 from .commands import CommandKind
 from .artifact_store import ArtifactStore
 from .artifacts import Artifact, ArtifactStatus
+from .approvals import ApprovalStore
 from .contracts_v4 import CommandEnvelope, EventEnvelope, canonical_identifier, new_command_id
 from .domain import Event, RunRequest, RunStatus, TaskStatus
 from .event_store import EventStore, ProjectionUpdate
 from .graph_compiler import GraphCompiler
 from .messages import MessageEnvelope
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
+from .reservations import ReservationManager
 from .state_guard import is_terminal, validate_transition
 
 
@@ -28,6 +30,9 @@ class ControlKernel:
     def __init__(self, path: str | Path | None = None) -> None:
         self.store = EventStore(path or self.default_path())
         self.artifact_store = ArtifactStore(self.store.path)
+        self.reservations = ReservationManager(self.store.path)
+        self.approval_store = ApprovalStore(self.store.path)
+        self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
 
@@ -60,6 +65,7 @@ class ControlKernel:
                 "quality_floor": request.quality_floor,
                 "max_concurrency": request.max_concurrency,
                 "simulate_replan": request.simulate_replan,
+                "deadline_seconds": request.deadline_seconds,
                 "retry_of": retry_of,
             },
         )
@@ -244,10 +250,15 @@ class ControlKernel:
         )
 
     def health(self) -> dict[str, Any]:
+        from .compat_v4 import artifact_dag_enabled, parallel_runtime_enabled
+
         return {
             **self.store.health(),
             **self.artifact_store.counts(),
-            "artifact_dag": True,
+            **self.reservations.counts(),
+            "artifact_dag": artifact_dag_enabled(),
+            "parallel_runtime": parallel_runtime_enabled(),
+            "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
 
@@ -416,6 +427,60 @@ class ControlKernel:
                 "artifact_links": [],
             }
         return self.artifact_store.graph(str(record.id), record.plan)
+
+    def resources(self) -> list[dict[str, Any]]:
+        return self.reservations.resources()
+
+    def approvals(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        return self.approval_store.list(status=status)
+
+    def scheduling_summary(self, run_id: str) -> dict[str, Any]:
+        approvals = self.approval_store.list(run_id=run_id)
+        return {
+            **self.reservations.summary(run_id),
+            "pending_approvals": sum(
+                item["status"] == "pending" for item in approvals
+            ),
+            "resolved_approvals": sum(
+                item["status"] in {"approved", "rejected"}
+                for item in approvals
+            ),
+        }
+
+    def resolve_approval(
+        self,
+        record: Any,
+        approval_id: str,
+        *,
+        decision: str,
+        note: str,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        approval, replayed = self.approval_store.resolve(
+            approval_id,
+            decision=decision,
+            note=note,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+        )
+        if not replayed:
+            self._persist(
+                record,
+                kind=CommandKind.RECORD_EVENT,
+                event_kind="approval.resolved",
+                source="control_kernel.resolve_approval",
+                payload={
+                    "approval_id": approval_id,
+                    "decision": decision,
+                    "approval_revision": approval["revision"],
+                },
+                idempotency_key=(
+                    f"internal:{record.id}:approval:{approval_id}:"
+                    f"{approval['revision']}"
+                ),
+            )
+        return approval
 
     def _persist(
         self,

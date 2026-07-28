@@ -1,4 +1,4 @@
-"""Command helpers for the CostWeave v0.4.3 control kernel."""
+"""Command helpers for the CostWeave v0.4.x control kernel."""
 
 from __future__ import annotations
 

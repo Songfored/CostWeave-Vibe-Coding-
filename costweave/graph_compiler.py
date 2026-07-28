@@ -131,6 +131,10 @@ class GraphCompiler:
         return affected
 
     def _normalize_task_contract(self, task: TaskContract) -> None:
+        if {"image", "video"} & set(task.required_modalities):
+            task.gpu_count = max(1, task.gpu_count)
+            task.vram_mb = max(8_192, task.vram_mb)
+            task.cpu_cores = max(2.0, task.cpu_cores)
         if not task.output_artifact_specs:
             task.output_artifact_specs = [
                 {

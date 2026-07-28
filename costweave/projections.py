@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v4.3"
+PROJECTION_SCHEMA_VERSION = "v4.4"
 
 
 class ProjectionError(ValueError):
@@ -53,6 +53,7 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                 "quality_floor": record.request.quality_floor,
                 "max_concurrency": record.request.max_concurrency,
                 "simulate_replan": record.request.simulate_replan,
+                "deadline_seconds": record.request.deadline_seconds,
             },
             "status": record.status.value,
             "plan": record.plan.to_dict() if record.plan else None,
@@ -105,7 +106,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(snapshot, Mapping):
         raise ProjectionError("run projection must be an object")
     schema = snapshot.get("projection_schema_version")
-    if schema not in {None, "v4.2", PROJECTION_SCHEMA_VERSION}:
+    if schema not in {None, "v4.2", "v4.3", PROJECTION_SCHEMA_VERSION}:
         raise ProjectionError(f"unsupported projection schema: {schema}")
     request_data = dict(snapshot.get("request") or {})
     request = RunRequest(
@@ -115,6 +116,11 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         quality_floor=float(request_data.get("quality_floor", 0.78)),
         max_concurrency=int(request_data.get("max_concurrency", 4)),
         simulate_replan=bool(request_data.get("simulate_replan", False)),
+        deadline_seconds=(
+            float(request_data["deadline_seconds"])
+            if request_data.get("deadline_seconds") is not None
+            else None
+        ),
     ).normalized()
     runtime = dict(snapshot.get("runtime") or {})
     metrics = dict(snapshot.get("metrics") or {})

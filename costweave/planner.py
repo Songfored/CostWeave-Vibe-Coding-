@@ -466,8 +466,16 @@ class HeuristicPlanner:
             exclude=failed.exclude.copy(),
             priority=10,
             parallel_group="recovery",
-            difficulty=min(10, failed.difficulty + 2),
-            risk_level="high",
+            # Recovery adds diagnostic and compatibility work, but it should not
+            # automatically turn an otherwise routable task into an impossible
+            # one.  The stronger capability/risk requirements already express
+            # the escalation; a single difficulty step keeps the contract
+            # conservative without double-counting the same failure signal.
+            difficulty=min(10, failed.difficulty + 1),
+            # A failed attempt raises execution uncertainty, not necessarily the
+            # business impact of the task.  Preserve the original risk class so
+            # routing does not count the same failure again as high-stakes risk.
+            risk_level=failed.risk_level,
             required_modalities=failed.required_modalities.copy(),
             requires_tools=failed.requires_tools.copy(),
             requires_freshness=failed.requires_freshness,

@@ -11,6 +11,7 @@ from typing import Any, Callable
 from .compat_v4 import (
     artifact_dag_enabled,
     contracts_v4_enabled,
+    parallel_runtime_enabled,
     runtime_v4_enabled,
     set_run_status,
     set_task_status,
@@ -31,6 +32,7 @@ from .executor import SimulatedExecutor, utc_now
 from .graph_compiler import GraphCompiler
 from .planner import HeuristicPlanner
 from .router import PredictiveRouter
+from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
 
 
@@ -73,6 +75,7 @@ class RunRecord:
                     "quality_floor": self.request.quality_floor,
                     "max_concurrency": self.request.max_concurrency,
                     "simulate_replan": self.request.simulate_replan,
+                    "deadline_seconds": self.request.deadline_seconds,
                 },
                 "status": self.status.value,
                 "plan": self.plan.to_dict() if self.plan else None,
@@ -92,11 +95,15 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "runtime": {
-                    "schema_version": "v4.3",
+                    "schema_version": "v4.4",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
                         artifact_dag_enabled()
+                        and self.control_kernel is not None
+                    ),
+                    "parallel_runtime": (
+                        parallel_runtime_enabled()
                         and self.control_kernel is not None
                     ),
                     "recovered": self.recovered,
@@ -110,6 +117,19 @@ class RunRecord:
                     if artifact_dag_enabled()
                     and self.control_kernel is not None
                     else []
+                ),
+                "scheduling": (
+                    self.control_kernel.scheduling_summary(str(self.id))
+                    if parallel_runtime_enabled()
+                    and self.control_kernel is not None
+                    else {
+                        "reservations": 0,
+                        "active_leases": 0,
+                        "reserved_cost": 0.0,
+                        "released_actual_cost": 0.0,
+                        "pending_approvals": 0,
+                        "resolved_approvals": 0,
+                    }
                 ),
             }
             if include_internal:
@@ -143,6 +163,11 @@ class OrchestrationEngine:
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
         self.graph_compiler = GraphCompiler()
+        self.scheduler = (
+            ParallelScheduler(control_kernel)
+            if control_kernel is not None
+            else None
+        )
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
@@ -156,6 +181,11 @@ class OrchestrationEngine:
         try:
             run_router = self.router.freeze()
             record.worker_snapshot = [worker.to_dict() for worker in run_router.workers]
+            if parallel_runtime_enabled() and self.scheduler is not None:
+                self.scheduler.configure(
+                    run_router.workers,
+                    max_concurrency=record.request.max_concurrency,
+                )
             plan = self.planner.plan(record.request)
             issues = self.validator.validate_plan(plan)
             if issues:
@@ -200,12 +230,14 @@ class OrchestrationEngine:
             self._event(record, "cancelled", "运行已取消；未启动新的任务节点")
         except Exception as exc:  # final safety boundary for background runs
             if record.status != RunStatus.CANCELLED:
+                # Publish the diagnostic before the terminal state.  Readers
+                # must never observe `failed` with a transiently empty error.
+                record.error = str(exc)
                 set_run_status(
                     record,
                     RunStatus.FAILED,
                     source="engine.run.failed",
                 )
-                record.error = str(exc)
                 self._event(record, "failed", f"运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
@@ -261,6 +293,11 @@ class OrchestrationEngine:
             if workers
             else self.router.freeze()
         )
+        if parallel_runtime_enabled() and self.scheduler is not None:
+            self.scheduler.configure(
+                run_router.workers,
+                max_concurrency=record.request.max_concurrency,
+            )
         self._event(record, "recovered", "从持久事件投影恢复运行；保留已验收节点")
         try:
             await self._execute_dag(record, run_router)
@@ -283,8 +320,8 @@ class OrchestrationEngine:
             self._event(record, "cancelled", "恢复运行已取消")
         except Exception as exc:
             if record.status != RunStatus.CANCELLED:
-                set_run_status(record, RunStatus.FAILED, source="engine.recovery.failed")
                 record.error = str(exc)
+                set_run_status(record, RunStatus.FAILED, source="engine.recovery.failed")
                 self._event(record, "failed", f"恢复运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
@@ -296,6 +333,7 @@ class OrchestrationEngine:
         run_router: PredictiveRouter,
     ) -> None:
         active: dict[asyncio.Task, TaskContract] = {}
+        reservations: dict[asyncio.Task, Any] = {}
         injected = False
         try:
             while True:
@@ -319,34 +357,111 @@ class OrchestrationEngine:
                     }
                     <= validated_ids
                 ]
-                slots = record.request.max_concurrency - len(active)
-                reserved = sum(item.estimated_cost for item in active.values())
-                for task in sorted(ready, key=lambda item: item.priority, reverse=True)[:max(0, slots)]:
-                    self._raise_if_cancelled(record)
-                    if record.spent + reserved + task.estimated_cost > record.request.budget + 1e-9:
-                        raise RuntimeError(
-                            f"预算守卫拒绝启动 {task.title}：已用 ${record.spent:.4f}，"
-                            f"在途 ${reserved:.4f}，节点预计 ${task.estimated_cost:.4f}，预算 ${record.request.budget:.4f}"
-                        )
-                    set_task_status(
-                        record,
-                        task,
-                        TaskStatus.RUNNING,
-                        source="engine.task.started",
+                ordered_ready = (
+                    self.scheduler.order_ready(record.plan.tasks, ready)
+                    if parallel_runtime_enabled()
+                    and self.scheduler is not None
+                    else sorted(
+                        ready,
+                        key=lambda item: item.priority,
+                        reverse=True,
                     )
-                    task.attempt += 1
-                    task.started_at = utc_now()
-                    if artifact_dag_enabled() and record.control_kernel is not None:
-                        dependency_results = record.control_kernel.prepare_handoff(
-                            record, task
+                )
+                reserved = sum(item.estimated_cost for item in active.values())
+                for task in ordered_ready:
+                    if len(active) >= record.request.max_concurrency:
+                        break
+                    self._raise_if_cancelled(record)
+                    worker = run_router.get_worker(task.selected_worker)
+                    reservation = None
+                    if (
+                        parallel_runtime_enabled()
+                        and self.scheduler is not None
+                    ):
+                        decision = self.scheduler.start_decision(
+                            record, task, worker
                         )
-                    else:
-                        dependency_results = [
-                            item.result
-                            for item in record.plan.tasks
-                            if item.id in task.dependencies
-                            and item.result is not None
-                        ]
+                        if decision.state != "admitted":
+                            if (
+                                task.queue_state != decision.state
+                                or task.blocked_reason != decision.reason
+                            ):
+                                task.queue_state = decision.state
+                                task.blocked_reason = decision.reason
+                                event_kind = (
+                                    "approval_required"
+                                    if decision.state == "waiting_approval"
+                                    else "task_queued"
+                                )
+                                self._event(
+                                    record,
+                                    event_kind,
+                                    (
+                                        f"{task.title} 等待审批"
+                                        if decision.state
+                                        == "waiting_approval"
+                                        else f"{task.title} 进入资源队列"
+                                    ),
+                                    task.id,
+                                    {
+                                        "reason": decision.reason,
+                                        "retry_after_ms": (
+                                            decision.retry_after_ms
+                                        ),
+                                        "approval_id": task.approval_id,
+                                    },
+                                )
+                            continue
+                        reservation = decision.reservation
+                    elif (
+                        record.spent + reserved + task.estimated_cost
+                        > record.request.budget + 1e-9
+                    ):
+                        raise RuntimeError(
+                            f"预算守卫拒绝启动 {task.title}：已用 "
+                            f"${record.spent:.4f}，在途 ${reserved:.4f}，"
+                            f"节点预计 ${task.estimated_cost:.4f}，"
+                            f"预算 ${record.request.budget:.4f}"
+                        )
+                    try:
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.RUNNING,
+                            source="engine.task.started",
+                        )
+                        task.attempt += 1
+                        task.started_at = utc_now()
+                        task.queue_state = "running"
+                        task.blocked_reason = ""
+                        task.reservation_id = (
+                            reservation.reservation_id
+                            if reservation is not None
+                            else None
+                        )
+                        if (
+                            artifact_dag_enabled()
+                            and record.control_kernel is not None
+                        ):
+                            dependency_results = (
+                                record.control_kernel.prepare_handoff(
+                                    record, task
+                                )
+                            )
+                        else:
+                            dependency_results = [
+                                item.result
+                                for item in record.plan.tasks
+                                if item.id in task.dependencies
+                                and item.result is not None
+                            ]
+                    except Exception:
+                        if reservation is not None:
+                            record.control_kernel.reservations.release(
+                                reservation.reservation_id,
+                                reason="start-failed",
+                            )
+                        raise
                     should_inject = (
                         record.request.simulate_replan
                         and not injected
@@ -354,9 +469,25 @@ class OrchestrationEngine:
                     )
                     if should_inject:
                         injected = True
-                    worker = run_router.get_worker(task.selected_worker)
-                    future = asyncio.create_task(self.executor.execute(task, worker, dependency_results, should_inject))
+                    execute = lambda task=task, worker=worker, dependency_results=dependency_results, should_inject=should_inject: self.executor.execute(
+                        task, worker, dependency_results, should_inject
+                    )
+                    coroutine = (
+                        self.scheduler.execute_with_retry(
+                            execute,
+                            provider=worker.provider,
+                            on_retry=lambda attempts, task=task: setattr(
+                                task, "transient_retries", attempts
+                            ),
+                        )
+                        if parallel_runtime_enabled()
+                        and self.scheduler is not None
+                        else execute()
+                    )
+                    future = asyncio.create_task(coroutine)
                     active[future] = task
+                    if reservation is not None:
+                        reservations[future] = reservation
                     reserved += task.estimated_cost
                     self._event(
                         record,
@@ -368,6 +499,13 @@ class OrchestrationEngine:
 
                 record.peak_parallelism = max(record.peak_parallelism, len(active))
                 if not active:
+                    if ready and any(
+                        task.queue_state
+                        in {"queued", "waiting_approval"}
+                        for task in ready
+                    ):
+                        await asyncio.sleep(0.05)
+                        continue
                     blocked = [task.id for task in pending]
                     raise RuntimeError(f"DAG无法继续，阻塞节点：{blocked}")
 
@@ -375,9 +513,19 @@ class OrchestrationEngine:
                 for future in done:
                     self._raise_if_cancelled(record)
                     task = active.pop(future)
+                    reservation = reservations.pop(future, None)
                     try:
                         result = future.result()
                     except Exception as exc:
+                        if reservation is not None:
+                            record.control_kernel.reservations.release(
+                                reservation.reservation_id,
+                                reason="execution-failed",
+                                actual_cost=0.0,
+                            )
+                        task.reservation_id = None
+                        task.queue_state = "rejected"
+                        task.blocked_reason = str(exc)
                         task.finished_at = utc_now()
                         set_task_status(
                             record,
@@ -401,6 +549,13 @@ class OrchestrationEngine:
                         )
                         continue
 
+                    if reservation is not None:
+                        record.control_kernel.reservations.release(
+                            reservation.reservation_id,
+                            reason="execution-finished",
+                            actual_cost=task.estimated_cost,
+                        )
+                    task.reservation_id = None
                     task.result = result
                     task.finished_at = utc_now()
                     task.validation = self.validator.validate_result(task, result)
@@ -415,6 +570,7 @@ class OrchestrationEngine:
                         )
 
                     if task.validation["passed"]:
+                        task.queue_state = "completed"
                         set_task_status(
                             record,
                             task,
@@ -424,6 +580,7 @@ class OrchestrationEngine:
                         self._recalculate_probability(record)
                         self._event(record, "task_validated", f"{task.title} 通过 {task.validation['level']} 验收", task.id)
                     else:
+                        task.queue_state = "rejected"
                         set_task_status(
                             record,
                             task,
@@ -446,7 +603,15 @@ class OrchestrationEngine:
                 for future in active:
                     future.cancel()
                 await asyncio.gather(*active, return_exceptions=True)
-                for task in active.values():
+                for future, task in active.items():
+                    reservation = reservations.get(future)
+                    if reservation is not None:
+                        record.control_kernel.reservations.release(
+                            reservation.reservation_id,
+                            reason="runtime-cancelled",
+                            actual_cost=0.0,
+                        )
+                    task.reservation_id = None
                     if task.status == TaskStatus.RUNNING:
                         set_task_status(
                             record,
@@ -787,6 +952,44 @@ class RunManager:
         if record is None or self.control_kernel is None:
             return None
         return self.control_kernel.graph(record)
+
+    def resources(self) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.resources()
+
+    def approvals(
+        self, *, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.approvals(status=status)
+
+    def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        decision: str,
+        note: str,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        approval = self.control_kernel.approval_store.get(approval_id)
+        if approval is None:
+            raise KeyError(approval_id)
+        record = self.get(str(approval["run_id"]))
+        if record is None:
+            raise KeyError(str(approval["run_id"]))
+        return self.control_kernel.resolve_approval(
+            record,
+            approval_id,
+            decision=decision,
+            note=note,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+        )
 
     def shutdown(self, *, wait_timeout: float = 10.0) -> None:
         """Let in-flight simulated work reach a persisted checkpoint on shutdown."""

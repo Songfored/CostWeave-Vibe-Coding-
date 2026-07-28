@@ -552,6 +552,10 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .task-state::before { content: ""; width: 6px; height: 6px; background: #60716c; border-radius: 50%; }
 .task-card[data-status="running"] { border-color: rgba(244, 191, 103, .42); }
 .task-card[data-status="running"] .task-state::before { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(244, 191, 103, .08); }
+.task-card[data-queue-state="queued"] { border-color: rgba(244, 191, 103, .28); }
+.task-card[data-queue-state="queued"] .task-state { color: var(--accent-2); }
+.task-card[data-queue-state="waiting_approval"] { border-color: rgba(140, 178, 255, .38); }
+.task-card[data-queue-state="waiting_approval"] .task-state { color: #9db8ff; }
 .task-card[data-status="validated"] .task-state { color: var(--accent); }
 .task-card[data-status="validated"] .task-state::before { background: var(--accent); }
 .task-card[data-status="rejected"], .task-card[data-status="invalidated"] { border-color: rgba(255, 142, 135, .32); opacity: .76; }

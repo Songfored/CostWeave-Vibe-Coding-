@@ -20,6 +20,7 @@ from .state_guard import StateTransitionError, validate_transition
 FEATURE_FLAG = "COSTWEAVE_CONTRACTS_V4"
 RUNTIME_FEATURE_FLAG = "COSTWEAVE_RUNTIME_V4"
 ARTIFACT_FEATURE_FLAG = "COSTWEAVE_ARTIFACT_DAG"
+PARALLEL_RUNTIME_FEATURE_FLAG = "COSTWEAVE_PARALLEL_RUNTIME"
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 _TRACE_LIMIT = 2048
 _TRACE: deque[EventEnvelope] = deque(maxlen=_TRACE_LIMIT)
@@ -41,12 +42,18 @@ def artifact_dag_enabled() -> bool:
     return runtime_v4_enabled() and raw.strip().lower() not in _FALSE_VALUES
 
 
+def parallel_runtime_enabled() -> bool:
+    raw = os.environ.get(PARALLEL_RUNTIME_FEATURE_FLAG, "1")
+    return runtime_v4_enabled() and raw.strip().lower() not in _FALSE_VALUES
+
+
 def contract_health() -> dict[str, Any]:
     return {
         "contract_schema": CONTRACT_SCHEMA_VERSION,
         "features": {
             "contracts_v4": contracts_v4_enabled(),
             "artifact_dag": artifact_dag_enabled(),
+            "parallel_runtime": parallel_runtime_enabled(),
         },
         "contract_trace_persistent": False,
     }

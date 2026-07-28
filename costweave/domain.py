@@ -46,6 +46,7 @@ class RunRequest:
     quality_floor: float = 0.78
     max_concurrency: int = 4
     simulate_replan: bool = False
+    deadline_seconds: float | None = None
 
     def normalized(self) -> "RunRequest":
         return RunRequest(
@@ -55,6 +56,11 @@ class RunRequest:
             quality_floor=max(0.5, min(float(self.quality_floor), 0.99)),
             max_concurrency=max(1, min(int(self.max_concurrency), 12)),
             simulate_replan=bool(self.simulate_replan),
+            deadline_seconds=(
+                max(0.05, min(float(self.deadline_seconds), 86_400.0))
+                if self.deadline_seconds is not None
+                else None
+            ),
         )
 
 
@@ -111,6 +117,18 @@ class TaskContract:
     data_permissions: list[str] = field(
         default_factory=lambda: ["public", "internal"]
     )
+    resource_slots: int = 1
+    cpu_cores: float = 1.0
+    gpu_count: int = 0
+    vram_mb: int = 0
+    requires_approval: bool = False
+    approval_kind: str = "task-execution"
+    approval_reason: str = ""
+    approval_id: str | None = None
+    queue_state: str = "pending"
+    blocked_reason: str = ""
+    reservation_id: str | None = None
+    transient_retries: int = 0
     required_capabilities: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
     output_schema: list[str] = field(default_factory=list)

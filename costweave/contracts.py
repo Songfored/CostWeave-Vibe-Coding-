@@ -1,4 +1,4 @@
-"""Public v0.4.3 domain contract surface."""
+"""Public v0.4.x domain contract surface."""
 
 from .artifacts import Artifact, ArtifactStatus
 from .domain import TaskContract

@@ -274,6 +274,10 @@ function render(run) {
   $("#routing-summary").textContent = routing.strategy
     ? `路由：${routing.strategy} · 目录 ${routing.catalog_revision || run.plan.model_snapshot || "未知"} · 最低可行 $${Number(routing.minimum_feasible_cost_usd || 0).toFixed(4)} · 当前组合 $${Number(routing.estimated_total_cost_usd || 0).toFixed(4)} · ${routing.independent_validators || 0} 个独立验收`
     : "等待模型组合决策";
+  const scheduling = run.scheduling || {};
+  $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
+    ? `调度：关键路径优先 · 资源预留 ${Number(scheduling.reservations || 0)} 次 · 活跃租约 ${Number(scheduling.active_leases || 0)} · 在途成本 $${Number(scheduling.reserved_cost || 0).toFixed(4)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
+    : "调度：兼容模式（未启用资源感知并行运行时）";
 
   if (!state.selectedTaskId || !run.plan.tasks.some((task) => task.id === state.selectedTaskId)) {
     const finalTask = findFinalTask(run.plan.tasks);
@@ -359,10 +363,17 @@ function renderDag(tasks) {
       ${items.map((task) => `
         <button class="task-card ${task.id === state.selectedTaskId ? "selected" : ""}"
           type="button" data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}"
+          data-queue-state="${escapeHtml(task.queue_state || "pending")}"
           aria-pressed="${task.id === state.selectedTaskId}">
           <strong>${escapeHtml(task.title)}</strong>
           <small>${escapeHtml(modelLabel(task.selected_worker))}</small>
-          <span class="task-state">${escapeHtml(taskLabels[task.status] || task.status)}</span>
+          <span class="task-state">${escapeHtml(
+            task.queue_state === "waiting_approval"
+              ? "等待审批"
+              : task.queue_state === "queued"
+                ? "资源排队"
+                : taskLabels[task.status] || task.status
+          )}</span>
         </button>`).join("")}
     </div>`).join("");
 
@@ -440,6 +451,9 @@ function renderContract(task) {
       <dt>路由理由</dt><dd>${escapeHtml(task.routing_rationale || "等待路由")}</dd>
       <dt>执行预测</dt><dd>均值 ${Math.round(task.predicted_success * 100)}% · 保守下界 ${Math.round(Number(task.predicted_success_lower_bound || 0) * 100)}% · 路由置信 ${Math.round(Number(task.route_confidence || 0) * 100)}% · $${Number(task.estimated_cost || 0).toFixed(4)} · ${task.estimated_latency_ms}ms</dd>
       <dt>任务画像</dt><dd>难度 L${task.difficulty}/10 · 风险 ${escapeHtml(task.risk_level)} · 不确定性 ${Math.round(Number(task.uncertainty || 0) * 100)}% · 关键度 ${Math.round(Number(task.criticality || 0) * 100)}% · 输入约 ${task.estimated_input_tokens} tokens · 输出约 ${task.estimated_output_tokens} tokens</dd>
+      <dt>资源合同</dt><dd>${Number(task.resource_slots || 1)} 槽 · CPU ${Number(task.cpu_cores || 0)} · GPU ${Number(task.gpu_count || 0)} · VRAM ${Number(task.vram_mb || 0)} MB</dd>
+      <dt>调度状态</dt><dd>${escapeHtml(task.queue_state || "pending")}${task.blocked_reason ? ` · ${escapeHtml(task.blocked_reason)}` : ""}${task.reservation_id ? ` · ${escapeHtml(task.reservation_id)}` : ""}</dd>
+      <dt>审批</dt><dd>${task.requires_approval ? escapeHtml(task.approval_id || "等待生成审批单") : "不需要"}</dd>
       ${task.validation ? `<dt>最近验收</dt><dd>${escapeHtml(task.validation.findings.join("；"))}</dd>` : ""}
     </dl>
     <div class="candidate-list"><span>候选排序</span><ol>${candidates || "<li>暂无候选</li>"}</ol></div>
