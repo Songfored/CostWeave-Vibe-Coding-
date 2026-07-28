@@ -1,6 +1,6 @@
-# CostWeave v0.4.7 架构说明
+# CostWeave v0.4.8 架构说明
 
-CostWeave v0.4.7 是以多结局预测、Outcome 归因、成功契约、独立证据、端到端成本和不可变 Artifact 为边界，带可复现 DAG 仿真、分层 Beta 后验、确定性恢复和 SQLite EventStore 的离线多模型决策 Runtime。
+CostWeave v0.4.8 在多结局预测、证据验收、端到端成本和不可变 Artifact 基线上，加入受控媒体生产平面。媒体意图、视觉圣经、镜头合同、Prompt、渲染尝试、连续性证据和单位成果成本均可追溯；真实图片与视频生成仍由元数据仿真适配器隔离。
 
 ```text
 HTTP / RunManager Facade / Engine
@@ -33,6 +33,18 @@ FailureClassifier + RecoveryPolicy：节点 / 子图 / 全局恢复
 DagMonteCarlo + OutcomeStore：结局分布 / 归因 / 校准
                     │
                     ▼
+MediaRuntime：意图 / 圣经 / 镜头 DAG / Prompt / 审批门
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+SimulatedMediaAdapter   ContinuityValidator
+关键帧/动态预览/终稿      身份/场景/动作/边界
+          │                   │
+          └─────────┬─────────┘
+                    ▼
+MediaCostLedger：合格镜头与合格视频秒成本
+                    │
+                    ▼
 ControlKernel：状态所有权、Artifact、幂等与恢复审计
                     │
      ┌──────────────┼──────────────┬────────────┐
@@ -51,6 +63,7 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_PLACEMENT_V4=0` 关闭联合 Placement，回到 v0.3 风险调整路由。
 - `COSTWEAVE_EVIDENCE_RECOVERY=0` 关闭高级恢复并失败即终止，不放宽验收。
 - `COSTWEAVE_OUTCOME_FORECAST=0` 停止新预测和学习写入，旧预测保持可读。
+- `COSTWEAVE_MEDIA_WORKFLOW=0` 停止创建新媒体项目，通用编排、旧媒体记录和其他功能保持可用。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
 
 ## 0.3 成功契约、证据与恢复边界

@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.4.7", health["version"])
+        self.assertEqual("0.4.8", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v4.7", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v4.8", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -346,6 +346,67 @@ class ServerTests(unittest.TestCase):
         )
         self.assertEqual(200, status, resolved)
         self.assertEqual("approved", resolved["status"])
+
+    def test_v1_media_project_preview_gate_and_approval_api(self):
+        status, run = self.request_json(
+            "/api/v1/runs",
+            {
+                "goal": "制作30秒AI电影，主角必须保持一致，包含配音",
+                "budget": 3,
+                "max_concurrency": 4,
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": "server-media-create-0001",
+            },
+            method="POST",
+        )
+        self.assertEqual(202, status)
+        for _ in range(120):
+            _, current = self.fetch_json(f"/api/v1/runs/{run['id']}")
+            if current.get("media_project") is not None:
+                break
+            time.sleep(.05)
+        self.assertIsNotNone(current.get("media_project"))
+
+        status, media = self.fetch_json(
+            f"/api/v1/media/projects/{run['id']}"
+        )
+        self.assertEqual(200, status)
+        self.assertTrue(6 <= len(media["shots"]) <= 10)
+        self.assertEqual(
+            0, media["render_summary"]["final_render_attempts"]
+        )
+        _, shot_list = self.fetch_json(
+            f"/api/v1/media/projects/{run['id']}/shots"
+        )
+        self.assertEqual(len(media["shots"]), len(shot_list["shots"]))
+
+        status, missing_key = self.request_json(
+            f"/api/v1/media/projects/{run['id']}/approve",
+            {},
+            method="POST",
+        )
+        self.assertEqual(400, status)
+        self.assertEqual(
+            "idempotency_key_required", missing_key["error"]
+        )
+
+        status, approved = self.request_json(
+            f"/api/v1/media/projects/{run['id']}/approve",
+            {},
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": "server-media-approve-0001",
+            },
+            method="POST",
+        )
+        self.assertEqual(202, status, approved)
+        self.assertEqual("completed", approved["status"])
+        self.assertEqual(
+            len(approved["shots"]),
+            approved["render_summary"]["accepted_final_shots"],
+        )
 
 
 if __name__ == "__main__":

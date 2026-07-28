@@ -104,6 +104,7 @@ $("#retry-run").addEventListener("click", () => {
 
 $("#copy-result").addEventListener("click", copyResult);
 $("#download-result").addEventListener("click", downloadResult);
+$("#approve-media-project").addEventListener("click", approveMediaProject);
 
 async function createRun() {
   setSubmitState(true, "正在创建计划…");
@@ -250,6 +251,7 @@ function render(run) {
 
   renderRunError(run);
   renderForecast(run.forecast);
+  renderMediaProject(run.media_project);
   if (!run.plan) return;
 
   $("#difficulty").textContent = `L${run.plan.difficulty} / 10`;
@@ -321,6 +323,81 @@ function renderForecast(forecast) {
     : "当前任务位于已知策略范围内";
   $("#forecast-note").textContent = `${ood} · 固定种子 ${forecast.seed} · ${forecast.policy_revision}`;
   card.classList.remove("hidden");
+}
+
+function renderMediaProject(project) {
+  const card = $("#media-project-card");
+  if (!project) {
+    card.classList.add("hidden");
+    return;
+  }
+  const profile = project.profile || {};
+  const summary = project.render_summary || {};
+  const cost = project.cost || {};
+  const shots = Array.isArray(project.shots) ? project.shots : [];
+  const labels = {
+    awaiting_preview_approval: "等待预览批准",
+    completed: "媒体流程已完成",
+    ready: "可生成",
+  };
+  $("#media-project-status").textContent = labels[project.status] || project.status;
+  $("#media-project-status").dataset.status = project.status;
+  $("#media-project-note").textContent = profile.requires_film_dag
+    ? `已建立 ${shots.length} 镜头的受控生产 DAG；当前只生成关键帧和低清动态预览。所有内容均为元数据模拟，不包含真实图片或视频。`
+    : "简单图片使用轻量流程，不创建电影级分镜 DAG。所有内容均为元数据模拟。";
+  $("#media-project-metrics").innerHTML = [
+    ["生产策略", humanize(profile.strategy || "supervised_production")],
+    ["镜头 / 时长", `${shots.length} 镜头 · ${Number(profile.duration_seconds || 0).toFixed(1)} 秒`],
+    ["预览尝试", `${Number(summary.keyframe_attempts || 0)} 关键帧 · ${Number(summary.animatic_attempts || 0)} 动态预览`],
+    ["终稿状态", `${Number(summary.accepted_final_shots || 0)} 已通过 · ${Number(summary.rejected_final_attempts || 0)} 次局部驳回`],
+    ["媒体成本", `$${Number(cost.total || 0).toFixed(4)}`],
+    ["单位成果", cost.cost_per_accepted_second == null ? "待终稿验收" : `$${Number(cost.cost_per_accepted_second).toFixed(4)} / 有效秒`],
+  ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  $("#media-shot-list").innerHTML = shots.map((shot) => {
+    const contract = shot.contract || {};
+    const attempts = Array.isArray(shot.attempts) ? shot.attempts : [];
+    const finalAttempts = attempts.filter((item) => item.stage === "final");
+    const dependency = (contract.reference_dependencies || []).length
+      ? `依赖 ${(contract.reference_dependencies || []).join("、")}`
+      : "可并行起步";
+    return `<article data-status="${escapeHtml(shot.status)}">
+      <div><strong>镜头 ${Number(contract.sequence || shot.sequence || 0).toString().padStart(2, "0")}</strong><span>${escapeHtml(taskLabels[shot.status] || shot.status)}</span></div>
+      <p>${escapeHtml(contract.shot_type || "image")} · ${Number(contract.duration_seconds || 0).toFixed(2)}s · ${escapeHtml(contract.resolution || "")}</p>
+      <small>${escapeHtml(dependency)} · 终稿尝试 ${finalAttempts.length}</small>
+    </article>`;
+  }).join("");
+  const approve = $("#approve-media-project");
+  approve.classList.toggle("hidden", !profile.requires_film_dag || project.status === "completed");
+  approve.disabled = false;
+  $("#media-approval-feedback").textContent = project.status === "completed"
+    ? `已验收 ${Number(summary.accepted_final_shots || 0)} 个镜头`
+    : "终稿渲染必须经过此批准门";
+  card.classList.remove("hidden");
+}
+
+async function approveMediaProject() {
+  const runId = state.currentRun?.id;
+  if (!runId) return;
+  const button = $("#approve-media-project");
+  button.disabled = true;
+  $("#media-approval-feedback").textContent = "正在执行终稿模拟与连续性验收…";
+  try {
+    const response = await fetch(`/api/v1/media/projects/${encodeURIComponent(runId)}/approve`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `media-approve-${runId}`,
+      },
+      body: "{}",
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法批准媒体项目");
+    await loadRun(runId, false);
+    $("#media-approval-feedback").textContent = "终稿模拟和连续性验收已完成";
+  } catch (error) {
+    button.disabled = false;
+    $("#media-approval-feedback").textContent = error instanceof Error ? error.message : "批准失败";
+  }
 }
 
 function renderArtifacts(run) {

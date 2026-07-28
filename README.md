@@ -2,11 +2,27 @@
 
 **以端到端成本、资源准入和不可变成果为边界，可解释、可恢复且由证据验收驱动的多模型 Agent 编排原型。**
 
-CostWeave v0.4.7 把单一“成功概率”升级为可复现、可校准的多结局预测：首次成功、修复后成功、升级后成功、人工介入和最终失败。系统同时预测质量、成本与完成时间区间，标记分布外任务和关键误放风险，并用完整归因的 Outcome 更新分层能力后验。
+CostWeave v0.4.8 新增受控图片、短视频和 AI 电影生产工作流：先锁定创作意图并形成视觉圣经，再把影片拆成可并行镜头合同，自动编译提示词，在关键帧和低清动态分镜获批后才进入昂贵终稿；失败镜头只在必要范围内重做，并按合格镜头和合格视频秒核算成本。
 
-> v0.4.7 仍是离线决策与编排原型，不调用真实模型 API。多结局仿真、评估指标、Outcome 归因、Beta 后验、成功契约、恢复和成本账本是真实逻辑；当前校准结论来自冻结仿真基准，不能等同于真实生产校准。
+> v0.4.8 仍是离线决策与编排原型，不调用真实模型或付费媒体 API，也不生成真实图片或视频。媒体适配器只生成可审计元数据；DAG、审批门、连续性规则、局部恢复、成本账本、持久化和 API 是真实实现。
 
-## v0.4.7 新增：多结局预测、校准与评估闭环
+## v0.4.8 新增：受控图片 / 视频制作工作流
+
+- 自动识别单图、图组、短视频和电影需求；30 秒视频默认形成 6～10 个镜头
+- 单图走轻量流程，不为简单任务建立电影级 DAG
+- 建立 Creative Brief、Film/Character/Location Bible 和 Asset Registry
+- 每个镜头使用结构化 `ShotContract`，锁定创作意图、规格、引用、首尾状态和验收条件
+- `PromptCompiler` 继承视觉圣经并输出版本、目标适配器和语义差异；禁止静默改写锁定意图
+- 关键帧、低清动态分镜与终稿采用分级成本门；supervised 模式下未批准预览时终稿次数严格为 0
+- 独立镜头并行；共享参考帧的镜头只等待必要依赖
+- 连续性检查覆盖技术格式、角色身份、场景、动作方向和首尾帧
+- 失败镜头局部重渲染；只有边界变化才把相邻镜头标记为待复核
+- 成本账本分别记录故事板、关键帧、动态分镜、终稿、重渲染和连续性验收
+- 媒体项目、圣经、镜头、Prompt、渲染尝试、连续性检查和媒体成本全部持久化
+- 新增媒体查询与批准 API，页面提供非技术化媒体生产控制台
+- `COSTWEAVE_MEDIA_WORKFLOW=0` 可停止创建新媒体项目，通用编排保持可用
+
+## 继承的 v0.4.7 多结局预测、校准与评估闭环
 
 - 用五种互斥结局替代伪精确单点成功率，概率总和严格为 1
 - 显示首次、修复、升级和人工介入后的单调累计成功率
@@ -159,7 +175,14 @@ CostWeave v0.4.7 把单一“成功概率”升级为可复现、可校准的多
 python -m costweave.server
 ```
 
-v0.4.7 默认启用 Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭 v0.4.7 新预测与学习写入：
+v0.4.8 默认启用媒体工作流、Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭媒体工作流：
+
+```powershell
+$env:COSTWEAVE_MEDIA_WORKFLOW="0"
+python -B -m costweave.server
+```
+
+只关闭 Outcome 预测与学习写入：
 
 ```powershell
 $env:COSTWEAVE_OUTCOME_FORECAST="0"
@@ -355,6 +378,10 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/failures` | 读取失败分类、影响范围与恢复决策 |
 | `GET` | `/api/v1/runs/{id}/forecast` | 读取五结局、质量/成本/时间区间与 OOD |
 | `GET` | `/api/v1/evaluations` | 读取冻结基准、Brier、ECE、Log Loss 与覆盖率 |
+| `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
+| `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
+| `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
+| `POST` | `/api/v1/media/shots/{shot_id}/approve` | 只批准并生成一个镜头的仿真终稿 |
 | `GET` | `/api/v1/runs/{id}/placements` | 读取选定与备用资源组合及成本预测 |
 | `GET` | `/api/v1/tasks/{task_id}` | 读取持久任务合同和状态 |
 | `GET` | `/api/v1/artifacts/{artifact_id}` | 校验并读取 Artifact 元数据与血缘（不返回内容） |
@@ -373,7 +400,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 244 项自动化测试。v0.4.7 新增测试覆盖互斥概率守恒、累计成功单调、固定种子复现、并行/串行 DAG、恢复关闭、OOD、多分位区间、Outcome 归因、Beta 后验、分层回退、历史后验参与后续预测、Brier、ECE、Log Loss、覆盖率、基准比较、持久化、API 和功能回滚。
+当前基线为 284 项自动化测试。v0.4.8 新增测试覆盖媒体意图、创作圣经、镜头合同、锁定意图、Prompt 继承与停止规则、镜头 DAG、预览批准门、元数据适配器、五类连续性检查、局部重渲染、相邻 suspect 传播、媒体成本幂等、SQLite 迁移、API 和页面交互。
 
 测试覆盖：
 
@@ -393,6 +420,8 @@ python -B -m unittest discover -s tests -v
 - 恢复次数、尝试次数、时间、预算上限和 PlanPatch 持久化
 - 多结局概率守恒、固定种子、DAG 时间结构和分布外检测
 - Outcome 完整归因、幂等学习、四级 Beta 后验与正式评估指标
+- 单图轻量路径、30 秒影片拆镜、预览门、镜头并行与局部重渲染
+- 媒体锁定意图零漂移、连续性缺陷、有效秒成本和媒体 API
 - 页面结构、响应式基础规则和管理交互绑定
 
 ## 当前边界
@@ -402,18 +431,19 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.4.7 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.4.8 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
 - 真实外部 Provider 尚未接入，因此幂等保证目前覆盖控制状态和模拟执行；真实外部副作用仍需 Provider 幂等协议。
 - 失败分类与 PlanPatch 当前采用可审计确定性规则；尚未用真实生产失败数据完成统计校准。
 - 固定基准中的 ECE、Brier 和 95% 覆盖率只证明评估实现与仿真数据一致，不代表真实模型生产表现。
 - 当前后验只记录和校准，不根据单次 Outcome 自动修改生产路由。
+- 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-下一版本 v0.4.8 将实现图像、视频和 AI 电影的媒体制作 DAG、提示词编译、镜头并行与局部返工；总体设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
+下一版本 v0.4.9 将停止增加大型算法，集中完成统一 API、迁移与故障加固、页面整合、发布复现和完整 v0.4 验收；总体设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
 
-为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.7 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
+为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.8 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 
 ## License
 

@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v4.7"
+PROJECTION_SCHEMA_VERSION = "v4.8"
 
 
 class ProjectionError(ValueError):
@@ -122,7 +122,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         raise ProjectionError("run projection must be an object")
     schema = snapshot.get("projection_schema_version")
     if schema not in {
-        None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6",
+        None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6", "v4.7",
         PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")

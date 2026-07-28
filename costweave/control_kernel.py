@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.7."""
+"""Persistent command/event/projection owner for CostWeave v0.4.8."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .placements import PlacementStore
 from .recovery import EvidenceRecoveryStore
 from .outcome_store import OutcomeStore
 from .calibration import HierarchicalCalibrator
+from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
 from .reservations import ReservationManager
 from .state_guard import is_terminal, validate_transition
@@ -40,6 +41,7 @@ class ControlKernel:
         self.evidence_store = EvidenceRecoveryStore(self.store.path)
         self.outcome_store = OutcomeStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
+        self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
@@ -273,6 +275,7 @@ class ControlKernel:
             artifact_dag_enabled,
             evidence_recovery_enabled,
             outcome_forecast_enabled,
+            media_workflow_enabled,
             parallel_runtime_enabled,
             placement_v4_enabled,
         )
@@ -284,11 +287,13 @@ class ControlKernel:
             **self.placement_store.counts(),
             **self.evidence_store.counts(),
             **self.outcome_store.counts(),
+            **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
             "placement_v4": placement_v4_enabled(),
             "evidence_recovery": evidence_recovery_enabled(),
             "outcome_forecast": outcome_forecast_enabled(),
+            "media_workflow": media_workflow_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
@@ -505,6 +510,24 @@ class ControlKernel:
 
     def evaluations(self) -> list[dict[str, Any]]:
         return self.outcome_store.evaluations()
+
+    def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
+        return self.media_runtime.ensure_project(
+            run_id=str(record.id),
+            goal=record.request.goal,
+        )
+
+    def media_project(self, run_id: str) -> dict[str, Any] | None:
+        return self.media_runtime.project(run_id)
+
+    def media_shots(self, run_id: str) -> list[dict[str, Any]]:
+        return self.media_runtime.shots(run_id)
+
+    def approve_media_shot(self, shot_id: str) -> dict[str, Any]:
+        return self.media_runtime.approve_shot(shot_id)
+
+    def approve_media_project(self, run_id: str) -> dict[str, Any]:
+        return self.media_runtime.approve_project(run_id)
 
     def sync_placements(self, record: Any) -> int:
         if record.plan is None:

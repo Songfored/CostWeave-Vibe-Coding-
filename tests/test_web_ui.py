@@ -51,6 +51,9 @@ class WebUiRegressionTests(unittest.TestCase):
             "analysis-signals",
             "routing-summary",
             "scheduler-summary",
+            "media-project-card",
+            "media-shot-list",
+            "approve-media-project",
             "model-catalog",
             "catalog-stats",
             "catalog-search",
@@ -84,6 +87,7 @@ class WebUiRegressionTests(unittest.TestCase):
             "renderOutcome",
             "renderArtifacts",
             "renderRunError",
+            "renderMediaProject",
             "renderHistory",
             "copyResult",
             "downloadResult",
@@ -100,12 +104,13 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.4.7 Outcome Forecast", self.html)
+        self.assertIn("v0.4.8 Media Production", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)
         self.assertIn("关键成功标准", self.js)
         self.assertIn("恢复记录", self.js)
         self.assertIn("function renderForecast", self.js)
+        self.assertIn("function approveMediaProject", self.js)
         self.assertIn("first_pass_success", self.js)
         self.assertIn('id="forecast-card"', self.html)
 

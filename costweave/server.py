@@ -44,7 +44,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.7"
+    server_version = "CostWeave/0.4.8"
 
     @property
     def manager(self) -> RunManager:
@@ -144,6 +144,46 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/evaluations":
             self._json({"evaluations": self.manager.evaluations()})
+            return
+        if path.startswith("/api/v1/media/projects/"):
+            suffix = path.removeprefix(
+                "/api/v1/media/projects/"
+            ).strip("/")
+            if suffix.endswith("/shots"):
+                run_id = suffix.removesuffix("/shots").strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                project = self.manager.media_project(run_id)
+                if project is None:
+                    self._json(
+                        {"error": "media_project_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json({
+                    "run_id": run_id,
+                    "project_id": project["project_id"],
+                    "shots": self.manager.media_shots(run_id),
+                })
+                return
+            run_id = suffix
+            if self.manager.get(run_id) is None:
+                self._json(
+                    {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
+                )
+                return
+            project = self.manager.media_project(run_id)
+            if project is None:
+                self._json(
+                    {"error": "media_project_not_found"},
+                    HTTPStatus.NOT_FOUND,
+                )
+                return
+            self._json(project)
             return
         if path.startswith("/api/v1/tasks/"):
             task_id = unquote(path.removeprefix("/api/v1/tasks/").strip("/"))
@@ -340,6 +380,24 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             if suffix.endswith("/retry"):
                 self._retry_run(suffix.removesuffix("/retry").strip("/"))
                 return
+        if path.startswith("/api/v1/media/projects/") and path.endswith(
+            "/approve"
+        ):
+            run_id = path.removeprefix(
+                "/api/v1/media/projects/"
+            ).removesuffix("/approve").strip("/")
+            self._approve_media_project(run_id)
+            return
+        if path.startswith("/api/v1/media/shots/") and path.endswith(
+            "/approve"
+        ):
+            shot_id = unquote(
+                path.removeprefix(
+                    "/api/v1/media/shots/"
+                ).removesuffix("/approve").strip("/")
+            )
+            self._approve_media_shot(shot_id)
+            return
         if path.startswith("/api/v1/approvals/") and path.endswith(
             "/resolve"
         ):
@@ -545,6 +603,62 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if isinstance(exc, RevisionConflictError):
             payload.update({"expected_revision": exc.expected, "current_revision": exc.actual})
         self._json(payload, HTTPStatus.CONFLICT)
+
+    def _approve_media_project(self, run_id: str) -> None:
+        try:
+            self._read_write_json()
+            if not self.headers.get("Idempotency-Key"):
+                raise RequestError(
+                    "批准媒体项目必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            self._json(
+                self.manager.approve_media_project(run_id),
+                HTTPStatus.ACCEPTED,
+            )
+        except KeyError:
+            self._json(
+                {"error": "media_project_not_found"},
+                HTTPStatus.NOT_FOUND,
+            )
+        except RequestError as exc:
+            self._json(
+                {"error": exc.code, "message": str(exc)}, exc.status
+            )
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "invalid_request", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _approve_media_shot(self, shot_id: str) -> None:
+        try:
+            self._read_write_json()
+            if not self.headers.get("Idempotency-Key"):
+                raise RequestError(
+                    "批准镜头必须提供 Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            self._json(
+                self.manager.approve_media_shot(shot_id),
+                HTTPStatus.ACCEPTED,
+            )
+        except KeyError:
+            self._json(
+                {"error": "media_shot_not_found"},
+                HTTPStatus.NOT_FOUND,
+            )
+        except RequestError as exc:
+            self._json(
+                {"error": exc.code, "message": str(exc)}, exc.status
+            )
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "invalid_request", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def _resolve_approval(self, approval_id: str) -> None:
         try:
@@ -789,7 +903,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.7 Outcome Forecast prototype"
+        description="Run the CostWeave v0.4.8 Media Workflow prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

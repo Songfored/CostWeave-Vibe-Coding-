@@ -14,6 +14,7 @@ from .compat_v4 import (
     contracts_v4_enabled,
     evidence_recovery_enabled,
     outcome_forecast_enabled,
+    media_workflow_enabled,
     parallel_runtime_enabled,
     placement_v4_enabled,
     runtime_v4_enabled,
@@ -127,8 +128,13 @@ class RunRecord:
                     if self.control_kernel is not None
                     else None
                 ),
+                "media_project": (
+                    self.control_kernel.media_project(str(self.id))
+                    if self.control_kernel is not None
+                    else None
+                ),
                 "runtime": {
-                    "schema_version": "v4.7",
+                    "schema_version": "v4.8",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -273,6 +279,32 @@ class OrchestrationEngine:
                     },
                 )
                 record.control_kernel.record_forecast(forecast)
+            if (
+                media_workflow_enabled()
+                and record.control_kernel is not None
+            ):
+                media_project = (
+                    record.control_kernel.ensure_media_project(record)
+                )
+                if media_project is not None:
+                    self._event(
+                        record,
+                        "media_project_ready",
+                        (
+                            "媒体制作合同、视觉圣经、镜头 DAG "
+                            "和低成本预览已生成"
+                        ),
+                        detail={
+                            "project_id": media_project["project_id"],
+                            "workflow_kind": media_project[
+                                "project"
+                            ]["workflow_kind"],
+                            "shot_count": len(
+                                media_project["shots"]
+                            ),
+                            "simulated": True,
+                        },
+                    )
             self._recalculate_probability(record)
             self._event(
                 record,
@@ -1352,6 +1384,28 @@ class RunManager:
         if self.control_kernel is None:
             return []
         return self.control_kernel.evaluations()
+
+    def media_project(self, run_id: str) -> dict[str, Any] | None:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return None
+        return self.control_kernel.media_project(run_id)
+
+    def media_shots(self, run_id: str) -> list[dict[str, Any]]:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return []
+        return self.control_kernel.media_shots(run_id)
+
+    def approve_media_shot(self, shot_id: str) -> dict[str, Any]:
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        return self.control_kernel.approve_media_shot(shot_id)
+
+    def approve_media_project(self, run_id: str) -> dict[str, Any]:
+        if self.get(run_id) is None:
+            raise KeyError(run_id)
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        return self.control_kernel.approve_media_project(run_id)
 
     def approvals(
         self, *, status: str | None = None
