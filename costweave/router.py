@@ -6,8 +6,15 @@ from datetime import date
 from typing import Any
 
 from .catalog_store import CATALOG_STORE, CatalogStore
+from .compat_v4 import placement_v4_enabled
 from .domain import RunMode, TaskContract, WorkerProfile
 from .model_catalog import MODELS, catalog_metadata
+from .resource_inventory import ResourceInventory
+from .resource_optimizer import (
+    PlacementBudgetError,
+    PlacementError,
+    ResourcePortfolioOptimizer,
+)
 
 
 WORKERS = MODELS
@@ -379,7 +386,7 @@ class PredictiveRouter:
             ),
         )
 
-    def assign(
+    def _assign_legacy(
         self,
         tasks: list[TaskContract],
         mode: RunMode,
@@ -585,6 +592,187 @@ class PredictiveRouter:
             "frontier_assignments": sum(
                 item.worker.tier in {"frontier", "premium"}
                 for item in choices
+            ),
+            "independent_validators": independent_validators,
+            "independence_degraded": degraded_validators,
+            "catalog_revision": self.catalog_revision,
+        }
+
+    def assign(
+        self,
+        tasks: list[TaskContract],
+        mode: RunMode,
+        quality_floor: float,
+        budget: float | None = None,
+        *,
+        max_concurrency: int = 4,
+        deadline_seconds: float | None = None,
+        recovery_budget_ratio: float = 0.2,
+        value_of_time_per_second: float | None = None,
+        reserve_recovery_budget: bool = True,
+        availability: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if not placement_v4_enabled():
+            return self._assign_legacy(
+                tasks, mode, quality_floor, budget
+            )
+
+        route_pools: dict[str, list[RouteDecision]] = {}
+        rejections_by_task: dict[str, list[dict[str, Any]]] = {}
+        for task in tasks:
+            ranked, rejections = self._rank_candidates(task, mode)
+            if not ranked:
+                reason = (
+                    "；".join(rejections[0]["reasons"])
+                    if rejections
+                    else "没有满足硬约束的模型"
+                )
+                raise RoutingError(
+                    f"{task.title} 无可用模型：{reason}"
+                )
+            route_pools[task.id] = ranked
+            rejections_by_task[task.id] = rejections
+
+        pools = ResourceInventory.from_workers(
+            self.workers,
+            max_concurrency=max_concurrency,
+        )
+        optimizer = ResourcePortfolioOptimizer()
+        placement_budget = budget
+        recovery_budget = 0.0
+        if budget is not None and reserve_recovery_budget:
+            recovery_budget = (
+                budget
+                * max(0.0, min(float(recovery_budget_ratio), 0.5))
+            )
+            placement_budget = budget - recovery_budget
+        try:
+            result = optimizer.optimize(
+                tasks=tasks,
+                route_pools=route_pools,
+                pools=pools,
+                quality_floor=quality_floor,
+                mode=mode,
+                budget=placement_budget,
+                availability=availability,
+                deadline_ms=(
+                    round(deadline_seconds * 1000)
+                    if deadline_seconds is not None
+                    else None
+                ),
+                value_of_time_per_second=value_of_time_per_second,
+            )
+            economy = (
+                result
+                if mode == RunMode.ECONOMY
+                else optimizer.optimize(
+                    tasks=tasks,
+                    route_pools=route_pools,
+                    pools=pools,
+                    quality_floor=quality_floor,
+                    mode=RunMode.ECONOMY,
+                    budget=None,
+                    availability=availability,
+                    deadline_ms=(
+                        round(deadline_seconds * 1000)
+                        if deadline_seconds is not None
+                        else None
+                    ),
+                    value_of_time_per_second=(
+                        value_of_time_per_second
+                    ),
+                )
+            )
+        except PlacementBudgetError as exc:
+            raise BudgetRoutingError(
+                f"预算不足：{exc}"
+            ) from exc
+        except PlacementError as exc:
+            message = str(exc)
+            if "no feasible placement" in message:
+                message = f"质量门槛、期限或容量约束无可行组合：{message}"
+            raise RoutingError(message) from exc
+
+        workers_by_id = {
+            worker.id: worker for worker in self.workers
+        }
+        independent_validators = 0
+        degraded_validators = 0
+        for task in tasks:
+            selected = result.selected[task.id]
+            viable = route_pools[task.id]
+            route = next(
+                item for item in viable
+                if item.worker.id == selected.model_id
+            )
+            self._apply(
+                task,
+                route,
+                viable,
+                rejections_by_task[task.id],
+            )
+            task.predicted_success = round(
+                selected.predicted_quality_mean, 4
+            )
+            task.predicted_success_lower_bound = round(
+                selected.predicted_quality_lower, 4
+            )
+            task.estimated_cost = round(
+                selected.expected_total_cost_usd, 6
+            )
+            task.direct_model_cost = round(
+                selected.direct_model_cost_usd, 6
+            )
+            task.estimated_latency_ms = selected.execution_p50_ms
+            task.routing_rationale = selected.rationale
+            task.placement_id = selected.placement_id
+            task.placement = selected.to_dict()
+            task.backup_placements = [
+                item.to_dict()
+                for item in result.backups.get(task.id, ())
+            ]
+            task.inference_profile_revision = str(
+                selected.inference_profile["revision"]
+            )
+            task.forecast_cost_breakdown = dict(
+                selected.forecast_cost["p50"]
+            )
+            if task.task_type == "validation" and task.dependencies:
+                producer = result.selected.get(task.dependencies[0])
+                if (
+                    producer is not None
+                    and producer.model_id != selected.model_id
+                ):
+                    independent_validators += 1
+                else:
+                    degraded_validators += 1
+
+        selected_workers = [
+            workers_by_id[item.model_id]
+            for item in result.selected.values()
+        ]
+        return {
+            **result.summary,
+            "quality_floor": quality_floor,
+            "quality_metric": "conservative lower bound",
+            "minimum_feasible_cost_usd": round(
+                economy.summary["estimated_total_cost_usd"], 6
+            ),
+            "normal_budget_usd": (
+                round(placement_budget, 6)
+                if placement_budget is not None
+                else None
+            ),
+            "recovery_budget_usd": round(recovery_budget, 6),
+            "providers": sorted(
+                {item.provider for item in result.selected.values()}
+            ),
+            "local_assignments": sum(
+                worker.local for worker in selected_workers
+            ),
+            "frontier_assignments": sum(
+                worker.tier in {"frontier", "premium"}
+                for worker in selected_workers
             ),
             "independent_validators": independent_validators,
             "independence_degraded": degraded_validators,

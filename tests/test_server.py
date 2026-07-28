@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.4.4", health["version"])
+        self.assertEqual("0.4.5", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v4.4", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v4.5", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["control_kernel"]["artifact_dag"])
@@ -280,6 +280,20 @@ class ServerTests(unittest.TestCase):
         _, resources = self.fetch_json("/api/v1/resources")
         self.assertGreater(len(resources["resources"]), 0)
         self.assertIn("availability", resources["resources"][0])
+
+        _, placements = self.fetch_json(
+            f"/api/v1/runs/{run['id']}/placements"
+        )
+        self.assertEqual(
+            len(current["plan"]["tasks"]), placements["selected"]
+        )
+        self.assertGreater(placements["backups"], 0)
+        _, ledger = self.fetch_json(
+            f"/api/v1/resources/ledger?run_id={run['id']}"
+        )
+        self.assertEqual(run["id"], ledger["run_id"])
+        self.assertGreater(len(ledger["entries"]), 0)
+        self.assertGreater(ledger["total"], 0)
 
         approval, _ = self.server.manager.control_kernel.approval_store.ensure(
             run_id=run["id"],

@@ -1,12 +1,25 @@
 # CostWeave
 
-**以资源准入、原子预留和不可变成果为边界，可持久恢复、可重放且由证据验收驱动的多模型 Agent 编排原型。**
+**以端到端成本、资源准入和不可变成果为边界，可解释、可恢复且由证据验收驱动的多模型 Agent 编排原型。**
 
-CostWeave v0.4.4 在 Artifact Graph 上加入可靠并行运行时。任务启动前会依次检查容量、期限、队列、Provider 熔断和 Token Bucket，并在同一事务中预留资源与预算；等待人工审批的节点不会阻塞无关分支。
+CostWeave v0.4.5 把“选模型”升级为“模型 × Provider × 资源池 × 推理档位 × 启动窗口”的联合 Placement 决策。系统不再只比较 Token 价格，而是显式计算本地算力、能源、稀缺容量、排队机会、交接、验收合并和预期返工成本，并在质量、期限与预算硬约束下选择组合。
 
-> v0.4.4 仍是离线决策与编排原型，不调用真实模型 API，也不读取真实 GPU 遥测。调度、准入、租约、成本预留、审批、熔断、Artifact、血缘、持久化、幂等、DAG、验收和重规划是真实逻辑；最终领域内容和资源容量仍由模拟器产生。
+> v0.4.5 仍是离线决策与编排原型，不调用真实模型 API，也不读取真实 GPU 遥测。成本模型、Placement 优化、成本账本、调度、准入、租约、审批、Artifact、持久化、验收和重规划是真实逻辑；最终领域内容、Provider 行为和资源遥测仍由模拟器产生。
 
-## v0.4.4 新增：可靠并行运行时与资源准入
+## v0.4.5 新增：端到端成本经济与资源组合优化
+
+- 为每个节点生成模型、Provider、资源池、推理强度、量化和缓存策略的有限候选前沿
+- 质量下界、期限和预算作为硬约束；经济、均衡和极速模式使用不同选择目标
+- 成本分解覆盖模型调用、本地算力、能源、稀缺容量、排队机会、交接、验收合并和预期返工
+- 本地模型不再被视为“免费”；排队和稀缺资源也会进入机会成本
+- 弱模型失败、检测、重做和下游失效的期望损失会与强模型直接调用成本比较
+- 任务保留两个备用 Placement；切换需要越过绝对与相对收益迟滞，避免来回抖动
+- 验收节点继续优先使用独立模型，高风险任务进一步要求 Provider 独立
+- 正常执行只使用预算的一部分，预留可配置恢复预算
+- `placements` 和 `cost_ledger` 持久化预测与实际归因；页面展示成本组成及 P95
+- `COSTWEAVE_PLACEMENT_V4=0` 可回退到 v0.3 风险调整路由，既有审计记录仍可读取
+
+## 继承的 v0.4.4 可靠并行运行时与资源准入
 
 - 就绪节点按关键路径长度、优先级和关键度排序，并保留 FIFO 回滚策略
 - CPU、GPU、显存、并发槽和队列容量在任务执行前检查
@@ -116,7 +129,14 @@ CostWeave v0.4.4 在 Artifact Graph 上加入可靠并行运行时。任务启�
 python -m costweave.server
 ```
 
-v0.4.4 默认启用合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭 v0.4.4 资源准入、回到 v0.4.3 执行路径：
+v0.4.5 默认启用 Placement、合同守卫、持久运行时、Artifact DAG 和并行运行时。只关闭 v0.4.5 联合成本决策、回到 v0.3 风险调整路由：
+
+```powershell
+$env:COSTWEAVE_PLACEMENT_V4="0"
+python -m costweave.server
+```
+
+只关闭 v0.4.4 资源准入、回到 v0.4.3 执行路径：
 
 ```powershell
 $env:COSTWEAVE_PARALLEL_RUNTIME="0"
@@ -287,9 +307,11 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/events` | 按 revision 分页读取持久事件流 |
 | `GET` | `/api/v1/runs/{id}/artifacts` | 读取运行的 Artifact 元数据 |
 | `GET` | `/api/v1/runs/{id}/graph` | 读取任务依赖与 Artifact 血缘图 |
+| `GET` | `/api/v1/runs/{id}/placements` | 读取选定与备用资源组合及成本预测 |
 | `GET` | `/api/v1/tasks/{task_id}` | 读取持久任务合同和状态 |
 | `GET` | `/api/v1/artifacts/{artifact_id}` | 校验并读取 Artifact 元数据与血缘（不返回内容） |
 | `GET` | `/api/v1/resources` | 读取资源池、容量和当前可用量 |
+| `GET` | `/api/v1/resources/ledger?run_id={id}` | 读取预测与实际端到端成本账本 |
 | `GET` | `/api/v1/approvals?status=pending` | 按状态读取审批单 |
 | `POST` | `/api/v1/approvals/{id}/resolve` | 用 revision 与幂等键批准或拒绝节点 |
 | `POST` | `/api/v1/runs/{id}/cancel` | 使用幂等键和 `expected_revision` 取消 |
@@ -303,7 +325,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 141 项自动化测试。v0.4.4 新增测试覆盖 1000 节点 DAG、关键路径与 FIFO、原子资源/成本预留、并发去重、容量和期限前置拒绝、Token Bucket、背压、熔断全状态、暂时性重试、租约恢复、审批幂等、审批并发冲突、无关分支继续和功能回滚。
+当前基线为 165 项自动化测试。v0.4.5 新增测试覆盖成本合同与账本守恒、本地算力和能源、稀缺容量与排队机会、失败返工、三档推理策略、严格缓存作用域、质量/期限/预算/永久容量硬约束、Oracle regret、Provider 对比、关键路径、验收独立性、切换迟滞、拆分经济、Placement 持久化和功能回滚。
 
 测试覆盖：
 
@@ -325,19 +347,19 @@ python -B -m unittest discover -s tests -v
 
 - 可导入最新资料不等于资料已被自动核实；来源、核验时间和能力先验仍由导入者负责。
 - 能力、速度、可靠性和资料可信度是可校准先验，不是厂商官方基准成绩。
-- 当前没有汇率服务、阶梯价格、批处理折扣和本地硬件成本折算。
+- 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.4.4 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.4.5 是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
 - 真实外部 Provider 尚未接入，因此幂等保证目前覆盖控制状态和模拟执行；真实外部副作用仍需 Provider 幂等协议。
 - 高级规划节点已经具备严格门控，但模拟执行器不会生成真正的外部模型 `PlanPatch`。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-下一版本 v0.4.5 将实现模型 × Provider × 资源池 × 推理配置 × 开始窗口的联合成本决策，并显式计算本地硬件、排队、失败返工与机会成本；后续结果分布预测、媒体 DAG 和学习闭环设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
+下一版本 v0.4.6 将实现校准后的结果分布预测、动态验收强度和恢复策略选择；后续媒体 DAG 与学习闭环设计见 [`docs/V0.4_UPGRADE_ROADMAP.md`](docs/V0.4_UPGRADE_ROADMAP.md)。
 
-为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.4 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
+为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.5 已完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 
 ## License
 

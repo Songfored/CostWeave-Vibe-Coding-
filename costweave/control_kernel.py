@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.4."""
+"""Persistent command/event/projection owner for CostWeave v0.4.5."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .domain import Event, RunRequest, RunStatus, TaskStatus
 from .event_store import EventStore, ProjectionUpdate
 from .graph_compiler import GraphCompiler
 from .messages import MessageEnvelope
+from .placements import PlacementStore
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
 from .reservations import ReservationManager
 from .state_guard import is_terminal, validate_transition
@@ -32,6 +33,7 @@ class ControlKernel:
         self.artifact_store = ArtifactStore(self.store.path)
         self.reservations = ReservationManager(self.store.path)
         self.approval_store = ApprovalStore(self.store.path)
+        self.placement_store = PlacementStore(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
@@ -66,6 +68,12 @@ class ControlKernel:
                 "max_concurrency": request.max_concurrency,
                 "simulate_replan": request.simulate_replan,
                 "deadline_seconds": request.deadline_seconds,
+                "recovery_budget_ratio": (
+                    request.recovery_budget_ratio
+                ),
+                "value_of_time_per_second": (
+                    request.value_of_time_per_second
+                ),
                 "retry_of": retry_of,
             },
         )
@@ -250,14 +258,20 @@ class ControlKernel:
         )
 
     def health(self) -> dict[str, Any]:
-        from .compat_v4 import artifact_dag_enabled, parallel_runtime_enabled
+        from .compat_v4 import (
+            artifact_dag_enabled,
+            parallel_runtime_enabled,
+            placement_v4_enabled,
+        )
 
         return {
             **self.store.health(),
             **self.artifact_store.counts(),
             **self.reservations.counts(),
+            **self.placement_store.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
+            "placement_v4": placement_v4_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
@@ -438,6 +452,7 @@ class ControlKernel:
         approvals = self.approval_store.list(run_id=run_id)
         return {
             **self.reservations.summary(run_id),
+            **self.placement_store.summary(run_id),
             "pending_approvals": sum(
                 item["status"] == "pending" for item in approvals
             ),
@@ -446,6 +461,28 @@ class ControlKernel:
                 for item in approvals
             ),
         }
+
+    def sync_placements(self, record: Any) -> int:
+        if record.plan is None:
+            return 0
+        return self.placement_store.sync_run(
+            str(record.id), record.plan.tasks
+        )
+
+    def record_actual_cost(self, record: Any, task: Any) -> None:
+        self.placement_store.record_actual(
+            run_id=str(record.id),
+            task=task,
+            actual_total=task.estimated_cost,
+        )
+
+    def placements(self, run_id: str) -> list[dict[str, Any]]:
+        return self.placement_store.list_run(run_id)
+
+    def ledger(
+        self, *, run_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.placement_store.ledger(run_id=run_id)
 
     def resolve_approval(
         self,

@@ -1,10 +1,19 @@
-# CostWeave v0.4.4 架构说明
+# CostWeave v0.4.5 架构说明
 
-CostWeave v0.4.4 是以资源准入和不可变 Artifact 为任务边界、带版本化合同、确定性状态机和 SQLite EventStore 的离线多模型决策 Runtime。v0.3 的目录、画像、规划、路由、执行、验收和恢复保持可用；`RunManager` 作为兼容 Facade 转发到持久化 `ControlKernel`。
+CostWeave v0.4.5 是以端到端成本、资源准入和不可变 Artifact 为任务边界、带版本化合同、确定性状态机和 SQLite EventStore 的离线多模型决策 Runtime。v0.3 的目录、画像、规划、路由、执行、验收和恢复保持可用；`RunManager` 作为兼容 Facade 转发到持久化 `ControlKernel`。
 
 ```text
 HTTP / RunManager Facade / Engine
                     │
+                    ▼
+ResourcePortfolioOptimizer：质量 / 期限 / 预算硬约束
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+InferencePolicy      ResourceEconomics
+推理档位与缓存边界     八类端到端成本与 P95
+          │                   │
+          └─────────┬─────────┘
                     ▼
 ParallelScheduler：关键路径、准入、重试与审批
                     │
@@ -30,7 +39,22 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_RUNTIME_V4=0` 只关闭持久运行时，保留 v0.4.1 合同守卫。
 - `COSTWEAVE_ARTIFACT_DAG=0` 关闭 Artifact 新写入，保留 v0.4.2 结果字段。
 - `COSTWEAVE_PARALLEL_RUNTIME=0` 关闭资源准入与租约，回到 v0.4.3 兼容执行路径。
+- `COSTWEAVE_PLACEMENT_V4=0` 关闭联合 Placement，回到 v0.3 风险调整路由。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
+
+## 0.2 Placement 与成本账本
+
+每个任务先形成有限候选集：
+
+```text
+模型候选 × Provider/本地池 × low/medium/high 推理档位
+→ 质量下界过滤 → 单节点期限过滤
+→ 端到端预期成本评分 → 模式选择
+→ 验收独立性修复 → DAG 关键路径修复
+→ 预算复核 → 选定项 + 两个备用项
+```
+
+`ResourceEconomics` 计算模型调用、本地算力、能源、稀缺容量、排队机会、交接、验收合并和预期返工。预测记录 P50、P95 与预留上限；实际执行按同一分类写入 `cost_ledger`，每项使用唯一归因键，支持守恒检查。`placements` 按运行隔离，避免相同任务合同在不同运行间发生身份碰撞。
 
 ## 0. 可靠控制内核
 

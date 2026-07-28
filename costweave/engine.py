@@ -12,6 +12,7 @@ from .compat_v4 import (
     artifact_dag_enabled,
     contracts_v4_enabled,
     parallel_runtime_enabled,
+    placement_v4_enabled,
     runtime_v4_enabled,
     set_run_status,
     set_task_status,
@@ -76,6 +77,12 @@ class RunRecord:
                     "max_concurrency": self.request.max_concurrency,
                     "simulate_replan": self.request.simulate_replan,
                     "deadline_seconds": self.request.deadline_seconds,
+                    "recovery_budget_ratio": (
+                        self.request.recovery_budget_ratio
+                    ),
+                    "value_of_time_per_second": (
+                        self.request.value_of_time_per_second
+                    ),
                 },
                 "status": self.status.value,
                 "plan": self.plan.to_dict() if self.plan else None,
@@ -95,7 +102,7 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "runtime": {
-                    "schema_version": "v4.4",
+                    "schema_version": "v4.5",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -104,6 +111,10 @@ class RunRecord:
                     ),
                     "parallel_runtime": (
                         parallel_runtime_enabled()
+                        and self.control_kernel is not None
+                    ),
+                    "placement_v4": (
+                        placement_v4_enabled()
                         and self.control_kernel is not None
                     ),
                     "recovered": self.recovered,
@@ -197,9 +208,24 @@ class OrchestrationEngine:
                 record.request.mode,
                 record.request.quality_floor,
                 record.request.budget,
+                max_concurrency=record.request.max_concurrency,
+                deadline_seconds=record.request.deadline_seconds,
+                recovery_budget_ratio=(
+                    record.request.recovery_budget_ratio
+                ),
+                value_of_time_per_second=(
+                    record.request.value_of_time_per_second
+                ),
+                availability=self._resource_availability(record),
             )
             if artifact_dag_enabled() and record.control_kernel is not None:
                 record.control_kernel.compile_graph(record)
+            if (
+                placement_v4_enabled()
+                and record.control_kernel is not None
+            ):
+                self._checkpoint(record, "engine.plan.placements")
+                record.control_kernel.sync_placements(record)
             self._recalculate_probability(record)
             self._event(
                 record,
@@ -298,6 +324,11 @@ class OrchestrationEngine:
                 run_router.workers,
                 max_concurrency=record.request.max_concurrency,
             )
+        if (
+            placement_v4_enabled()
+            and record.control_kernel is not None
+        ):
+            record.control_kernel.sync_placements(record)
         self._event(record, "recovered", "从持久事件投影恢复运行；保留已验收节点")
         try:
             await self._execute_dag(record, run_router)
@@ -539,6 +570,15 @@ class OrchestrationEngine:
                             "findings": [f"执行适配器异常：{exc}"],
                             "score": 0.0,
                         }
+                        if (
+                            placement_v4_enabled()
+                            and record.control_kernel is not None
+                        ):
+                            record.control_kernel.placement_store.record_actual(
+                                run_id=str(record.id),
+                                task=task,
+                                actual_total=0.0,
+                            )
                         self._recalculate_probability(record)
                         self._event(record, "task_rejected", f"{task.title} 执行异常：{exc}", task.id)
                         await self._global_replan(
@@ -560,6 +600,13 @@ class OrchestrationEngine:
                     task.finished_at = utc_now()
                     task.validation = self.validator.validate_result(task, result)
                     record.spent += task.estimated_cost
+                    if (
+                        placement_v4_enabled()
+                        and record.control_kernel is not None
+                    ):
+                        record.control_kernel.record_actual_cost(
+                            record, task
+                        )
 
                     if artifact_dag_enabled() and record.control_kernel is not None:
                         record.control_kernel.publish_task_artifacts(
@@ -671,13 +718,30 @@ class OrchestrationEngine:
         remaining_budget = max(0.0, record.request.budget - record.spent - reserved_cost)
         pending_for_route = [task for task in record.plan.tasks if task.status == TaskStatus.PENDING]
         replacement_summary = run_router.assign(
-            pending_for_route, record.request.mode, record.request.quality_floor, remaining_budget
+            pending_for_route,
+            record.request.mode,
+            record.request.quality_floor,
+            remaining_budget,
+            max_concurrency=record.request.max_concurrency,
+            deadline_seconds=record.request.deadline_seconds,
+            recovery_budget_ratio=0.0,
+            value_of_time_per_second=(
+                record.request.value_of_time_per_second
+            ),
+            reserve_recovery_budget=False,
+            availability=self._resource_availability(record),
         )
         record.plan.routing_summary = {
             **replacement_summary,
             "replanned": True,
             "reserved_in_flight_usd": round(reserved_cost, 6),
         }
+        if (
+            placement_v4_enabled()
+            and record.control_kernel is not None
+        ):
+            self._checkpoint(record, "engine.replan.placements")
+            record.control_kernel.sync_placements(record)
         self._event(record, "replanning", f"高级模型候选重新规划；保留已验收成果，替换 {failed.id}", failed.id, {
             "replacement": replacement.id,
             "affected_descendants": sorted(affected - {failed.id}),
@@ -770,6 +834,17 @@ class OrchestrationEngine:
             kernel = record.control_kernel
             if kernel is not None:
                 kernel.record_runtime_event(record, event, source=f"engine.event.{kind}")
+
+    @staticmethod
+    def _resource_availability(
+        record: RunRecord,
+    ) -> dict[str, dict[str, Any]] | None:
+        if record.control_kernel is None:
+            return None
+        return {
+            item["pool_id"]: dict(item["availability"])
+            for item in record.control_kernel.resources()
+        }
 
 
 class RunManager:
@@ -957,6 +1032,18 @@ class RunManager:
         if self.control_kernel is None:
             return []
         return self.control_kernel.resources()
+
+    def placements(self, run_id: str) -> list[dict[str, Any]]:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return []
+        return self.control_kernel.placements(run_id)
+
+    def ledger(
+        self, *, run_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.ledger(run_id=run_id)
 
     def approvals(
         self, *, status: str | None = None

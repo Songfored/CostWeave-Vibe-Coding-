@@ -164,6 +164,12 @@ class ParallelScheduler:
             raise ImpossibleAdmission(
                 f"no resource pool for {worker.provider}"
             )
+        selected_pool = task.placement.get("resource_pool")
+        if selected_pool and selected_pool != pool.pool_id:
+            raise ImpossibleAdmission(
+                "selected placement resource pool is unavailable: "
+                f"{selected_pool}"
+            )
         request = ResourceRequest(
             slots=max(1, task.resource_slots),
             cpu_cores=max(0.0, task.cpu_cores),

@@ -47,6 +47,8 @@ class RunRequest:
     max_concurrency: int = 4
     simulate_replan: bool = False
     deadline_seconds: float | None = None
+    recovery_budget_ratio: float = 0.2
+    value_of_time_per_second: float | None = None
 
     def normalized(self) -> "RunRequest":
         return RunRequest(
@@ -59,6 +61,17 @@ class RunRequest:
             deadline_seconds=(
                 max(0.05, min(float(self.deadline_seconds), 86_400.0))
                 if self.deadline_seconds is not None
+                else None
+            ),
+            recovery_budget_ratio=max(
+                0.0, min(float(self.recovery_budget_ratio), 0.5)
+            ),
+            value_of_time_per_second=(
+                max(
+                    0.0,
+                    min(float(self.value_of_time_per_second), 10.0),
+                )
+                if self.value_of_time_per_second is not None
                 else None
             ),
         )
@@ -129,6 +142,16 @@ class TaskContract:
     blocked_reason: str = ""
     reservation_id: str | None = None
     transient_retries: int = 0
+    placement_id: str | None = None
+    placement: dict[str, Any] = field(default_factory=dict)
+    backup_placements: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    inference_profile_revision: str | None = None
+    direct_model_cost: float = 0.0
+    forecast_cost_breakdown: dict[str, float] = field(
+        default_factory=dict
+    )
     required_capabilities: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
     output_schema: list[str] = field(default_factory=list)

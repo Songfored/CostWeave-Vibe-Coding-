@@ -1,4 +1,4 @@
-"""SQLite event store and deterministic projections for CostWeave v0.4.4."""
+"""SQLite event store and deterministic projections for CostWeave v0.4.5."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .contracts_v4 import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = "v4.4"
+RUNTIME_SCHEMA_VERSION = "v4.5"
 
 
 class EventStoreError(RuntimeError):
@@ -117,6 +117,7 @@ class EventStore:
                 (1, "001_runtime.sql"),
                 (2, "002_artifacts.sql"),
                 (3, "003_parallel_runtime.sql"),
+                (4, "004_cost_economics.sql"),
             ):
                 sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
                 checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()

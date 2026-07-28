@@ -44,7 +44,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.4"
+    server_version = "CostWeave/0.4.5"
 
     @property
     def manager(self) -> RunManager:
@@ -111,6 +111,22 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path in {"/api/runs", "/api/v1/runs"}:
             self._json({"runs": self.manager.list()})
             return
+        if path == "/api/v1/resources/ledger":
+            run_id = parse_qs(parsed.query).get("run_id", [None])[0]
+            if run_id is not None and self.manager.get(run_id) is None:
+                self._json(
+                    {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
+                )
+                return
+            entries = self.manager.ledger(run_id=run_id)
+            self._json({
+                "run_id": run_id,
+                "entries": entries,
+                "total": round(
+                    sum(float(item["amount"]) for item in entries), 8
+                ),
+            })
+            return
         if path == "/api/v1/resources":
             self._json({"resources": self.manager.resources()})
             return
@@ -158,6 +174,27 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/placements"):
+                run_id = suffix.removesuffix("/placements").strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
+                    )
+                    return
+                placements = self.manager.placements(run_id)
+                self._json({
+                    "run_id": run_id,
+                    "placements": placements,
+                    "selected": sum(
+                        item["status"] == "selected"
+                        for item in placements
+                    ),
+                    "backups": sum(
+                        item["status"] == "backup"
+                        for item in placements
+                    ),
+                })
+                return
             if suffix.endswith("/graph"):
                 run_id = suffix.removesuffix("/graph").strip("/")
                 graph = self.manager.graph(run_id)
@@ -340,6 +377,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 deadline_seconds=(
                     float(payload["deadline_seconds"])
                     if payload.get("deadline_seconds") is not None
+                    else None
+                ),
+                recovery_budget_ratio=float(
+                    payload.get("recovery_budget_ratio", 0.2)
+                ),
+                value_of_time_per_second=(
+                    float(payload["value_of_time_per_second"])
+                    if payload.get("value_of_time_per_second") is not None
                     else None
                 ),
             )
@@ -671,7 +716,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.4 Parallel Runtime prototype"
+        description="Run the CostWeave v0.4.5 Resource Economics prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

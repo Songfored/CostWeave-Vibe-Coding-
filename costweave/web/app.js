@@ -276,7 +276,7 @@ function render(run) {
     : "等待模型组合决策";
   const scheduling = run.scheduling || {};
   $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
-    ? `调度：关键路径优先 · 资源预留 ${Number(scheduling.reservations || 0)} 次 · 活跃租约 ${Number(scheduling.active_leases || 0)} · 在途成本 $${Number(scheduling.reserved_cost || 0).toFixed(4)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
+    ? `调度：关键路径优先 · Placement ${Number(scheduling.selected_placements || 0)} 个（备用 ${Math.max(0, Number(scheduling.placements || 0) - Number(scheduling.selected_placements || 0))}） · 预测总成本 $${Number(scheduling.forecast_total || 0).toFixed(4)} · 实际账本 $${Number(scheduling.actual_total || 0).toFixed(4)} · 活跃租约 ${Number(scheduling.active_leases || 0)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
     : "调度：兼容模式（未启用资源感知并行运行时）";
 
   if (!state.selectedTaskId || !run.plan.tasks.some((task) => task.id === state.selectedTaskId)) {
@@ -417,6 +417,21 @@ function renderTimeline(events) {
 function renderContract(task) {
   if (!task) return;
   const list = (items) => items?.length ? items.map(escapeHtml).join(" · ") : "—";
+  const placement = task.placement || {};
+  const profile = placement.inference_profile || {};
+  const cost = placement.forecast_cost?.p50 || task.forecast_cost_breakdown || {};
+  const costItems = [
+    ["模型调用", cost.provider_inference],
+    ["本地算力", cost.local_compute],
+    ["能源", cost.energy],
+    ["稀缺容量", cost.scarce_capacity],
+    ["排队机会", cost.queue_opportunity],
+    ["交接", cost.handoff],
+    ["验收合并", cost.validation_merge],
+    ["预期返工", cost.expected_rework],
+  ].filter(([, value]) => Number(value || 0) > 0)
+    .map(([label, value]) => `${label} $${Number(value).toFixed(5)}`)
+    .join(" · ");
   const resultSection = task.result ? `
     <div class="node-result">
       <span>节点成果</span>
@@ -448,6 +463,10 @@ function renderContract(task) {
       <dt>验收标准</dt><dd>${list(task.acceptance_criteria)}</dd>
       <dt>输出格式</dt><dd>${list(task.output_schema)}</dd>
       <dt>选定模型</dt><dd>${escapeHtml(modelLabel(task.selected_worker))}</dd>
+      <dt>资源组合</dt><dd>${placement.placement_id
+        ? `${escapeHtml(placement.provider)} / ${escapeHtml(placement.resource_pool)} · ${escapeHtml(profile.reasoning_effort || "medium")} 推理 · ${escapeHtml(profile.quantization || "provider-default")} · 备用 ${Number(task.backup_placements?.length || 0)} 个`
+        : "等待资源组合决策"}</dd>
+      <dt>端到端成本</dt><dd>${costItems || "暂无成本分解"}${placement.forecast_cost?.p95_total != null ? ` · P95 $${Number(placement.forecast_cost.p95_total).toFixed(5)}` : ""}</dd>
       <dt>路由理由</dt><dd>${escapeHtml(task.routing_rationale || "等待路由")}</dd>
       <dt>执行预测</dt><dd>均值 ${Math.round(task.predicted_success * 100)}% · 保守下界 ${Math.round(Number(task.predicted_success_lower_bound || 0) * 100)}% · 路由置信 ${Math.round(Number(task.route_confidence || 0) * 100)}% · $${Number(task.estimated_cost || 0).toFixed(4)} · ${task.estimated_latency_ms}ms</dd>
       <dt>任务画像</dt><dd>难度 L${task.difficulty}/10 · 风险 ${escapeHtml(task.risk_level)} · 不确定性 ${Math.round(Number(task.uncertainty || 0) * 100)}% · 关键度 ${Math.round(Number(task.criticality || 0) * 100)}% · 输入约 ${task.estimated_input_tokens} tokens · 输出约 ${task.estimated_output_tokens} tokens</dd>

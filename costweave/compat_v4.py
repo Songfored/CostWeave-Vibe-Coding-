@@ -21,6 +21,7 @@ FEATURE_FLAG = "COSTWEAVE_CONTRACTS_V4"
 RUNTIME_FEATURE_FLAG = "COSTWEAVE_RUNTIME_V4"
 ARTIFACT_FEATURE_FLAG = "COSTWEAVE_ARTIFACT_DAG"
 PARALLEL_RUNTIME_FEATURE_FLAG = "COSTWEAVE_PARALLEL_RUNTIME"
+PLACEMENT_FEATURE_FLAG = "COSTWEAVE_PLACEMENT_V4"
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 _TRACE_LIMIT = 2048
 _TRACE: deque[EventEnvelope] = deque(maxlen=_TRACE_LIMIT)
@@ -47,6 +48,14 @@ def parallel_runtime_enabled() -> bool:
     return runtime_v4_enabled() and raw.strip().lower() not in _FALSE_VALUES
 
 
+def placement_v4_enabled() -> bool:
+    raw = os.environ.get(PLACEMENT_FEATURE_FLAG, "1")
+    return (
+        parallel_runtime_enabled()
+        and raw.strip().lower() not in _FALSE_VALUES
+    )
+
+
 def contract_health() -> dict[str, Any]:
     return {
         "contract_schema": CONTRACT_SCHEMA_VERSION,
@@ -54,6 +63,7 @@ def contract_health() -> dict[str, Any]:
             "contracts_v4": contracts_v4_enabled(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
+            "placement_v4": placement_v4_enabled(),
         },
         "contract_trace_persistent": False,
     }
