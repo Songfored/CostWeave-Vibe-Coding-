@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.4.9 可备份、可诊断、兼容升级且经过安全加固的成本感知多模型编排原型">
+  <meta name="description" content="CostWeave v0.5.1 具备两层规划、跨厂商角色合同和零付费仿真的成本感知多模型编排原型">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=0.5.1">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.4.9 Release Hardening</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.1 Deliberation Contracts</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,7 +29,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">RELIABLE MULTI-MODEL ORCHESTRATOR · V0.4.9</p>
+        <p class="eyebrow">PROVIDER-NEUTRAL DELIBERATION · V0.5.1</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -131,6 +131,23 @@
               <button id="edit-and-retry" class="secondary-button" type="button">调整参数</button>
               <button id="retry-run" class="secondary-button subtle" type="button">按当前配置重试</button>
             </div>
+          </section>
+
+          <section id="planning-card" class="planning-card hidden" aria-labelledby="planning-title">
+            <div class="planning-heading">
+              <div>
+                <span class="section-kicker">METAPLANNER RECEIPT</span>
+                <h3 id="planning-title">规划模式决策</h3>
+              </div>
+              <span id="planning-mode"></span>
+            </div>
+            <p id="planning-reason"></p>
+            <div id="planning-metrics" class="planning-metrics"></div>
+            <div id="planning-roles" class="planning-roles"></div>
+            <details class="planning-explain">
+              <summary>查看淘汰路线与硬限制</summary>
+              <div id="planning-details"></div>
+            </details>
           </section>
 
           <section id="forecast-card" class="forecast-card hidden" aria-labelledby="forecast-title">
@@ -336,6 +353,6 @@
   </dialog>
 
   <footer><span>CostWeave v0.3 / Adaptive Decision Orchestration Prototype</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=0.5.1" defer></script>
 </body>
 </html>

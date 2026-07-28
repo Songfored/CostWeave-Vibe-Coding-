@@ -40,6 +40,10 @@ class WebUiRegressionTests(unittest.TestCase):
             "run-panel",
             "run-status",
             "run-error-panel",
+            "planning-card",
+            "planning-mode",
+            "planning-metrics",
+            "planning-roles",
             "outcome-card",
             "copy-result",
             "download-result",
@@ -81,12 +85,15 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("@media (max-width: 480px)", self.css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.css)
         self.assertIn(":focus-visible", self.css)
+        self.assertIn("max-height: calc(100vh - 36px)", self.css)
+        self.assertIn("overflow-y: auto", self.css)
 
     def test_result_history_and_failure_interactions_are_wired(self):
         for function_name in (
             "renderOutcome",
             "renderArtifacts",
             "renderRunError",
+            "renderPlanning",
             "renderMediaProject",
             "renderHistory",
             "copyResult",
@@ -104,7 +111,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.4.9 Release Hardening", self.html)
+        self.assertIn("v0.5.1 Deliberation Contracts", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)
         self.assertIn("关键成功标准", self.js)
@@ -113,6 +120,8 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("function approveMediaProject", self.js)
         self.assertIn("first_pass_success", self.js)
         self.assertIn('id="forecast-card"', self.html)
+        self.assertIn('id="planning-card"', self.html)
+        self.assertIn("max_management_depth", self.js)
 
 
 if __name__ == "__main__":

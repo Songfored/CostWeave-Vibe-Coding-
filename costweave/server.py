@@ -24,6 +24,13 @@ from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
 from .event_store import IdempotencyConflictError, RevisionConflictError
 from .runtime_maintenance import RuntimeMaintenance
+from .planning_contracts import (
+    ManagementLimits,
+    PLANNING_POLICY_VERSION,
+    PLANNING_SCHEMA_VERSION,
+    PlanningMode,
+)
+from .role_registry import RoleRegistry
 
 
 MANAGER: RunManager | None = None
@@ -50,7 +57,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.9"
+    server_version = "CostWeave/0.5.1"
 
     def setup(self) -> None:
         super().setup()
@@ -83,8 +90,31 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "runtime": "offline-decision-simulation",
                 "version": __version__,
                 "catalog_revision": self.catalog_store.revision,
+                "planning_contract": {
+                    "schema_version": PLANNING_SCHEMA_VERSION,
+                    "policy_version": PLANNING_POLICY_VERSION,
+                    "paid_calls_enabled": False,
+                },
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/planning/policy":
+            self._json({
+                "schema_version": PLANNING_SCHEMA_VERSION,
+                "policy_version": PLANNING_POLICY_VERSION,
+                "modes": [mode.value for mode in PlanningMode],
+                "roles": [
+                    role.to_dict() for role in RoleRegistry().list()
+                ],
+                "limits": ManagementLimits().to_dict(),
+                "adapter_policy": {
+                    "provider_neutral": True,
+                    "default_adapter": "mock",
+                    "paid_calls_enabled": False,
+                    "real_provider_requires_explicit_feature_flag": True,
+                },
+                "scope": "deterministic-contract-simulation",
             })
             return
         if path == "/api/catalog":
@@ -247,6 +277,17 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/planning"):
+                run_id = suffix.removesuffix("/planning").strip("/")
+                planning = self.manager.planning(run_id)
+                if planning is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json(planning)
+                return
             if suffix.endswith("/forecast"):
                 run_id = suffix.removesuffix(
                     "/forecast"
@@ -1045,7 +1086,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.9 hardened orchestration prototype"
+        description="Run the CostWeave v0.5.1 deliberation-contract prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

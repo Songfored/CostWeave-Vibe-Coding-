@@ -346,8 +346,12 @@ class HeuristicPlanner:
             planning_action=planning_action,
         )
 
-    def plan(self, request: RunRequest) -> Plan:
-        analysis = self.analyze(request)
+    def plan(
+        self,
+        request: RunRequest,
+        analysis: TaskAnalysis | None = None,
+    ) -> Plan:
+        analysis = analysis or self.analyze(request)
         tasks: list[TaskContract] = [self._alignment(request, analysis)]
         planning_gate = "goal-alignment"
 

@@ -250,6 +250,7 @@ function render(run) {
   $("#metric-replan").textContent = `${metrics.replans || 0} 次重规划`;
 
   renderRunError(run);
+  renderPlanning(run.planning);
   renderForecast(run.forecast);
   renderMediaProject(run.media_project);
   if (!run.plan) return;
@@ -293,6 +294,51 @@ function render(run) {
   renderTimeline(run.events || []);
   const selected = run.plan.tasks.find((task) => task.id === state.selectedTaskId) || run.plan.tasks[0];
   renderContract(selected);
+}
+
+function renderPlanning(planning) {
+  const card = $("#planning-card");
+  const decision = planning?.decision;
+  if (!decision) {
+    card.classList.add("hidden");
+    return;
+  }
+  const modeLabels = {
+    NO_DELEGATION: "主线程直接处理",
+    DIRECT_DELEGATION: "直接委派",
+    SINGLE_PLANNER: "单 Planner",
+    MULTI_PLANNER: "MultiPlanner",
+    EXPERT_OVERRIDE: "高级规划接管",
+    ASK_USER: "建议先澄清",
+  };
+  const budget = decision.planning_budget || {};
+  const panel = decision.panel_policy || {};
+  const limits = decision.limits || {};
+  $("#planning-mode").textContent = modeLabels[decision.mode] || decision.mode;
+  $("#planning-mode").dataset.mode = decision.mode;
+  $("#planning-reason").textContent = (decision.reasons || []).join(" ");
+  $("#planning-metrics").innerHTML = [
+    ["判定置信", `${Math.round(Number(decision.confidence || 0) * 100)}%`],
+    ["规划预算", `$${Number(budget.max_cost || 0).toFixed(4)} · ${Math.round(Number(budget.task_budget_ratio || 0) * 100)}%`],
+    ["调用 / 时延上限", `${Number(budget.max_calls || 0)} 次 · ${Number(budget.max_latency_ms || 0)} ms`],
+    ["管理深度", `${Number(limits.max_management_depth || 0)} 层（固定）`],
+  ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  const assignments = Array.isArray(panel.selected_assignments) ? panel.selected_assignments : [];
+  $("#planning-roles").innerHTML = assignments.length
+    ? assignments.map((item) => `<article>
+        <strong>${escapeHtml(humanize(item.role_id || "planner"))}</strong>
+        <span>${escapeHtml(item.model_id || item.worker_id || "未绑定候选")}</span>
+        <small>${escapeHtml(item.provider || "provider-neutral")} · ${escapeHtml(item.deployment || "未部署")} · 匹配 ${Math.round(Number(item.score || 0) * 100)}%</small>
+      </article>`).join("")
+    : '<p>本模式不创建额外 Planner，避免无意义管理开销。</p>';
+  const rejected = Object.entries(decision.rejected_modes || {})
+    .map(([mode, reason]) => `<li><b>${escapeHtml(modeLabels[mode] || mode)}</b>：${escapeHtml(reason)}</li>`)
+    .join("");
+  $("#planning-details").innerHTML = `
+    <ul>${rejected}</ul>
+    <p>最多 ${Number(limits.max_planners_per_round || 0)} 个 Planner、${Number(limits.max_adjudication_rounds || 0)} 次裁决、${Number(limits.max_full_replans || 0)} 次全局重规划；Planner 不得再创建 Planner。</p>
+    <small>离线可重复仿真 · ${escapeHtml(decision.policy_version || "")} · 指纹 ${escapeHtml(String(decision.fingerprint || "").slice(0, 16))}</small>`;
+  card.classList.remove("hidden");
 }
 
 function renderForecast(forecast) {

@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v4.9"
+PROJECTION_SCHEMA_VERSION = "v5.1"
 
 
 class ProjectionError(ValueError):
@@ -83,6 +83,10 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
             "recovery_history": copy.deepcopy(
                 record.recovery_history
             ),
+            "planning": {
+                "decision": copy.deepcopy(record.planning_decision),
+                "proposals": copy.deepcopy(record.planning_proposals),
+            },
             "runtime": {
                 "schema_version": PROJECTION_SCHEMA_VERSION,
                 "revision": record.runtime_revision if revision is None else int(revision),
@@ -123,6 +127,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     schema = snapshot.get("projection_schema_version")
     if schema not in {
         None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6", "v4.7",
+        "v4.9",
         PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")
@@ -160,6 +165,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     runtime = dict(snapshot.get("runtime") or {})
     metrics = dict(snapshot.get("metrics") or {})
     internal = dict(snapshot.get("_runtime_internal") or {})
+    planning = dict(snapshot.get("planning") or {})
     return {
         "id": str(snapshot["id"]),
         "request": request,
@@ -182,6 +188,10 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "recovered": bool(runtime.get("recovered", False)),
         "cancel_requested": bool(runtime.get("cancel_requested", False)),
         "retry_of": runtime.get("retry_of"),
+        "planning_decision": copy.deepcopy(planning.get("decision")),
+        "planning_proposals": copy.deepcopy(
+            planning.get("proposals", [])
+        ),
         "worker_snapshot": copy.deepcopy(internal.get("worker_snapshot", [])),
     }
 

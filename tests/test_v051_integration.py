@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from costweave.control_kernel import ControlKernel
+from costweave.domain import RunRequest
+from costweave.engine import RunRecord
+from costweave.projections import record_from_snapshot, record_to_projection
+
+
+class V051ProjectionTests(unittest.TestCase):
+    def test_planning_receipt_round_trips_in_authoritative_projection(self):
+        record = RunRecord(
+            id="run_1234567890abcdef1234567890abcdef",
+            request=RunRequest(goal="验证规划合同能够持久恢复"),
+            planning_decision={
+                "decision_id": "planning-test",
+                "mode": "SINGLE_PLANNER",
+                "fingerprint": "abc",
+            },
+            planning_proposals=[{
+                "proposal_id": "proposal-test",
+                "planner_role": "domain-planner",
+            }],
+        )
+        snapshot = record_to_projection(record, revision=1)
+        restored = record_from_snapshot(snapshot)
+        self.assertEqual("v5.1", snapshot["projection_schema_version"])
+        self.assertEqual(
+            "SINGLE_PLANNER",
+            restored.planning_decision["mode"],
+        )
+        self.assertEqual(1, len(restored.planning_proposals))
+
+    def test_legacy_v49_projection_hydrates_without_planning_receipt(self):
+        record = RunRecord(
+            id="run_abcdef1234567890abcdef1234567890",
+            request=RunRequest(goal="兼容旧投影"),
+        )
+        snapshot = record_to_projection(record, revision=1)
+        snapshot["projection_schema_version"] = "v4.9"
+        snapshot["runtime"]["schema_version"] = "v4.9"
+        snapshot.pop("planning")
+        restored = record_from_snapshot(snapshot)
+        self.assertIsNone(restored.planning_decision)
+        self.assertEqual([], restored.planning_proposals)
+
+    def test_migration_nine_is_applied_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.sqlite3"
+            first = ControlKernel(path)
+            self.assertEqual(9, first.health()["migrations"])
+            second = ControlKernel(path)
+            self.assertEqual(9, second.health()["migrations"])
+            self.assertEqual("v5.1", second.health()["runtime_schema"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+

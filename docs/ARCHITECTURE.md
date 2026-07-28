@@ -1,6 +1,6 @@
-# CostWeave v0.4.9 架构说明
+# CostWeave v0.5.1 架构说明
 
-CostWeave v0.4.9 在多结局预测、证据验收、端到端成本、不可变 Artifact 和受控媒体生产平面之上，完成 API 整合、事件完整性、数据库备份恢复、资源租约回收和本地 HTTP 安全加固。真实模型、图片与视频生成仍由仿真适配器隔离。
+CostWeave v0.5.1 在 v0.4.9 的可靠控制内核之上增加两层规划合同：第 1 层 MetaPlanner 只选择规划模式并分配预算，第 2 层 Planner 只提出受限方案。管理层不得递归扩张，跨 Provider 角色通过目录能力画像匹配，默认只使用确定性的 MockProvider。真实模型、图片与视频生成仍由仿真适配器隔离。
 
 ```text
 HTTP / RunManager Facade / Engine

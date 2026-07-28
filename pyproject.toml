@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.4.9"
-description = "Controlled image and video production DAG for multi-model orchestration"
+version = "0.5.1"
+description = "Provider-neutral deliberation contracts for cost-aware multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

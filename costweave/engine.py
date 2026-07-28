@@ -48,6 +48,7 @@ from .router import PredictiveRouter
 from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
 from .dag_simulation import DagMonteCarlo
+from .deliberation import DeliberationSimulator
 
 
 @dataclass
@@ -71,6 +72,8 @@ class RunRecord:
     recovered: bool = False
     cancel_requested: bool = False
     retry_of: str | None = None
+    planning_decision: dict[str, Any] | None = None
+    planning_proposals: list[dict[str, Any]] = field(default_factory=list)
     worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
     control_kernel: Any = field(default=None, repr=False)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -123,6 +126,10 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "recovery_history": list(self.recovery_history),
+                "planning": {
+                    "decision": self.planning_decision,
+                    "proposals": list(self.planning_proposals),
+                },
                 "forecast": (
                     self.control_kernel.forecast(str(self.id))
                     if self.control_kernel is not None
@@ -134,7 +141,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v4.9",
+                    "schema_version": "v5.1",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -201,6 +208,7 @@ class OrchestrationEngine:
         control_kernel: Any = None,
     ):
         self.planner = HeuristicPlanner()
+        self.deliberation = DeliberationSimulator()
         self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
@@ -232,7 +240,46 @@ class OrchestrationEngine:
                     run_router.workers,
                     max_concurrency=record.request.max_concurrency,
                 )
-            plan = self.planner.plan(record.request)
+            analysis_planner = (
+                self.planner
+                if hasattr(self.planner, "analyze")
+                else HeuristicPlanner()
+            )
+            analysis = analysis_planner.analyze(record.request)
+            planning_decision = self.deliberation.decide(
+                record.request,
+                analysis,
+                run_router.workers,
+            )
+            planning_proposals = self.deliberation.proposals(
+                planning_decision,
+                record.request,
+                analysis,
+            )
+            record.planning_decision = planning_decision.to_dict()
+            record.planning_proposals = [
+                proposal.to_dict() for proposal in planning_proposals
+            ]
+            self._event(
+                record,
+                "planning_mode_decided",
+                (
+                    f"MetaPlanner 仿真选择 {planning_decision.mode.value}；"
+                    f"规划角色 {planning_decision.panel_policy.size} 个，"
+                    "管理深度上限 2"
+                ),
+                detail={
+                    "decision_id": planning_decision.decision_id,
+                    "mode": planning_decision.mode.value,
+                    "fingerprint": planning_decision.fingerprint(),
+                    "simulated": True,
+                },
+            )
+            plan = (
+                self.planner.plan(record.request, analysis)
+                if isinstance(self.planner, HeuristicPlanner)
+                else self.planner.plan(record.request)
+            )
             issues = self.validator.validate_plan(plan)
             if issues:
                 raise PlanValidationError("；".join(issues))
@@ -1379,6 +1426,17 @@ class RunManager:
         if self.get(run_id) is None or self.control_kernel is None:
             return None
         return self.control_kernel.forecast(run_id)
+
+    def planning(self, run_id: str) -> dict[str, Any] | None:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        with record.lock:
+            return {
+                "run_id": str(record.id),
+                "decision": record.planning_decision,
+                "proposals": list(record.planning_proposals),
+            }
 
     def evaluations(self) -> list[dict[str, Any]]:
         if self.control_kernel is None:

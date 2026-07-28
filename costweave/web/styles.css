@@ -216,6 +216,10 @@ button { color: inherit; }
 .control-panel {
   position: sticky;
   top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 23px;
 }
 
@@ -460,6 +464,35 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .secondary-button { padding: 9px 12px; color: var(--text); font-size: 12px; font-weight: 750; }
 .secondary-button:hover { border-color: rgba(255, 142, 135, .4); background: rgba(255, 255, 255, .05); }
 .secondary-button.subtle { color: var(--muted); }
+
+.planning-card {
+  padding: 18px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(244, 191, 103, .12), transparent 34%),
+    linear-gradient(135deg, rgba(32, 35, 28, .82), rgba(10, 24, 25, .72));
+  border: 1px solid rgba(244, 191, 103, .22);
+  border-radius: 16px;
+}
+.planning-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.planning-heading h3 { margin: 5px 0 0; font-size: 19px; }
+#planning-mode { padding: 6px 9px; color: var(--accent-2); border: 1px solid rgba(244, 191, 103, .28); border-radius: 999px; font-size: 11px; font-weight: 800; }
+#planning-mode[data-mode="MULTI_PLANNER"] { color: var(--blue); border-color: rgba(106, 199, 232, .34); }
+#planning-reason { margin: 12px 0 0; color: var(--soft); font-size: 12px; line-height: 1.65; }
+.planning-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+.planning-metrics span { padding: 9px 10px; background: rgba(3, 12, 14, .34); border: 1px solid rgba(244, 191, 103, .11); border-radius: 10px; color: var(--soft); font-size: 11px; }
+.planning-metrics b { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; text-transform: uppercase; }
+.planning-roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
+.planning-roles article { padding: 10px; background: rgba(255, 255, 255, .025); border: 1px solid rgba(150, 218, 235, .11); border-radius: 10px; }
+.planning-roles strong, .planning-roles span, .planning-roles small { display: block; }
+.planning-roles strong { color: var(--text); font-size: 12px; }
+.planning-roles span { margin-top: 4px; color: var(--blue); font-size: 11px; }
+.planning-roles small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.planning-roles p { margin: 0; color: var(--muted); font-size: 11px; }
+.planning-explain { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(244, 191, 103, .12); }
+.planning-explain summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 750; }
+#planning-details { color: var(--muted); font-size: 10px; line-height: 1.55; }
+#planning-details ul { padding-left: 18px; }
+#planning-details p { margin: 8px 0; }
 
 .forecast-card {
   padding: 18px;
@@ -791,7 +824,12 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 
 @media (max-width: 980px) {
   .workspace { grid-template-columns: 1fr; }
-  .control-panel { position: static; }
+  .control-panel {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    scrollbar-gutter: auto;
+  }
   .recent-runs .history-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-proof { display: none; }
   .hero { grid-template-columns: 1fr; }
@@ -802,6 +840,8 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 
 @media (max-width: 700px) {
+  .planning-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .planning-roles { grid-template-columns: 1fr; }
   .media-project-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .media-project-heading, .media-project-footer { align-items: flex-start; flex-direction: column; }
   .media-project-footer > span { text-align: left; }
@@ -844,6 +884,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 
 @media (max-width: 480px) {
+  .planning-metrics { grid-template-columns: 1fr; }
   .media-project-metrics { grid-template-columns: 1fr; }
   .topbar, main, footer { width: min(100% - 20px, 1380px); }
   .brand { font-size: 17px; }

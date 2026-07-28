@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.4.9", health["version"])
+        self.assertEqual("0.5.1", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v4.9", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.1", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -76,6 +76,42 @@ class ServerTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["models"]), 12)
         self.assertIn("snapshot_date", catalog["metadata"])
         self.assertTrue(catalog["metadata"]["editable"])
+
+    def test_planning_policy_and_run_receipt_are_explainable(self):
+        status, policy = self.fetch_json("/api/v1/planning/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.1", policy["schema_version"])
+        self.assertFalse(policy["adapter_policy"]["paid_calls_enabled"])
+        self.assertEqual(2, policy["limits"]["max_management_depth"])
+        self.assertIn("MULTI_PLANNER", policy["modes"])
+        self.assertEqual(3, len(policy["roles"]))
+
+        headers = {
+            "Content-Type": "application/json",
+            "Idempotency-Key": "server-planning-receipt-0001",
+        }
+        status, run = self.request_json(
+            "/api/v1/runs",
+            {
+                "goal": "设计并验证一个跨领域高可靠成本调度系统",
+                "budget": 2,
+            },
+            headers=headers,
+            method="POST",
+        )
+        self.assertEqual(202, status)
+        planning = None
+        for _ in range(50):
+            status, planning = self.fetch_json(
+                f"/api/v1/runs/{run['id']}/planning"
+            )
+            if planning["decision"] is not None:
+                break
+            time.sleep(0.03)
+        self.assertEqual(200, status)
+        self.assertIsNotNone(planning["decision"])
+        self.assertTrue(planning["decision"]["fingerprint"])
+        self.assertTrue(planning["decision"]["simulated"])
 
     def test_catalog_crud_and_revision_conflict(self):
         _, catalog = self.fetch_json("/api/catalog")

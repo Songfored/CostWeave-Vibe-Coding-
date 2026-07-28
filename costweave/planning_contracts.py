@@ -1,0 +1,344 @@
+"""Provider-neutral deliberation contracts introduced by CostWeave v0.5.1."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from enum import StrEnum
+from typing import Any, Mapping
+
+
+PLANNING_SCHEMA_VERSION = "v0.5.1"
+PLANNING_POLICY_VERSION = "deliberation-contracts-0.5.1"
+
+
+class PlanningContractError(ValueError):
+    """Raised when a deliberation contract violates a hard invariant."""
+
+
+class PlanningMode(StrEnum):
+    NO_DELEGATION = "NO_DELEGATION"
+    DIRECT_DELEGATION = "DIRECT_DELEGATION"
+    SINGLE_PLANNER = "SINGLE_PLANNER"
+    MULTI_PLANNER = "MULTI_PLANNER"
+    EXPERT_OVERRIDE = "EXPERT_OVERRIDE"
+    ASK_USER = "ASK_USER"
+
+
+@dataclass(frozen=True, slots=True)
+class ManagementLimits:
+    max_management_depth: int = 2
+    governor_can_spawn_governor: bool = False
+    planner_can_spawn_planner: bool = False
+    max_planners_per_round: int = 3
+    max_adjudication_rounds: int = 1
+    max_full_replans: int = 1
+    max_node_escalations: int = 2
+
+    def __post_init__(self) -> None:
+        if self.max_management_depth != 2:
+            raise PlanningContractError("management depth is frozen at two")
+        if self.governor_can_spawn_governor or self.planner_can_spawn_planner:
+            raise PlanningContractError("recursive management layers are forbidden")
+        if not 1 <= self.max_planners_per_round <= 3:
+            raise PlanningContractError("planner panel must contain one to three roles")
+        if self.max_adjudication_rounds != 1 or self.max_full_replans != 1:
+            raise PlanningContractError("v0.5.1 permits only one adjudication and one full replan")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningBudget:
+    max_cost: float
+    max_latency_ms: int
+    max_calls: int
+    task_budget_ratio: float
+
+    def __post_init__(self) -> None:
+        if self.max_cost < 0 or self.max_latency_ms < 0 or self.max_calls < 0:
+            raise PlanningContractError("planning budget values cannot be negative")
+        if not 0 <= self.task_budget_ratio <= 0.25:
+            raise PlanningContractError("planning cannot exceed 25% of the task budget")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_cost": round(self.max_cost, 6),
+            "max_latency_ms": self.max_latency_ms,
+            "max_calls": self.max_calls,
+            "task_budget_ratio": round(self.task_budget_ratio, 4),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PanelPolicy:
+    size: int
+    required_diversity: tuple[str, ...] = ()
+    selected_roles: tuple[str, ...] = ()
+    selected_assignments: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.size <= 3:
+            raise PlanningContractError("panel size must be between zero and three")
+        if len(self.selected_roles) != self.size:
+            raise PlanningContractError("panel size must equal selected role count")
+        if len(self.selected_assignments) not in {0, self.size}:
+            raise PlanningContractError("assignments must be empty or match panel size")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "size": self.size,
+            "required_diversity": list(self.required_diversity),
+            "selected_roles": list(self.selected_roles),
+            "selected_assignments": [
+                dict(item) for item in self.selected_assignments
+            ],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RoleSpec:
+    role_id: str
+    title: str
+    objective: str
+    required_capabilities: tuple[str, ...]
+    evaluation_focus: tuple[str, ...]
+    authority: tuple[str, ...] = ("propose",)
+    forbidden_actions: tuple[str, ...] = (
+        "spawn_planner",
+        "change_budget",
+        "execute_irreversible_action",
+    )
+    management_level: int = 2
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.role_id.strip() or not self.objective.strip():
+            raise PlanningContractError("role id and objective are required")
+        if self.management_level != 2:
+            raise PlanningContractError("planner roles must remain at management level two")
+        if "spawn_planner" not in self.forbidden_actions:
+            raise PlanningContractError("planner roles must not create another planner layer")
+        if not self.required_capabilities or not self.evaluation_focus:
+            raise PlanningContractError("role capabilities and evaluation focus are required")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in (
+            "required_capabilities",
+            "evaluation_focus",
+            "authority",
+            "forbidden_actions",
+        ):
+            data[key] = list(data[key])
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class PlanProposal:
+    proposal_id: str
+    planner_role: str
+    objective_interpretation: str
+    decomposition_outline: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    risks: tuple[str, ...]
+    acceptance_strategy: tuple[str, ...]
+    estimated_planning_cost: float
+    estimated_planning_latency_ms: int
+    confidence: float
+    assignment: Mapping[str, Any] = field(default_factory=dict)
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.proposal_id.strip() or not self.planner_role.strip():
+            raise PlanningContractError("proposal id and planner role are required")
+        if not self.decomposition_outline or not self.acceptance_strategy:
+            raise PlanningContractError("proposal requires a decomposition and acceptance strategy")
+        if self.estimated_planning_cost < 0 or self.estimated_planning_latency_ms < 0:
+            raise PlanningContractError("proposal estimates cannot be negative")
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError("proposal confidence must be between zero and one")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in (
+            "decomposition_outline",
+            "assumptions",
+            "risks",
+            "acceptance_strategy",
+        ):
+            data[key] = list(data[key])
+        data["assignment"] = dict(self.assignment)
+        data["estimated_planning_cost"] = round(
+            self.estimated_planning_cost, 6
+        )
+        data["confidence"] = round(self.confidence, 4)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningDecision:
+    decision_id: str
+    mode: PlanningMode
+    confidence: float
+    reasons: tuple[str, ...]
+    rejected_modes: Mapping[str, str]
+    planning_budget: PlanningBudget
+    panel_policy: PanelPolicy
+    stop_conditions: tuple[str, ...]
+    escalation_conditions: tuple[str, ...]
+    limits: ManagementLimits = field(default_factory=ManagementLimits)
+    policy_version: str = PLANNING_POLICY_VERSION
+    schema_version: str = PLANNING_SCHEMA_VERSION
+    simulated: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.decision_id.strip() or not self.reasons:
+            raise PlanningContractError("decision id and reasons are required")
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError("decision confidence must be between zero and one")
+        expected_panel = {
+            PlanningMode.NO_DELEGATION: 0,
+            PlanningMode.ASK_USER: 0,
+            PlanningMode.DIRECT_DELEGATION: 1,
+            PlanningMode.SINGLE_PLANNER: 1,
+            PlanningMode.EXPERT_OVERRIDE: 1,
+        }
+        if self.mode in expected_panel and self.panel_policy.size != expected_panel[self.mode]:
+            raise PlanningContractError("planning mode and panel size disagree")
+        if self.mode == PlanningMode.MULTI_PLANNER and not 2 <= self.panel_policy.size <= 3:
+            raise PlanningContractError("MultiPlanner requires two or three roles")
+        if self.panel_policy.size > self.limits.max_planners_per_round:
+            raise PlanningContractError("panel exceeds the hard planner limit")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "policy_version": self.policy_version,
+            "decision_id": self.decision_id,
+            "mode": self.mode.value,
+            "confidence": round(self.confidence, 4),
+            "reasons": list(self.reasons),
+            "rejected_modes": dict(self.rejected_modes),
+            "planning_budget": self.planning_budget.to_dict(),
+            "panel_policy": self.panel_policy.to_dict(),
+            "stop_conditions": list(self.stop_conditions),
+            "escalation_conditions": list(self.escalation_conditions),
+            "limits": self.limits.to_dict(),
+            "simulated": self.simulated,
+            "fingerprint": self.fingerprint(),
+        }
+
+    def fingerprint(self) -> str:
+        semantic = {
+            "schema_version": self.schema_version,
+            "policy_version": self.policy_version,
+            "decision_id": self.decision_id,
+            "mode": self.mode.value,
+            "confidence": round(self.confidence, 6),
+            "reasons": list(self.reasons),
+            "rejected_modes": dict(self.rejected_modes),
+            "planning_budget": self.planning_budget.to_dict(),
+            "panel_policy": self.panel_policy.to_dict(),
+            "stop_conditions": list(self.stop_conditions),
+            "escalation_conditions": list(self.escalation_conditions),
+            "limits": self.limits.to_dict(),
+            "simulated": self.simulated,
+        }
+        return hashlib.sha256(
+            json.dumps(
+                semantic,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class WorkOrder:
+    work_order_id: str
+    task_id: str
+    objective: str
+    dependencies: tuple[str, ...]
+    input_artifacts: tuple[str, ...]
+    context_manifest: tuple[Mapping[str, Any], ...]
+    assumptions: tuple[str, ...]
+    allowed_tools: tuple[str, ...]
+    forbidden_actions: tuple[str, ...]
+    output_schema: Mapping[str, Any]
+    acceptance_tests: tuple[str, ...]
+    cost_limit: float
+    time_limit_ms: int
+    escalation_conditions: tuple[str, ...]
+    idempotency_key: str
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.work_order_id or not self.task_id or not self.objective.strip():
+            raise PlanningContractError("work order identity and objective are required")
+        if not self.acceptance_tests or not self.output_schema:
+            raise PlanningContractError("work order requires output schema and acceptance tests")
+        if self.cost_limit < 0 or self.time_limit_ms <= 0:
+            raise PlanningContractError("work order limits are invalid")
+        if not self.idempotency_key.strip():
+            raise PlanningContractError("work order idempotency key is required")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in (
+            "dependencies",
+            "input_artifacts",
+            "context_manifest",
+            "assumptions",
+            "allowed_tools",
+            "forbidden_actions",
+            "acceptance_tests",
+            "escalation_conditions",
+        ):
+            data[key] = list(data[key])
+        data["output_schema"] = dict(self.output_schema)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class ResultEnvelope:
+    work_order_id: str
+    status: str
+    output: Mapping[str, Any]
+    evidence: tuple[Mapping[str, Any], ...]
+    acceptance_results: tuple[Mapping[str, Any], ...]
+    assumptions_used: tuple[str, ...]
+    unresolved_risks: tuple[str, ...]
+    actual_cost: float
+    actual_latency_ms: int
+    confidence: float
+    escalation_requested: bool = False
+    escalation_reason: str = ""
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "failed", "rate_limited", "escalated"}:
+            raise PlanningContractError("unsupported result status")
+        if self.actual_cost < 0 or self.actual_latency_ms < 0:
+            raise PlanningContractError("result measurements cannot be negative")
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError("result confidence must be between zero and one")
+        if self.escalation_requested and not self.escalation_reason.strip():
+            raise PlanningContractError("escalation requires a reason")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in (
+            "evidence",
+            "acceptance_results",
+            "assumptions_used",
+            "unresolved_risks",
+        ):
+            data[key] = list(data[key])
+        data["output"] = dict(self.output)
+        return data
+
