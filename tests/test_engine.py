@@ -79,7 +79,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(RunStatus.FAILED, record.status)
         self.assertIn("质量门槛", record.error)
 
-    async def test_adapter_exception_is_replanned_without_dirty_running_tasks(self):
+    async def test_transient_adapter_exception_retries_only_failed_node(self):
         engine = OrchestrationEngine()
         engine.executor = OneShotFailingExecutor()
         record = RunRecord(
@@ -88,7 +88,14 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         )
         await engine.run(record)
         self.assertEqual(RunStatus.COMPLETED, record.status, record.error)
-        self.assertEqual(1, record.replans)
+        self.assertEqual(0, record.replans)
+        self.assertEqual(1, record.recovery_count)
+        self.assertTrue(
+            any(
+                event.kind == "recovery_retry_node"
+                for event in record.events
+            )
+        )
         self.assertFalse(any(task.status == TaskStatus.RUNNING for task in record.plan.tasks))
 
 

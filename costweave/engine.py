@@ -6,11 +6,13 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 from .compat_v4 import (
     artifact_dag_enabled,
     contracts_v4_enabled,
+    evidence_recovery_enabled,
     parallel_runtime_enabled,
     placement_v4_enabled,
     runtime_v4_enabled,
@@ -31,7 +33,15 @@ from .domain import (
 from .catalog_store import CATALOG_STORE, CatalogStore
 from .executor import SimulatedExecutor, utc_now
 from .graph_compiler import GraphCompiler
+from .failure_classifier import FailureClassifier, FailureRecord
+from .plan_patch import PlanPatch
 from .planner import HeuristicPlanner
+from .recovery import (
+    RecoveryAction,
+    RecoveryContext,
+    RecoveryDecision,
+    RecoveryPolicy,
+)
 from .router import PredictiveRouter
 from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
@@ -50,6 +60,8 @@ class RunRecord:
     current_success_probability: float = 0.0
     spent: float = 0.0
     replans: int = 0
+    recovery_count: int = 0
+    recovery_history: list[dict[str, Any]] = field(default_factory=list)
     peak_parallelism: int = 0
     error: str | None = None
     runtime_revision: int = 0
@@ -83,6 +95,11 @@ class RunRecord:
                     "value_of_time_per_second": (
                         self.request.value_of_time_per_second
                     ),
+                    "max_recoveries": self.request.max_recoveries,
+                    "max_task_attempts": self.request.max_task_attempts,
+                    "recovery_time_limit_seconds": (
+                        self.request.recovery_time_limit_seconds
+                    ),
                 },
                 "status": self.status.value,
                 "plan": self.plan.to_dict() if self.plan else None,
@@ -92,6 +109,7 @@ class RunRecord:
                     "spent": round(self.spent, 4),
                     "budget": self.request.budget,
                     "replans": self.replans,
+                    "recoveries": self.recovery_count,
                     "peak_parallelism": self.peak_parallelism,
                     "duration_ms": duration_ms,
                     "validated_tasks": sum(task.status == TaskStatus.VALIDATED for task in self.plan.tasks) if self.plan else 0,
@@ -101,8 +119,9 @@ class RunRecord:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "error": self.error,
+                "recovery_history": list(self.recovery_history),
                 "runtime": {
-                    "schema_version": "v4.5",
+                    "schema_version": "v4.6",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -171,6 +190,8 @@ class OrchestrationEngine:
         self.planner = HeuristicPlanner()
         self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
+        self.failure_classifier = FailureClassifier()
+        self.recovery_policy = RecoveryPolicy()
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
         self.graph_compiler = GraphCompiler()
@@ -569,6 +590,21 @@ class OrchestrationEngine:
                             "level": "L0-adapter",
                             "findings": [f"执行适配器异常：{exc}"],
                             "score": 0.0,
+                            "contract_revision": (
+                                task.success_contract.get(
+                                    "revision",
+                                    "success-contract-v1",
+                                )
+                            ),
+                            "criterion_results": [],
+                            "critical_failures": list(
+                                task.critical_criteria
+                            ),
+                            "evidence_gaps": [str(exc)],
+                            "contract_errors": [],
+                            "layers_completed": [],
+                            "false_positive_risk": 0.01,
+                            "false_negative_risk": 0.25,
                         }
                         if (
                             placement_v4_enabled()
@@ -581,11 +617,12 @@ class OrchestrationEngine:
                             )
                         self._recalculate_probability(record)
                         self._event(record, "task_rejected", f"{task.title} 执行异常：{exc}", task.id)
-                        await self._global_replan(
+                        await self._recover_from_failure(
                             record,
                             task,
                             run_router,
                             reserved_cost=sum(item.estimated_cost for item in active.values()),
+                            exception=exc,
                         )
                         continue
 
@@ -599,6 +636,13 @@ class OrchestrationEngine:
                     task.result = result
                     task.finished_at = utc_now()
                     task.validation = self.validator.validate_result(task, result)
+                    if (
+                        evidence_recovery_enabled()
+                        and record.control_kernel is not None
+                    ):
+                        record.control_kernel.record_validation(
+                            record, task
+                        )
                     record.spent += task.estimated_cost
                     if (
                         placement_v4_enabled()
@@ -636,7 +680,7 @@ class OrchestrationEngine:
                         )
                         self._recalculate_probability(record)
                         self._event(record, "task_rejected", f"{task.title} 未通过验收：{'; '.join(task.validation['findings'])}", task.id)
-                        await self._global_replan(
+                        await self._recover_from_failure(
                             record,
                             task,
                             run_router,
@@ -668,15 +712,157 @@ class OrchestrationEngine:
                         )
                         task.finished_at = utc_now()
 
+    async def _recover_from_failure(
+        self,
+        record: RunRecord,
+        failed: TaskContract,
+        run_router: PredictiveRouter,
+        reserved_cost: float = 0.0,
+        exception: Exception | None = None,
+    ) -> None:
+        if not evidence_recovery_enabled():
+            raise RuntimeError(
+                "高级恢复已停用；失败节点保持拒绝状态"
+            )
+        failure = self.failure_classifier.classify(
+            task=failed,
+            validation=failed.validation,
+            exception=exception,
+            result=failed.result,
+        )
+        remaining_budget = max(
+            0.0,
+            record.request.budget
+            - record.spent
+            - reserved_cost,
+        )
+        estimated_recovery_cost = max(
+            0.000001,
+            failed.estimated_cost
+            * (
+                1.0
+                if failure.classification == "transient"
+                else 1.22
+            ),
+        )
+        elapsed = self._elapsed_seconds(record)
+        decision = self.recovery_policy.decide(
+            failure,
+            RecoveryContext(
+                recovery_count=record.recovery_count,
+                max_recoveries=record.request.max_recoveries,
+                task_attempt=failed.attempt,
+                max_task_attempts=record.request.max_task_attempts,
+                remaining_budget=remaining_budget,
+                estimated_recovery_cost=estimated_recovery_cost,
+                elapsed_seconds=elapsed,
+                time_limit_seconds=(
+                    record.request.recovery_time_limit_seconds
+                ),
+            ),
+        )
+        descendants = self.validator.descendants(
+            record.plan.tasks, failed.id
+        )
+        affected = (
+            {failed.id}
+            if decision.scope == "node"
+            else {failed.id, *descendants}
+        )
+        if decision.scope == "global":
+            affected = {task.id for task in record.plan.tasks}
+        patch = None
+        if decision.action in {
+            RecoveryAction.UPGRADE_NODE.value,
+            RecoveryAction.REPLAN_SUBGRAPH.value,
+            RecoveryAction.REPLAN_GLOBAL.value,
+        }:
+            patch = PlanPatch.propose(
+                base_revision=record.plan.version,
+                scope=decision.scope,
+                failed_task_id=failed.id,
+                affected_task_ids=affected,
+                rationale=decision.reason,
+            )
+            patch.validate()
+
+        entry = {
+            "failure": failure.to_dict(),
+            "decision": decision.to_dict(),
+            "affected_task_ids": sorted(affected),
+            "plan_patch": (
+                patch.to_dict() if patch is not None else None
+            ),
+        }
+        failed.failure_record = failure.to_dict()
+        failed.recovery_history.append(entry)
+        record.recovery_history.append(entry)
+        if record.control_kernel is not None:
+            record.control_kernel.record_failure(
+                record,
+                failed,
+                failure,
+                decision,
+                sorted(affected),
+                patch,
+            )
+        if not decision.allowed:
+            self._event(
+                record,
+                "recovery_stopped",
+                f"{failed.title} 恢复停止：{decision.reason}",
+                failed.id,
+                entry,
+            )
+            raise RuntimeError(f"恢复停止：{decision.reason}")
+
+        record.recovery_count += 1
+        if decision.action == RecoveryAction.RETRY_NODE.value:
+            set_task_status(
+                record,
+                failed,
+                TaskStatus.PENDING,
+                source="engine.recovery.retry_node",
+            )
+            failed.result = None
+            failed.validation = None
+            failed.queue_state = "pending"
+            failed.blocked_reason = ""
+            failed.started_at = None
+            failed.finished_at = None
+            self._event(
+                record,
+                "recovery_retry_node",
+                f"{failed.title} 判定为临时故障，仅重试该节点",
+                failed.id,
+                entry,
+            )
+            self._checkpoint(record, "engine.recovery.retry_node")
+            return
+
+        await self._global_replan(
+            record,
+            failed,
+            run_router,
+            reserved_cost=reserved_cost,
+            failure=failure,
+            decision=decision,
+            patch=patch,
+            affected=affected,
+        )
+
     async def _global_replan(
         self,
         record: RunRecord,
         failed: TaskContract,
         run_router: PredictiveRouter,
         reserved_cost: float = 0.0,
+        *,
+        failure: FailureRecord | None = None,
+        decision: RecoveryDecision | None = None,
+        patch: PlanPatch | None = None,
+        affected: set[str] | None = None,
     ) -> None:
-        if record.replans >= 1:
-            raise RuntimeError("全局重规划次数已达到MVP安全上限")
         set_run_status(
             record,
             RunStatus.REPLANNING,
@@ -684,14 +870,27 @@ class OrchestrationEngine:
         )
         record.replans += 1
         descendants = self.validator.descendants(record.plan.tasks, failed.id)
-        affected = {failed.id, *descendants}
+        affected = affected or {failed.id, *descendants}
         if artifact_dag_enabled() and record.control_kernel is not None:
-            affected = self.graph_compiler.affected_subgraph(
-                record.plan, {failed.id}
-            )
+            if (
+                decision is None
+                or decision.action
+                != RecoveryAction.REPLAN_GLOBAL.value
+            ):
+                affected = self.graph_compiler.affected_subgraph(
+                    record.plan, {failed.id}
+                )
+            invalidation_scope = {
+                task.id
+                for task in record.plan.tasks
+                if (
+                    task.id in affected
+                    and task.status != TaskStatus.VALIDATED
+                )
+            }
             record.control_kernel.invalidate_tasks(
                 record,
-                affected,
+                invalidation_scope,
                 reason=f"task {failed.id} failed validation",
             )
         for task in record.plan.tasks:
@@ -713,6 +912,21 @@ class OrchestrationEngine:
             source="engine.task.invalidated",
         )
         replacement = self.planner.replan(record.plan, failed.id)
+        if (
+            decision is not None
+            and decision.action
+            == RecoveryAction.REPLAN_GLOBAL.value
+        ):
+            for task in record.plan.tasks:
+                if (
+                    task.id != replacement.id
+                    and task.status == TaskStatus.PENDING
+                    and replacement.id not in task.dependencies
+                ):
+                    task.dependencies.append(replacement.id)
+                    task.dependency_types[
+                        replacement.id
+                    ] = "hard"
         if artifact_dag_enabled() and record.control_kernel is not None:
             record.control_kernel.compile_graph(record)
         remaining_budget = max(0.0, record.request.budget - record.spent - reserved_cost)
@@ -747,6 +961,16 @@ class OrchestrationEngine:
             "affected_descendants": sorted(affected - {failed.id}),
             "selected_model": replacement.selected_worker,
             "routing": replacement_summary,
+            "recovery_action": (
+                decision.action if decision is not None else "legacy"
+            ),
+            "failure_class": (
+                failure.classification
+                if failure is not None else "legacy"
+            ),
+            "plan_patch": (
+                patch.to_dict() if patch is not None else None
+            ),
         })
         await asyncio.sleep(.18)
         issues = self.validator.validate_plan(record.plan)
@@ -762,6 +986,22 @@ class OrchestrationEngine:
             record,
             "replan_validated",
             f"计划v{record.plan.version}通过检查，成功率重估为{record.current_success_probability:.0%}，恢复并行调度",
+        )
+
+    @staticmethod
+    def _elapsed_seconds(record: RunRecord) -> float:
+        if not record.started_at:
+            return 0.0
+        return max(
+            0.0,
+            (
+                datetime.fromisoformat(
+                    utc_now().replace("Z", "+00:00")
+                )
+                - datetime.fromisoformat(
+                    record.started_at.replace("Z", "+00:00")
+                )
+            ).total_seconds(),
         )
 
     @staticmethod
@@ -1044,6 +1284,16 @@ class RunManager:
         if self.control_kernel is None:
             return []
         return self.control_kernel.ledger(run_id=run_id)
+
+    def validations(self, run_id: str) -> list[dict[str, Any]]:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return []
+        return self.control_kernel.validations(run_id)
+
+    def failures(self, run_id: str) -> list[dict[str, Any]]:
+        if self.get(run_id) is None or self.control_kernel is None:
+            return []
+        return self.control_kernel.failures(run_id)
 
     def approvals(
         self, *, status: str | None = None

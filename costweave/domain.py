@@ -49,6 +49,9 @@ class RunRequest:
     deadline_seconds: float | None = None
     recovery_budget_ratio: float = 0.2
     value_of_time_per_second: float | None = None
+    max_recoveries: int = 2
+    max_task_attempts: int = 2
+    recovery_time_limit_seconds: float = 30.0
 
     def normalized(self) -> "RunRequest":
         return RunRequest(
@@ -73,6 +76,17 @@ class RunRequest:
                 )
                 if self.value_of_time_per_second is not None
                 else None
+            ),
+            max_recoveries=max(0, min(int(self.max_recoveries), 8)),
+            max_task_attempts=max(
+                1, min(int(self.max_task_attempts), 5)
+            ),
+            recovery_time_limit_seconds=max(
+                0.1,
+                min(
+                    float(self.recovery_time_limit_seconds),
+                    86_400.0,
+                ),
             ),
         )
 
@@ -151,6 +165,12 @@ class TaskContract:
     direct_model_cost: float = 0.0
     forecast_cost_breakdown: dict[str, float] = field(
         default_factory=dict
+    )
+    critical_criteria: list[str] = field(default_factory=list)
+    success_contract: dict[str, Any] = field(default_factory=dict)
+    failure_record: dict[str, Any] | None = None
+    recovery_history: list[dict[str, Any]] = field(
+        default_factory=list
     )
     required_capabilities: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)

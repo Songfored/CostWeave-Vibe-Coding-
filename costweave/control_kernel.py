@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.4.5."""
+"""Persistent command/event/projection owner for CostWeave v0.4.6."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from .event_store import EventStore, ProjectionUpdate
 from .graph_compiler import GraphCompiler
 from .messages import MessageEnvelope
 from .placements import PlacementStore
+from .recovery import EvidenceRecoveryStore
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
 from .reservations import ReservationManager
 from .state_guard import is_terminal, validate_transition
@@ -34,6 +35,7 @@ class ControlKernel:
         self.reservations = ReservationManager(self.store.path)
         self.approval_store = ApprovalStore(self.store.path)
         self.placement_store = PlacementStore(self.store.path)
+        self.evidence_store = EvidenceRecoveryStore(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
         self._lock = threading.RLock()
@@ -73,6 +75,11 @@ class ControlKernel:
                 ),
                 "value_of_time_per_second": (
                     request.value_of_time_per_second
+                ),
+                "max_recoveries": request.max_recoveries,
+                "max_task_attempts": request.max_task_attempts,
+                "recovery_time_limit_seconds": (
+                    request.recovery_time_limit_seconds
                 ),
                 "retry_of": retry_of,
             },
@@ -260,6 +267,7 @@ class ControlKernel:
     def health(self) -> dict[str, Any]:
         from .compat_v4 import (
             artifact_dag_enabled,
+            evidence_recovery_enabled,
             parallel_runtime_enabled,
             placement_v4_enabled,
         )
@@ -269,9 +277,11 @@ class ControlKernel:
             **self.artifact_store.counts(),
             **self.reservations.counts(),
             **self.placement_store.counts(),
+            **self.evidence_store.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
             "placement_v4": placement_v4_enabled(),
+            "evidence_recovery": evidence_recovery_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
@@ -453,6 +463,7 @@ class ControlKernel:
         return {
             **self.reservations.summary(run_id),
             **self.placement_store.summary(run_id),
+            **self.evidence_store.summary(run_id),
             "pending_approvals": sum(
                 item["status"] == "pending" for item in approvals
             ),
@@ -483,6 +494,37 @@ class ControlKernel:
         self, *, run_id: str | None = None
     ) -> list[dict[str, Any]]:
         return self.placement_store.ledger(run_id=run_id)
+
+    def record_validation(self, record: Any, task: Any) -> str:
+        return self.evidence_store.record_validation(
+            run_id=str(record.id),
+            task=task,
+            validation=task.validation,
+        )
+
+    def record_failure(
+        self,
+        record: Any,
+        task: Any,
+        failure: Any,
+        decision: Any,
+        affected_task_ids: list[str],
+        patch: Any = None,
+    ) -> None:
+        self.evidence_store.record_failure(
+            run_id=str(record.id),
+            task=task,
+            failure=failure,
+            decision=decision,
+            affected_task_ids=affected_task_ids,
+            patch=patch,
+        )
+
+    def validations(self, run_id: str) -> list[dict[str, Any]]:
+        return self.evidence_store.validations(run_id)
+
+    def failures(self, run_id: str) -> list[dict[str, Any]]:
+        return self.evidence_store.failures(run_id)
 
     def resolve_approval(
         self,

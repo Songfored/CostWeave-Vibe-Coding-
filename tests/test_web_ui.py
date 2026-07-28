@@ -100,9 +100,11 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.4.5 Resource Economics", self.html)
+        self.assertIn("v0.4.6 Evidence Recovery", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)
+        self.assertIn("关键成功标准", self.js)
+        self.assertIn("恢复记录", self.js)
 
 
 if __name__ == "__main__":

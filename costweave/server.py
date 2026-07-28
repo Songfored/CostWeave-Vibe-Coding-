@@ -44,7 +44,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.4.5"
+    server_version = "CostWeave/0.4.6"
 
     @property
     def manager(self) -> RunManager:
@@ -174,6 +174,43 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/validations"):
+                run_id = suffix.removesuffix(
+                    "/validations"
+                ).strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                items = self.manager.validations(run_id)
+                self._json({
+                    "run_id": run_id,
+                    "validations": items,
+                    "passed": sum(
+                        item["passed"] for item in items
+                    ),
+                    "failed": sum(
+                        not item["passed"] for item in items
+                    ),
+                })
+                return
+            if suffix.endswith("/failures"):
+                run_id = suffix.removesuffix(
+                    "/failures"
+                ).strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json({
+                    "run_id": run_id,
+                    "failures": self.manager.failures(run_id),
+                })
+                return
             if suffix.endswith("/placements"):
                 run_id = suffix.removesuffix("/placements").strip("/")
                 if self.manager.get(run_id) is None:
@@ -386,6 +423,17 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     float(payload["value_of_time_per_second"])
                     if payload.get("value_of_time_per_second") is not None
                     else None
+                ),
+                max_recoveries=int(
+                    payload.get("max_recoveries", 2)
+                ),
+                max_task_attempts=int(
+                    payload.get("max_task_attempts", 2)
+                ),
+                recovery_time_limit_seconds=float(
+                    payload.get(
+                        "recovery_time_limit_seconds", 30.0
+                    )
                 ),
             )
             key = self.headers.get("Idempotency-Key")
@@ -716,7 +764,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.4.5 Resource Economics prototype"
+        description="Run the CostWeave v0.4.6 Evidence Recovery prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

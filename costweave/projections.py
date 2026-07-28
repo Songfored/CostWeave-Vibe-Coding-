@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v4.5"
+PROJECTION_SCHEMA_VERSION = "v4.6"
 
 
 class ProjectionError(ValueError):
@@ -60,6 +60,11 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                 "value_of_time_per_second": (
                     record.request.value_of_time_per_second
                 ),
+                "max_recoveries": record.request.max_recoveries,
+                "max_task_attempts": record.request.max_task_attempts,
+                "recovery_time_limit_seconds": (
+                    record.request.recovery_time_limit_seconds
+                ),
             },
             "status": record.status.value,
             "plan": record.plan.to_dict() if record.plan else None,
@@ -68,12 +73,16 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                 "success_probability": record.current_success_probability,
                 "spent": record.spent,
                 "replans": record.replans,
+                "recoveries": record.recovery_count,
                 "peak_parallelism": record.peak_parallelism,
             },
             "created_at": record.created_at,
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "error": record.error,
+            "recovery_history": copy.deepcopy(
+                record.recovery_history
+            ),
             "runtime": {
                 "schema_version": PROJECTION_SCHEMA_VERSION,
                 "revision": record.runtime_revision if revision is None else int(revision),
@@ -113,7 +122,8 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         raise ProjectionError("run projection must be an object")
     schema = snapshot.get("projection_schema_version")
     if schema not in {
-        None, "v4.2", "v4.3", "v4.4", PROJECTION_SCHEMA_VERSION
+        None, "v4.2", "v4.3", "v4.4", "v4.5",
+        PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")
     request_data = dict(snapshot.get("request") or {})
@@ -137,6 +147,15 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             if request_data.get("value_of_time_per_second") is not None
             else None
         ),
+        max_recoveries=int(
+            request_data.get("max_recoveries", 2)
+        ),
+        max_task_attempts=int(
+            request_data.get("max_task_attempts", 2)
+        ),
+        recovery_time_limit_seconds=float(
+            request_data.get("recovery_time_limit_seconds", 30.0)
+        ),
     ).normalized()
     runtime = dict(snapshot.get("runtime") or {})
     metrics = dict(snapshot.get("metrics") or {})
@@ -153,8 +172,12 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "current_success_probability": float(metrics.get("success_probability", 0.0)),
         "spent": float(metrics.get("spent", 0.0)),
         "replans": int(metrics.get("replans", 0)),
+        "recovery_count": int(metrics.get("recoveries", 0)),
         "peak_parallelism": int(metrics.get("peak_parallelism", 0)),
         "error": snapshot.get("error"),
+        "recovery_history": copy.deepcopy(
+            snapshot.get("recovery_history", [])
+        ),
         "runtime_revision": int(runtime.get("revision", 0)),
         "recovered": bool(runtime.get("recovered", False)),
         "cancel_requested": bool(runtime.get("cancel_requested", False)),

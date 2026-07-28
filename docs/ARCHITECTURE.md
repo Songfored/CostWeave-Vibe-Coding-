@@ -1,6 +1,6 @@
-# CostWeave v0.4.5 架构说明
+# CostWeave v0.4.6 架构说明
 
-CostWeave v0.4.5 是以端到端成本、资源准入和不可变 Artifact 为任务边界、带版本化合同、确定性状态机和 SQLite EventStore 的离线多模型决策 Runtime。v0.3 的目录、画像、规划、路由、执行、验收和恢复保持可用；`RunManager` 作为兼容 Facade 转发到持久化 `ControlKernel`。
+CostWeave v0.4.6 是以成功契约、独立证据、端到端成本、资源准入和不可变 Artifact 为任务边界，带确定性失败分类、分级恢复、版本化合同、状态机和 SQLite EventStore 的离线多模型决策 Runtime。`RunManager` 作为兼容 Facade 转发到持久化 `ControlKernel`。
 
 ```text
 HTTP / RunManager Facade / Engine
@@ -24,7 +24,13 @@ ReservationManager       ApprovalStore
           │                   │
           └─────────┬─────────┘
                     ▼
-ControlKernel：状态所有权、Artifact、幂等与恢复
+SuccessContract + Validator：关键标准、逐条证据与误验风险
+                    │
+                    ▼
+FailureClassifier + RecoveryPolicy：节点 / 子图 / 全局恢复
+                    │
+                    ▼
+ControlKernel：状态所有权、Artifact、幂等与恢复审计
                     │
      ┌──────────────┼──────────────┬────────────┐
      ▼              ▼              ▼            ▼
@@ -40,7 +46,33 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_ARTIFACT_DAG=0` 关闭 Artifact 新写入，保留 v0.4.2 结果字段。
 - `COSTWEAVE_PARALLEL_RUNTIME=0` 关闭资源准入与租约，回到 v0.4.3 兼容执行路径。
 - `COSTWEAVE_PLACEMENT_V4=0` 关闭联合 Placement，回到 v0.3 风险调整路由。
+- `COSTWEAVE_EVIDENCE_RECOVERY=0` 关闭高级恢复并失败即终止，不放宽验收。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
+
+## 0.3 成功契约、证据与恢复边界
+
+每个任务在执行前形成版本化成功契约：
+
+```text
+acceptance_criteria
+→ critical / quality criteria
+→ required result fields + minimum score
+→ independent evidence requirement
+→ criterion_results
+→ validation result + FP/FN risk
+```
+
+关键标准使用硬门，不能被普通标准平均；高风险任务的关键标准必须含非执行器自评的独立证据。失败随后进入确定性分类，并由策略映射到最小恢复范围：
+
+```text
+transient             → retry_node
+capability/evidence   → upgrade_node
+contract_error        → replan_subgraph
+root_assumption_error → replan_global
+limit_exceeded        → stop
+```
+
+`PlanPatch` 只能由规划层生成，并且从当前修订精确推进到下一修订。恢复前计算受影响任务集合；已验证且与失败无关的兄弟 Artifact 保持 `validated`。`validation_results`、`criterion_results`、`failure_records` 和 `plan_revisions` 记录完整审计链。
 
 ## 0.2 Placement 与成本账本
 

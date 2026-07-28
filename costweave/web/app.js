@@ -275,9 +275,9 @@ function render(run) {
     ? `路由：${routing.strategy} · 目录 ${routing.catalog_revision || run.plan.model_snapshot || "未知"} · 最低可行 $${Number(routing.minimum_feasible_cost_usd || 0).toFixed(4)} · 当前组合 $${Number(routing.estimated_total_cost_usd || 0).toFixed(4)} · ${routing.independent_validators || 0} 个独立验收`
     : "等待模型组合决策";
   const scheduling = run.scheduling || {};
-  $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
-    ? `调度：关键路径优先 · Placement ${Number(scheduling.selected_placements || 0)} 个（备用 ${Math.max(0, Number(scheduling.placements || 0) - Number(scheduling.selected_placements || 0))}） · 预测总成本 $${Number(scheduling.forecast_total || 0).toFixed(4)} · 实际账本 $${Number(scheduling.actual_total || 0).toFixed(4)} · 活跃租约 ${Number(scheduling.active_leases || 0)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
-    : "调度：兼容模式（未启用资源感知并行运行时）";
+    $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
+      ? `调度：关键路径优先 · Placement ${Number(scheduling.selected_placements || 0)} 个（备用 ${Math.max(0, Number(scheduling.placements || 0) - Number(scheduling.selected_placements || 0))}） · 预测总成本 $${Number(scheduling.forecast_total || 0).toFixed(4)} · 实际账本 $${Number(scheduling.actual_total || 0).toFixed(4)} · 验收 ${Number(scheduling.validation_results || 0)} 次（失败 ${Number(scheduling.failed_validations || 0)}） · 恢复 ${Number(scheduling.failure_records || 0)} 次 · 活跃租约 ${Number(scheduling.active_leases || 0)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
+      : "调度：兼容模式（未启用资源感知并行运行时）";
 
   if (!state.selectedTaskId || !run.plan.tasks.some((task) => task.id === state.selectedTaskId)) {
     const finalTask = findFinalTask(run.plan.tasks);
@@ -447,6 +447,14 @@ function renderContract(task) {
     `${dependency} [${task.dependency_types?.[dependency] || "hard"}]`);
   const artifactOutputs = (task.output_artifact_specs || []).map((spec) =>
     `${spec.artifact_type} · ${spec.schema_ref}`);
+  const successCriteria = (task.success_contract?.criteria || []);
+  const criticalCriteria = successCriteria
+    .filter((criterion) => criterion.critical)
+    .map((criterion) => criterion.text);
+  const criterionResults = (task.validation?.criterion_results || []).map((criterion) =>
+    `${criterion.passed ? "✓" : "✕"} ${criterion.critical ? "[关键] " : ""}${criterion.criterion}${criterion.independent_evidence ? " · 独立证据" : ""}`);
+  const recoveryRecords = (task.recovery_history || []).map((record) =>
+    `${record.classification || "unknown"} → ${record.action || "stop"} · ${record.scope || "none"}`);
   $("#contract").innerHTML = `
     <div class="contract-heading">
       <div><h4>${escapeHtml(task.title)}</h4><code>${escapeHtml(task.id)} · 计划 v${task.plan_version}</code></div>
@@ -461,6 +469,7 @@ function renderContract(task) {
       <dt>交接消息</dt><dd>${escapeHtml(task.handoff_message_id || "尚未发送")}</dd>
       <dt>所需能力</dt><dd>${list(task.required_capabilities)}</dd>
       <dt>验收标准</dt><dd>${list(task.acceptance_criteria)}</dd>
+      <dt>关键成功标准</dt><dd>${list(criticalCriteria)}</dd>
       <dt>输出格式</dt><dd>${list(task.output_schema)}</dd>
       <dt>选定模型</dt><dd>${escapeHtml(modelLabel(task.selected_worker))}</dd>
       <dt>资源组合</dt><dd>${placement.placement_id
@@ -473,7 +482,9 @@ function renderContract(task) {
       <dt>资源合同</dt><dd>${Number(task.resource_slots || 1)} 槽 · CPU ${Number(task.cpu_cores || 0)} · GPU ${Number(task.gpu_count || 0)} · VRAM ${Number(task.vram_mb || 0)} MB</dd>
       <dt>调度状态</dt><dd>${escapeHtml(task.queue_state || "pending")}${task.blocked_reason ? ` · ${escapeHtml(task.blocked_reason)}` : ""}${task.reservation_id ? ` · ${escapeHtml(task.reservation_id)}` : ""}</dd>
       <dt>审批</dt><dd>${task.requires_approval ? escapeHtml(task.approval_id || "等待生成审批单") : "不需要"}</dd>
-      ${task.validation ? `<dt>最近验收</dt><dd>${escapeHtml(task.validation.findings.join("；"))}</dd>` : ""}
+      ${task.validation ? `<dt>最近验收</dt><dd>${escapeHtml((task.validation.findings || []).join("；"))} · 误放风险 ${Math.round(Number(task.validation.false_positive_risk || 0) * 100)}% · 误拒风险 ${Math.round(Number(task.validation.false_negative_risk || 0) * 100)}%</dd>` : ""}
+      <dt>逐标准证据</dt><dd>${list(criterionResults)}</dd>
+      <dt>恢复记录</dt><dd>${list(recoveryRecords)}</dd>
     </dl>
     <div class="candidate-list"><span>候选排序</span><ol>${candidates || "<li>暂无候选</li>"}</ol></div>
     <div class="candidate-list rejected-list"><span>硬约束淘汰</span><ol>${rejections || "<li>无</li>"}</ol></div>
