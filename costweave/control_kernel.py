@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.5."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.1."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from .handoff_compiler import (
 from .placements import PlacementStore
 from .recovery import EvidenceRecoveryStore
 from .outcome_store import OutcomeStore
+from .evaluation_store import EvaluationProtocolStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -44,6 +45,9 @@ class ControlKernel:
         self.placement_store = PlacementStore(self.store.path)
         self.evidence_store = EvidenceRecoveryStore(self.store.path)
         self.outcome_store = OutcomeStore(self.store.path)
+        self.evaluation_protocol_store = EvaluationProtocolStore(
+            self.store.path
+        )
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -293,6 +297,7 @@ class ControlKernel:
             **self.placement_store.counts(),
             **self.evidence_store.counts(),
             **self.outcome_store.counts(),
+            **self.evaluation_protocol_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -721,6 +726,17 @@ class ControlKernel:
 
     def evaluations(self) -> list[dict[str, Any]]:
         return self.outcome_store.evaluations()
+
+    def record_evaluation_report(self, report: Any) -> bool:
+        return self.evaluation_protocol_store.record(report)
+
+    def evaluation_reports(self) -> list[dict[str, Any]]:
+        return self.evaluation_protocol_store.list()
+
+    def evaluation_observations(
+        self, evaluation_id: str
+    ) -> list[dict[str, Any]]:
+        return self.evaluation_protocol_store.observations(evaluation_id)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

@@ -375,6 +375,16 @@ class PredictiveRouter:
             )
         return viable[0]
 
+    def rank_candidates(
+        self,
+        task: TaskContract,
+        mode: RunMode = RunMode.BALANCED,
+    ) -> tuple[RouteDecision, ...]:
+        """Return a read-only deterministic ranking for evaluation policies."""
+
+        ranked, _ = self._rank_candidates(task, mode)
+        return tuple(ranked)
+
     @staticmethod
     def _apply(
         task: TaskContract,

@@ -1,4 +1,8 @@
-# CostWeave v0.5.5 架构说明
+# CostWeave v0.5.6.1 架构说明
+
+v0.5.6.1 在运行控制面之外加入独立但可归因的评测平面。`ExperimentSpec` 冻结任务集、模型目录、五组基线、预算、随机种子和验收版本；`ExecutionTaskView` 在进入执行后端前剥离参考答案、验证器身份、数据分区和路线身份。每个基线使用同一任务顺序、权限、工具、质量门槛和资源上限，形成 35 × 5 的观察矩阵。
+
+内置 `DeterministicFixtureBackend` 只验证协议、成本记账、盲评和重放，不代表真实模型。盲评材料不包含模型、Provider、策略、价格、硬验收结论或软评分；身份映射单独保存。实验报告写入既有 `evaluation_runs`，逐项观察写入 migration 014 的 `evaluation_observations`，因此报告仍只有一个权威事实源。
 
 v0.5.5 在跨供应商经济与预执行准入之后加入智能交接和证据匹配恢复。每个执行节点先被编译为 WorkOrder 与最小 Context Manifest；接收方在执行前验证版本、依赖、Artifact 完整性、Schema、权限、工具、模态、上下文、输出容量和审批。执行中通过 Pcomplete 检查点持续更新完成预期，失败时沿依赖类型分析污染范围，并在权限不扩张、全局重规划最多一次的门禁下选择最小恢复动作。
 
@@ -57,6 +61,9 @@ Pcomplete + PollutionAnalyzer + RecoveryGate
 DagMonteCarlo + OutcomeStore：结局分布 / 归因 / 校准
                     │
                     ▼
+Evaluation Protocol：五基线 / 盲评 / CPS / Regret / JSONL
+                    │
+                    ▼
 MediaRuntime：意图 / 圣经 / 镜头 DAG / Prompt / 审批门
                     │
           ┌─────────┴─────────┐
@@ -89,6 +96,7 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_OUTCOME_FORECAST=0` 停止新预测和学习写入，旧预测保持可读。
 - `COSTWEAVE_MEDIA_WORKFLOW=0` 停止创建新媒体项目，通用编排、旧媒体记录和其他功能保持可用。
 - `COSTWEAVE_HANDOFF_INTELLIGENCE=0` 关闭 v0.5.5 WorkOrder 预检、Pcomplete 与污染感知门禁，回到 v0.5.4 兼容交接和恢复路径。
+- v0.5.6.1 评测命令固定使用 E0 Fixture Backend；没有启用真实 Provider 或策略晋级的环境开关。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
 
 ## 0.1 Planning Governor 决策边界

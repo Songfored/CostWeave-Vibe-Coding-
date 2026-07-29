@@ -39,6 +39,12 @@ from .adaptive_recovery import (
     CHECKPOINT_SCHEMA_VERSION,
     RECOVERY_GATE_REVISION,
 )
+from .evaluation_protocol import (
+    BASELINE_IDS,
+    EVALUATION_PROTOCOL_VERSION,
+    SEED_TASK_SET_VERSION,
+    load_seed_tasks,
+)
 
 
 MANAGER: RunManager | None = None
@@ -65,7 +71,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.5"
+    server_version = "CostWeave/0.5.6.1"
 
     def setup(self) -> None:
         super().setup()
@@ -109,8 +115,39 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "checkpoint_schema": CHECKPOINT_SCHEMA_VERSION,
                     "recovery_policy": RECOVERY_GATE_REVISION,
                 },
+                "evaluation_protocol": {
+                    "schema_version": EVALUATION_PROTOCOL_VERSION,
+                    "task_set_version": SEED_TASK_SET_VERSION,
+                    "baseline_count": len(BASELINE_IDS),
+                    "real_provider_calls_allowed": False,
+                    "commercial_claims_allowed": False,
+                },
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/evaluation/protocol":
+            seed_tasks = load_seed_tasks()
+            self._json({
+                "schema_version": EVALUATION_PROTOCOL_VERSION,
+                "task_set_version": SEED_TASK_SET_VERSION,
+                "task_count": len(seed_tasks),
+                "partitions": {
+                    partition: sum(
+                        item.partition == partition
+                        for item in seed_tasks
+                    )
+                    for partition in ("train", "calibration", "test")
+                },
+                "baselines": list(BASELINE_IDS),
+                "execution_mode": "deterministic_fixture_simulation",
+                "evidence_level": "E0-simulated",
+                "real_provider_calls_allowed": False,
+                "commercial_claims_allowed": False,
+                "run_command": (
+                    "python -m costweave.baseline_runner "
+                    "--output-dir work/v0561-evaluation"
+                ),
             })
             return
         if path == "/api/v1/planning/policy":
@@ -1192,7 +1229,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.5 handoff and adaptive recovery prototype"
+        description="Run the CostWeave v0.5.6.1 evaluation-ready prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

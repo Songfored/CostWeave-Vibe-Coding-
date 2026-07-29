@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.5", health["version"])
+        self.assertEqual("0.5.6.1", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.5", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.6.1", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -75,12 +75,36 @@ class ServerTests(unittest.TestCase):
             "v0.5.5",
             health["handoff_contract"]["schema_version"],
         )
+        self.assertEqual(
+            "v0.5.6.1",
+            health["evaluation_protocol"]["schema_version"],
+        )
+        self.assertEqual(
+            5, health["evaluation_protocol"]["baseline_count"]
+        )
+        self.assertFalse(
+            health["evaluation_protocol"][
+                "real_provider_calls_allowed"
+            ]
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
         self.assertGreaterEqual(len(catalog["models"]), 12)
         self.assertIn("snapshot_date", catalog["metadata"])
         self.assertTrue(catalog["metadata"]["editable"])
+
+    def test_evaluation_protocol_is_explicitly_simulated(self):
+        status, protocol = self.fetch_json(
+            "/api/v1/evaluation/protocol"
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.6.1", protocol["schema_version"])
+        self.assertEqual(35, protocol["task_count"])
+        self.assertEqual(5, len(protocol["baselines"]))
+        self.assertFalse(protocol["real_provider_calls_allowed"])
+        self.assertEqual("E0-simulated", protocol["evidence_level"])
+        self.assertFalse(protocol["commercial_claims_allowed"])
 
     def test_planning_policy_and_run_receipt_are_explainable(self):
         status, policy = self.fetch_json("/api/v1/planning/policy")

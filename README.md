@@ -1,5 +1,34 @@
 # CostWeave
 
+## v0.5.6.1：Evaluation Protocol & Baseline Runner
+
+v0.5.6.1 不再继续增加未经验证的路由规则，而是先建立一套能证明或推翻 CostWeave 分流效果的实验基础设施：
+
+- 冻结 `ExperimentSpec`、`BenchmarkTask`、`ExecutionTaskView`、共享预算和盲评合同；参考答案、验证器身份和数据分区不会进入执行负载。
+- 内置 35 个 E0 种子任务，按项目隔离为 15 个 train、10 个 calibration 和 10 个 test，覆盖代码、研究、写作、分析、长上下文、工具、多语言与视觉。
+- 同一批任务统一比较五组基线：最强可行模型、最低价可行模型、人工静态分配、v0.4 固定规则和 v0.5 自适应策略。
+- 结果矩阵同时记录关键条件、软质量、重试、验证、工具、完整成本、Time to Accepted Result、CPS、非劣差值和 Routing Regret。
+- 盲评包隐藏模型、Provider、策略和价格身份，并保持未评分状态；私有身份映射与公开评审材料分离。
+- `python -m costweave.baseline_runner` 可导出不可静默覆盖的 `experiment.json`、任务/观察 JSONL、盲评 JSONL 和基线 CSV。
+- migration 014 把 175 个观察项幂等写入现有 `evaluation_runs` 事实源；Runtime Schema 升级到 `v5.6.1`，运行投影继续兼容 `v5.5`。
+- `GET /api/v1/evaluation/protocol` 明确返回任务规模、五组基线、E0 证据等级和零真实 Provider 调用边界。
+
+运行内置零调用评测：
+
+```powershell
+python -B -m costweave.baseline_runner --output-dir work/v0561-evaluation
+```
+
+如需把报告同时存入现有运行数据库：
+
+```powershell
+python -B -m costweave.baseline_runner --output-dir work/v0561-evaluation --database work/v0561-runtime.sqlite3
+```
+
+> 证据边界：本版证明的是评测协议、数据隔离、盲评、成本记账和重放机制能够运行。内置结果全部标记为 `E0-simulated`，真实 Provider 调用数为 0，不能用来宣传真实成功率、真实降本比例或商业优势。真实数据接入从 v0.5.6.2～v0.5.6.3 开始。
+
+升级说明见 [`docs/V0.5.6.1_MIGRATION.md`](docs/V0.5.6.1_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.6.1.md`](docs/CHANGELOG-v0.5.6.1.md)，后续路线见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+
 ## v0.5.5：Handoff Intelligence & Adaptive Recovery
 
 v0.5.5 把“把提示词发给下一个模型”升级为可验证的执行合同与证据匹配恢复：
@@ -278,7 +307,7 @@ CostWeave v0.4.8 新增受控图片、短视频和 AI 电影生产工作流：�
 python -m costweave.server
 ```
 
-v0.5.5 默认启用智能交接、媒体工作流、Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG、并行运行时和发布加固。只关闭智能交接与自适应恢复，回到 v0.5.4 兼容路径：
+v0.5.6.1 默认保留智能交接、媒体工作流、Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG、并行运行时和发布加固。评测协议是独立命令，不会自动执行。只关闭智能交接与自适应恢复，回到 v0.5.4 兼容路径：
 
 ```powershell
 $env:COSTWEAVE_HANDOFF_INTELLIGENCE="0"
@@ -455,6 +484,10 @@ costweave/
 ├── catalog_store.py   # 校验、CRUD、导入导出、版本与持久化
 ├── planner.py         # 分层画像、复杂度、风险、DAG 与升级门
 ├── router.py          # 快照、硬约束、保守预测和组合优化
+├── evaluation_protocol.py # 实验、任务、共享预算、执行隔离和盲评合同
+├── baseline_runner.py # 五基线 Runner、E0 Fixture、比较指标和不可变导出
+├── evaluation_store.py # 评测报告与 observation matrix 幂等持久化
+├── benchmarks/        # 固定种子任务和评测入口
 ├── validator.py       # DAG、Schema、逐条标准和门控语义
 ├── executor.py        # 离线结构化模拟执行器
 ├── engine.py          # 快照冻结、并行、预算、证据概率与重规划
@@ -492,6 +525,7 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/handoffs` | 读取 WorkOrder、最小上下文清单、合同摘要与接收方预检 |
 | `GET` | `/api/v1/runs/{id}/recovery` | 读取 Pcomplete 检查点、污染分析、恢复门禁与全局重规划余额 |
 | `GET` | `/api/v1/evaluations` | 读取冻结基准、Brier、ECE、Log Loss 与覆盖率 |
+| `GET` | `/api/v1/evaluation/protocol` | 读取 v0.5.6.1 任务集、五组基线、证据等级和零真实调用边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -511,10 +545,12 @@ costweave/
 ## 测试
 
 ```bash
-python -B -m unittest discover -s tests -v
+python -B tests/run_isolated.py
 ```
 
-当前基线为 402 项自动化测试。v0.5.5 新增 13 项专项测试，覆盖最小上下文、工具/Schema/权限预检、旧消息兼容、计划版本同步、Pcomplete 风险门槛、硬/软污染传播、全局重规划硬上限、不可逆审批、恢复权限不扩张和完整持久化；此前 389 项跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
+当前基线为 426 项自动化测试。v0.5.6.1 新增 23 项专项测试和 1 项协议 API 回归，覆盖实验合同、项目级数据隔离、执行负载去答案、五基线、确定性重放、路由拒绝、身份盲化、硬失败、共享预算、完整成本、不可变导出和幂等持久化；此前 402 项交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面测试继续作为回归门。
+
+测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
 测试覆盖：
 
@@ -540,6 +576,7 @@ python -B -m unittest discover -s tests -v
 - MetaPlanner 回执、淘汰路线、跨 Provider 角色、零付费 Adapter 和两层管理上限
 - 难度区间、ExpectedLoss、VoD、容量预检、执行前升级和六路线可解释性
 - WorkOrder、接收方预检、最小上下文、Pcomplete、污染隔离和恢复权限门禁
+- 35 个评测种子任务、五基线完整矩阵、盲评身份隔离、E0 证据边界和不可变 JSONL/CSV 导出
 
 ## 当前边界
 
@@ -548,7 +585,7 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.5 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.6.1 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -559,7 +596,7 @@ python -B -m unittest discover -s tests -v
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.5 路线已经完成；下一步是 v0.5.6 Outcome Dataset & Learned Predictors。进入真实 Provider 适配、实时遥测和受控在线评估前，应保留本版作为可重复的控制平面基线。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+v0.5.1～v0.5.6.1 路线已经完成；下一步是 v0.5.6.2 Outcome Dataset & Label Governance。进入真实 Provider 适配、实时遥测和受控在线评估前，应保留本版作为可重复的评测基线。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，v0.5.6.2～v0.6 的全部未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

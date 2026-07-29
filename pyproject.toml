@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.5.5"
+version = "0.5.6.1"
 description = "Cross-provider expected-value control plane for cost-aware multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,9 +14,10 @@ keywords = ["agent", "orchestration", "dag", "llm-router", "multi-agent"]
 
 [project.scripts]
 costweave = "costweave.server:main"
+costweave-evaluate = "costweave.baseline_runner:main"
 
 [tool.setuptools.packages.find]
 include = ["costweave*"]
 
 [tool.setuptools.package-data]
-costweave = ["web/*", "migrations/*.sql"]
+costweave = ["web/*", "migrations/*.sql", "benchmarks/*.json"]
