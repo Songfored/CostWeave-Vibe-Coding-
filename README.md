@@ -1,5 +1,25 @@
 # CostWeave
 
+## v0.5.2：Planning Governor
+
+v0.5.2 把 v0.5.1 的确定性模式仿真升级为规则优先、置信度感知的规划治理器。系统会在执行前估计任务难度区间、比较六条候选路线的预期总损失，并在低置信、高风险或本地容量不足时直接升级，避免让弱模型先失败再逐级试错。
+
+- 冻结 11 维 `TaskDifficultyVector`，同时输出难度下界、期望、上界、判断置信度与触发特征。
+- 为 `NO_DELEGATION`、直接委派、SinglePlanner、MultiPlanner、高级模型和询问用户生成统一候选回执。
+- 预期总损失同时计入直接费用、时间价值、失败返工、错误风险和协调开销，不再只比较 Token 单价。
+- MultiPlanner 必须同时通过硬约束和 VoD（讨论价值）收益边际；简单任务会被规则门直接挡住。
+- 高级模型仅在高风险、低置信、专业能力缺口或难度越界时可用，防止常规任务被高价路线吞噬。
+- 角色匹配先执行模式对应的推理能力下限，再按标准化价格、本地优先、能力与可靠性评分；低难度直接委派不会仅因高级模型分数略高就选择最贵候选。
+- 本地轻量分类器接口不调用 Provider；后续可以替换为本地开源分类模型而不改变 Governor 合同。
+- 执行前检查本地候选数量、推理能力上限、并发压力和期限压力；容量不足时在第一次执行前请求远程增强。
+- 低置信或高风险决策会把 `senior-review` 验证门写入现有 DAG，而不是仅在页面上提示。
+- 页面展示难度信号、区间、升级原因、六条候选路线、成功率下界、预期损失、规划费用、VoD 与淘汰理由。
+- Runtime / Projection Schema 升级为 `v5.2`，migration 010 增加规划事件复合审计索引；v4.9 与 v5.1 投影继续可读。
+
+> 能力边界：v0.5.2 的 Governor 是可解释的确定性决策内核，不宣称已经通过真实流量学习出最优策略。真实并行 MultiPlanner 提案与裁决属于 v0.5.3；跨 Provider 实时价格、容量和熔断属于 v0.5.4。当前默认配置仍不会产生付费 API 请求。
+
+升级说明见 [`docs/V0.5.2_MIGRATION.md`](docs/V0.5.2_MIGRATION.md)，完整 v0.5 路线见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+
 ## v0.5.1：Deliberation Contracts
 
 v0.5.1 是 v0.5 跨厂商 MultiPlanner 路线的第一个稳定切片。它先冻结“谁负责判断、谁负责提出计划、信息怎样交接、管理层最多有几层”，不提前把规则仿真器包装成学习型 Planning Governor。
@@ -433,7 +453,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 347 项自动化测试。v0.5.1 新增 32 项测试，覆盖合同硬限制、六种规划模式、安全任务强制讨论、角色多样性、预算上限、稳定指纹、MockProvider、规划 API、Projection 往返、v4.9 恢复和 migration 009；既有 315 项媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
+当前基线为 369 项自动化测试。v0.5.2 新增 22 项专项测试，覆盖 11 维难度合同、置信区间、ExpectedLoss、六条候选路线、VoD、简单任务防过度规划、低置信与高风险升级、本地容量和并发预检、价格感知角色匹配、推理能力下限、Provider 多样性、预算硬门、稳定指纹以及执行前高级复核门；v0.5.1 的 347 项合同、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
 
 测试覆盖：
 
@@ -457,6 +477,7 @@ python -B -m unittest discover -s tests -v
 - 媒体锁定意图零漂移、连续性缺陷、有效秒成本和媒体 API
 - 页面结构、响应式基础规则和管理交互绑定
 - MetaPlanner 回执、淘汰路线、跨 Provider 角色、零付费 Adapter 和两层管理上限
+- 难度区间、ExpectedLoss、VoD、容量预检、执行前升级和六路线可解释性
 
 ## 当前边界
 
@@ -465,8 +486,8 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.1 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
-- 当前规划模式选择器是确定性合同仿真，不是已通过生产数据校准的 Planning Governor。
+- v0.5.2 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
 - 真实外部 Provider 尚未接入，因此幂等保证目前覆盖控制状态和模拟执行；真实外部副作用仍需 Provider 幂等协议。
@@ -476,7 +497,7 @@ python -B -m unittest discover -s tests -v
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-下一版本 v0.5.2 将在当前合同之上实现难度向量、置信区间、VoD、规划预算收益门和执行前升级；总体设计见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+下一版本 v0.5.3 将实现 2～3 个 Planner 的真正并行提案、匿名化约束评分、一轮受限裁决、冲突检测和 Plan Compiler；总体设计见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

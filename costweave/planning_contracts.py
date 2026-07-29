@@ -1,4 +1,4 @@
-"""Provider-neutral deliberation contracts introduced by CostWeave v0.5.1."""
+"""Provider-neutral planning-governance contracts for CostWeave v0.5.2."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 
-PLANNING_SCHEMA_VERSION = "v0.5.1"
-PLANNING_POLICY_VERSION = "deliberation-contracts-0.5.1"
+PLANNING_SCHEMA_VERSION = "v0.5.2"
+PLANNING_POLICY_VERSION = "planning-governor-0.5.2"
 
 
 class PlanningContractError(ValueError):
@@ -44,7 +44,7 @@ class ManagementLimits:
         if not 1 <= self.max_planners_per_round <= 3:
             raise PlanningContractError("planner panel must contain one to three roles")
         if self.max_adjudication_rounds != 1 or self.max_full_replans != 1:
-            raise PlanningContractError("v0.5.1 permits only one adjudication and one full replan")
+            raise PlanningContractError("v0.5.2 permits only one adjudication and one full replan")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -178,6 +178,170 @@ class PlanProposal:
         return data
 
 
+DIFFICULTY_DIMENSIONS = (
+    "ambiguity",
+    "decomposition_uncertainty",
+    "novelty",
+    "domain_specialization",
+    "cross_domain_coupling",
+    "context_multimodal_load",
+    "tool_chain_depth",
+    "verification_difficulty",
+    "error_loss",
+    "irreversibility",
+    "concurrency_deadline_pressure",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DifficultyInterval:
+    lower: float
+    expected: float
+    upper: float
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.lower <= self.expected <= self.upper <= 1:
+            raise PlanningContractError(
+                "difficulty interval must be ordered within zero and one"
+            )
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "lower": round(self.lower, 4),
+            "expected": round(self.expected, 4),
+            "upper": round(self.upper, 4),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TaskDifficultyVector:
+    dimensions: Mapping[str, float]
+    overall: DifficultyInterval
+    confidence: float
+    trigger_features: tuple[str, ...]
+    classifier_id: str
+    classifier_version: str
+
+    def __post_init__(self) -> None:
+        if set(self.dimensions) != set(DIFFICULTY_DIMENSIONS):
+            raise PlanningContractError(
+                "difficulty vector must contain the frozen eleven dimensions"
+            )
+        if any(not 0 <= float(value) <= 1 for value in self.dimensions.values()):
+            raise PlanningContractError(
+                "difficulty dimensions must be between zero and one"
+            )
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError(
+                "difficulty confidence must be between zero and one"
+            )
+        if not self.classifier_id or not self.classifier_version:
+            raise PlanningContractError("difficulty classifier identity is required")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dimensions": {
+                key: round(float(self.dimensions[key]), 4)
+                for key in DIFFICULTY_DIMENSIONS
+            },
+            "overall": self.overall.to_dict(),
+            "confidence": round(self.confidence, 4),
+            "trigger_features": list(self.trigger_features),
+            "classifier_id": self.classifier_id,
+            "classifier_version": self.classifier_version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedLoss:
+    money: float
+    time: float
+    failure: float
+    error_risk: float
+    coordination: float
+
+    def __post_init__(self) -> None:
+        if any(
+            value < 0
+            for value in (
+                self.money,
+                self.time,
+                self.failure,
+                self.error_risk,
+                self.coordination,
+            )
+        ):
+            raise PlanningContractError("expected loss components cannot be negative")
+
+    @property
+    def total(self) -> float:
+        return (
+            self.money
+            + self.time
+            + self.failure
+            + self.error_risk
+            + self.coordination
+        )
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "money": round(self.money, 6),
+            "time": round(self.time, 6),
+            "failure": round(self.failure, 6),
+            "error_risk": round(self.error_risk, 6),
+            "coordination": round(self.coordination, 6),
+            "total": round(self.total, 6),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningCandidate:
+    mode: PlanningMode
+    feasible: bool
+    expected_success: float
+    success_lower_bound: float
+    expected_cost: float
+    expected_latency_ms: int
+    planning_cost: float
+    planning_latency_ms: int
+    expected_loss: ExpectedLoss
+    hard_rejections: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.success_lower_bound <= self.expected_success <= 1:
+            raise PlanningContractError(
+                "candidate success estimates must be ordered within zero and one"
+            )
+        if any(
+            value < 0
+            for value in (
+                self.expected_cost,
+                self.expected_latency_ms,
+                self.planning_cost,
+                self.planning_latency_ms,
+            )
+        ):
+            raise PlanningContractError("candidate estimates cannot be negative")
+        if self.feasible and self.hard_rejections:
+            raise PlanningContractError(
+                "feasible candidate cannot contain hard rejections"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode.value,
+            "feasible": self.feasible,
+            "expected_success": round(self.expected_success, 4),
+            "success_lower_bound": round(self.success_lower_bound, 4),
+            "expected_cost": round(self.expected_cost, 6),
+            "expected_latency_ms": self.expected_latency_ms,
+            "planning_cost": round(self.planning_cost, 6),
+            "planning_latency_ms": self.planning_latency_ms,
+            "expected_loss": self.expected_loss.to_dict(),
+            "hard_rejections": list(self.hard_rejections),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class PlanningDecision:
     decision_id: str
@@ -190,9 +354,16 @@ class PlanningDecision:
     stop_conditions: tuple[str, ...]
     escalation_conditions: tuple[str, ...]
     limits: ManagementLimits = field(default_factory=ManagementLimits)
+    difficulty_vector: TaskDifficultyVector | None = None
+    candidates: tuple[PlanningCandidate, ...] = ()
+    value_of_deliberation: float = 0.0
+    vod_margin: float = 0.0
+    pre_execution_escalation: Mapping[str, Any] = field(
+        default_factory=dict
+    )
     policy_version: str = PLANNING_POLICY_VERSION
     schema_version: str = PLANNING_SCHEMA_VERSION
-    simulated: bool = True
+    simulated: bool = False
 
     def __post_init__(self) -> None:
         if not self.decision_id.strip() or not self.reasons:
@@ -212,6 +383,18 @@ class PlanningDecision:
             raise PlanningContractError("MultiPlanner requires two or three roles")
         if self.panel_policy.size > self.limits.max_planners_per_round:
             raise PlanningContractError("panel exceeds the hard planner limit")
+        if self.value_of_deliberation < 0 or self.vod_margin < 0:
+            raise PlanningContractError("VoD values cannot be negative")
+        if self.candidates:
+            selected = [
+                item
+                for item in self.candidates
+                if item.mode == self.mode and item.feasible
+            ]
+            if not selected:
+                raise PlanningContractError(
+                    "selected planning mode must be a feasible candidate"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +410,21 @@ class PlanningDecision:
             "stop_conditions": list(self.stop_conditions),
             "escalation_conditions": list(self.escalation_conditions),
             "limits": self.limits.to_dict(),
+            "difficulty_vector": (
+                self.difficulty_vector.to_dict()
+                if self.difficulty_vector is not None
+                else None
+            ),
+            "candidates": [
+                candidate.to_dict() for candidate in self.candidates
+            ],
+            "value_of_deliberation": round(
+                self.value_of_deliberation, 6
+            ),
+            "vod_margin": round(self.vod_margin, 6),
+            "pre_execution_escalation": dict(
+                self.pre_execution_escalation
+            ),
             "simulated": self.simulated,
             "fingerprint": self.fingerprint(),
         }
@@ -245,6 +443,21 @@ class PlanningDecision:
             "stop_conditions": list(self.stop_conditions),
             "escalation_conditions": list(self.escalation_conditions),
             "limits": self.limits.to_dict(),
+            "difficulty_vector": (
+                self.difficulty_vector.to_dict()
+                if self.difficulty_vector is not None
+                else None
+            ),
+            "candidates": [
+                candidate.to_dict() for candidate in self.candidates
+            ],
+            "value_of_deliberation": round(
+                self.value_of_deliberation, 8
+            ),
+            "vod_margin": round(self.vod_margin, 8),
+            "pre_execution_escalation": dict(
+                self.pre_execution_escalation
+            ),
             "simulated": self.simulated,
         }
         return hashlib.sha256(
@@ -341,4 +554,3 @@ class ResultEnvelope:
             data[key] = list(data[key])
         data["output"] = dict(self.output)
         return data
-

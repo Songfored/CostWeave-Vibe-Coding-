@@ -49,6 +49,7 @@ from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
 from .dag_simulation import DagMonteCarlo
 from .deliberation import DeliberationSimulator
+from .planning_governor import PlanningGovernor
 
 
 @dataclass
@@ -141,7 +142,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v5.1",
+                    "schema_version": "v5.2",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -209,6 +210,7 @@ class OrchestrationEngine:
     ):
         self.planner = HeuristicPlanner()
         self.deliberation = DeliberationSimulator()
+        self.planning_governor = PlanningGovernor()
         self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
@@ -246,7 +248,7 @@ class OrchestrationEngine:
                 else HeuristicPlanner()
             )
             analysis = analysis_planner.analyze(record.request)
-            planning_decision = self.deliberation.decide(
+            planning_decision = self.planning_governor.decide(
                 record.request,
                 analysis,
                 run_router.workers,
@@ -260,11 +262,17 @@ class OrchestrationEngine:
             record.planning_proposals = [
                 proposal.to_dict() for proposal in planning_proposals
             ]
+            if bool(
+                planning_decision.pre_execution_escalation.get(
+                    "required"
+                )
+            ):
+                analysis.planning_action = "senior-review"
             self._event(
                 record,
                 "planning_mode_decided",
                 (
-                    f"MetaPlanner 仿真选择 {planning_decision.mode.value}；"
+                    f"Planning Governor 选择 {planning_decision.mode.value}；"
                     f"规划角色 {planning_decision.panel_policy.size} 个，"
                     "管理深度上限 2"
                 ),
@@ -272,7 +280,18 @@ class OrchestrationEngine:
                     "decision_id": planning_decision.decision_id,
                     "mode": planning_decision.mode.value,
                     "fingerprint": planning_decision.fingerprint(),
-                    "simulated": True,
+                    "difficulty_interval": (
+                        planning_decision.difficulty_vector.overall.to_dict()
+                        if planning_decision.difficulty_vector is not None
+                        else None
+                    ),
+                    "value_of_deliberation": (
+                        planning_decision.value_of_deliberation
+                    ),
+                    "pre_execution_escalation": (
+                        planning_decision.pre_execution_escalation
+                    ),
+                    "simulated": False,
                 },
             )
             plan = (

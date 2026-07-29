@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.1", health["version"])
+        self.assertEqual("0.5.2", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.1", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.2", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -80,7 +80,15 @@ class ServerTests(unittest.TestCase):
     def test_planning_policy_and_run_receipt_are_explainable(self):
         status, policy = self.fetch_json("/api/v1/planning/policy")
         self.assertEqual(200, status)
-        self.assertEqual("v0.5.1", policy["schema_version"])
+        self.assertEqual("v0.5.2", policy["schema_version"])
+        self.assertEqual(
+            "rule-first-confidence-aware-governor",
+            policy["scope"],
+        )
+        self.assertEqual(
+            "local-heuristic-difficulty",
+            policy["classifier"]["default"],
+        )
         self.assertFalse(policy["adapter_policy"]["paid_calls_enabled"])
         self.assertEqual(2, policy["limits"]["max_management_depth"])
         self.assertIn("MULTI_PLANNER", policy["modes"])
@@ -111,7 +119,46 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIsNotNone(planning["decision"])
         self.assertTrue(planning["decision"]["fingerprint"])
-        self.assertTrue(planning["decision"]["simulated"])
+        self.assertFalse(planning["decision"]["simulated"])
+        self.assertIn("difficulty_vector", planning["decision"])
+        self.assertEqual(6, len(planning["decision"]["candidates"]))
+        self.assertIn("expected_loss", planning["decision"]["candidates"][0])
+
+    def test_high_risk_governor_inserts_pre_execution_review(self):
+        status, run = self.request_json(
+            "/api/v1/runs",
+            {
+                "goal": (
+                    "在生产环境执行删除并迁移所有用户认证数据库，"
+                    "要求安全审计、法律合规和回滚方案。"
+                ),
+                "budget": 2,
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": "server-governor-risk-gate-0001",
+            },
+            method="POST",
+        )
+        self.assertEqual(202, status)
+        current = None
+        for _ in range(80):
+            _, current = self.fetch_json(
+                f"/api/v1/runs/{run['id']}"
+            )
+            if current.get("plan") is not None:
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(current["plan"])
+        self.assertTrue(
+            current["planning"]["decision"][
+                "pre_execution_escalation"
+            ]["required"]
+        )
+        self.assertIn(
+            "planning-escalation",
+            [task["id"] for task in current["plan"]["tasks"]],
+        )
 
     def test_catalog_crud_and_revision_conflict(self):
         _, catalog = self.fetch_json("/api/catalog")

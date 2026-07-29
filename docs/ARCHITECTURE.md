@@ -1,9 +1,23 @@
-# CostWeave v0.5.1 架构说明
+# CostWeave v0.5.2 架构说明
 
-CostWeave v0.5.1 在 v0.4.9 的可靠控制内核之上增加两层规划合同：第 1 层 MetaPlanner 只选择规划模式并分配预算，第 2 层 Planner 只提出受限方案。管理层不得递归扩张，跨 Provider 角色通过目录能力画像匹配，默认只使用确定性的 MockProvider。真实模型、图片与视频生成仍由仿真适配器隔离。
+CostWeave v0.5.2 在两层规划合同之上加入 Planning Governor：第 1 层先用本地轻量分类器形成难度区间，再用硬门、容量检查、预期总损失和 VoD 选择模式；第 2 层 Planner 仍只能提出受限方案。管理层不得递归扩张，跨 Provider 角色通过目录能力画像匹配，默认只使用确定性的 MockProvider。真实模型、图片与视频生成仍由仿真适配器隔离。
 
 ```text
 HTTP / RunManager Facade / Engine
+                    │
+                    ▼
+HeuristicDifficultyClassifier：11 维难度 + 置信区间
+                    │
+                    ▼
+PlanningGovernor：硬门 → ExpectedLoss → VoD → 容量升级
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+NO / Direct / Single     Multi / Expert / Ask
+          │                   │
+          └─────────┬─────────┘
+                    ▼
+PlanningDecision：候选路线、预算、角色、淘汰原因与指纹
                     │
                     ▼
 ResourcePortfolioOptimizer：质量 / 期限 / 预算硬约束
@@ -65,6 +79,25 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_OUTCOME_FORECAST=0` 停止新预测和学习写入，旧预测保持可读。
 - `COSTWEAVE_MEDIA_WORKFLOW=0` 停止创建新媒体项目，通用编排、旧媒体记录和其他功能保持可用。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
+
+## 0.1 Planning Governor 决策边界
+
+Governor 的目标不是挑“最聪明”或“最便宜”的单一模型，而是在满足质量和权限硬约束后最小化：
+
+```text
+ExpectedLoss
+= 直接费用
+ + 规划与执行时间价值
+ + 失败后返工损失
+ + 错误结果的业务风险
+ + 多角色协调开销
+```
+
+六条候选路线使用同一损失结构。MultiPlanner 还必须满足 `VoD > 收益边际`；高级模型必须存在高风险、低置信、专业缺口或难度越界触发条件。任何已选路线都必须是可行候选，全部淘汰理由随决策指纹和权威 Run Projection 持久化。
+
+本地容量判断在执行前完成，输入包括可用本地候选数、本地推理能力上限、请求并发和期限压力。低置信、高风险或容量不足会触发增强路线，并把 `senior-review` 写入后续计划。v0.5.2 不执行真实多模型讨论；提案并行、匿名裁决和 Plan Compiler 属于 v0.5.3。
+
+模式选择完成后，角色匹配不能重新破坏成本决策。Direct、Single、Multi 和 Expert 分别携带不同的推理能力下限与成本敏感度：先淘汰低于能力下限的候选，再按角色能力、可靠性、推理、标准化输入/输出价格、本地部署收益和组合多样性评分。这样既不会为了便宜把任务交给明显不足的模型，也不会让低风险直接委派静默落到最高价模型。
 
 ## 0.3 成功契约、证据与恢复边界
 

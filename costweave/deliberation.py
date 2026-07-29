@@ -1,4 +1,4 @@
-"""Deterministic v0.5.1 planning-mode simulation and proposal receipts."""
+"""Backward-compatible v0.5.1 contract simulator and proposal receipts."""
 
 from __future__ import annotations
 
@@ -94,6 +94,7 @@ class DeliberationSimulator:
                 "规划置信度低于任务质量底线",
             ),
             limits=self.limits,
+            simulated=True,
         )
 
     def proposals(
@@ -165,7 +166,7 @@ class DeliberationSimulator:
         ):
             return PlanningMode.ASK_USER, [
                 "目标歧义很高且本地分类置信不足，继续拆解会放大提示偏差。",
-                "v0.5.1 只记录询问建议；现有离线演示仍会按兼容规划器运行。",
+                "兼容仿真器只记录询问建议；现有离线演示仍会按兼容规划器运行。",
             ]
         if (
             analysis.stakes == "high"

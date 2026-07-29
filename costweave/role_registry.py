@@ -81,8 +81,28 @@ class RoleRegistry:
         workers: Iterable[WorkerProfile],
         *,
         prefer_diversity: bool = True,
+        reasoning_floor: float = 0.0,
+        cost_sensitivity: float = 0.0,
+        prefer_local: bool = False,
     ) -> list[RoleAssignment]:
-        available = [worker for worker in workers if worker.routable]
+        if not 0 <= reasoning_floor <= 1:
+            raise ValueError("reasoning floor must be between zero and one")
+        if not 0 <= cost_sensitivity <= 0.35:
+            raise ValueError("cost sensitivity must be between zero and 0.35")
+        available = [
+            worker
+            for worker in workers
+            if worker.routable
+            and float(worker.reasoning) >= reasoning_floor
+        ]
+        maximum_price = max(
+            (
+                float(worker.input_price_per_mtok)
+                + float(worker.output_price_per_mtok)
+                + float(worker.cost_per_task)
+            )
+            for worker in available
+        ) if available else 0.0
         used_providers: set[str] = set()
         used_workers: set[str] = set()
         assignments: list[RoleAssignment] = []
@@ -100,13 +120,27 @@ class RoleRegistry:
                     else 0.0
                 )
                 uniqueness = 0.04 if worker.id not in used_workers else -0.08
+                price = (
+                    float(worker.input_price_per_mtok)
+                    + float(worker.output_price_per_mtok)
+                    + float(worker.cost_per_task)
+                )
+                normalized_price = (
+                    price / maximum_price
+                    if maximum_price > 0
+                    else 0.0
+                )
+                local_bonus = (
+                    0.045 if prefer_local and worker.local else 0.0
+                )
                 score = (
                     capability * 0.52
                     + float(worker.reliability) * 0.22
                     + float(worker.reasoning) * 0.16
                     + diversity
                     + uniqueness
-                    - min(0.08, float(worker.cost_per_task) * 0.02)
+                    + local_bonus
+                    - normalized_price * cost_sensitivity
                 )
                 candidates.append((score, worker))
             candidates.sort(key=lambda item: (-item[0], item[1].id))
@@ -118,7 +152,10 @@ class RoleRegistry:
                     provider=None,
                     deployment=None,
                     score=0.0,
-                    rationale="目录中没有可路由候选；保留角色合同但不触发调用。",
+                    rationale=(
+                        "目录中没有同时满足可路由状态与推理能力下限的候选；"
+                        "保留角色合同但不触发弱能力调用。"
+                    ),
                 ))
                 continue
             score, worker = candidates[0]
@@ -132,9 +169,9 @@ class RoleRegistry:
                 deployment="local" if worker.local else "remote",
                 score=max(0.0, min(1.0, score)),
                 rationale=(
-                    "按角色能力、可靠性、推理强度、成本和组合多样性评分；"
+                    "按角色能力、可靠性、推理下限、标准化价格、"
+                    "本地优先和组合多样性评分；"
                     "核心逻辑不依赖厂商名称。"
                 ),
             ))
         return assignments
-

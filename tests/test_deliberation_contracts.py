@@ -108,7 +108,7 @@ class PlanningContractTests(unittest.TestCase):
 
     def test_work_order_is_json_safe(self):
         payload = work_order().to_dict()
-        self.assertEqual("v0.5.1", payload["schema_version"])
+        self.assertEqual("v0.5.2", payload["schema_version"])
         self.assertEqual(["summary exists"], payload["acceptance_tests"])
 
     def test_work_order_requires_acceptance_tests(self):
@@ -176,6 +176,56 @@ class RoleRegistryTests(unittest.TestCase):
         only = dataclasses.replace(self.workers[0], routable=False)
         assignment = self.registry.assign(("domain-planner",), [only])[0]
         self.assertIsNone(assignment.worker_id)
+
+    def test_cost_sensitive_assignment_avoids_equivalent_premium_model(self):
+        cheap = dataclasses.replace(
+            self.workers[0],
+            id="cheap",
+            model_id="cheap",
+            input_price_per_mtok=0.2,
+            output_price_per_mtok=0.8,
+        )
+        premium = dataclasses.replace(
+            cheap,
+            id="premium",
+            model_id="premium",
+            input_price_per_mtok=10,
+            output_price_per_mtok=50,
+        )
+        assignment = self.registry.assign(
+            ("domain-planner",),
+            [premium, cheap],
+            prefer_diversity=False,
+            reasoning_floor=0.7,
+            cost_sensitivity=0.24,
+        )[0]
+        self.assertEqual("cheap", assignment.worker_id)
+
+    def test_reasoning_floor_refuses_inadequate_cheap_model(self):
+        weak = dataclasses.replace(
+            self.workers[0],
+            id="weak",
+            model_id="weak",
+            reasoning=0.45,
+            input_price_per_mtok=0,
+            output_price_per_mtok=0,
+        )
+        capable = dataclasses.replace(
+            self.workers[1],
+            id="capable",
+            model_id="capable",
+            reasoning=0.86,
+            input_price_per_mtok=2,
+            output_price_per_mtok=8,
+        )
+        assignment = self.registry.assign(
+            ("domain-planner",),
+            [weak, capable],
+            prefer_diversity=False,
+            reasoning_floor=0.7,
+            cost_sensitivity=0.24,
+        )[0]
+        self.assertEqual("capable", assignment.worker_id)
 
 
 class DeliberationSimulatorTests(unittest.TestCase):

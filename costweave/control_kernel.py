@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.1."""
+"""Persistent command/event/projection owner for CostWeave v0.5.2."""
 
 from __future__ import annotations
 

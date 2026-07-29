@@ -314,6 +314,11 @@ function renderPlanning(planning) {
   const budget = decision.planning_budget || {};
   const panel = decision.panel_policy || {};
   const limits = decision.limits || {};
+  const difficulty = decision.difficulty_vector || {};
+  const interval = difficulty.overall || {};
+  const candidates = Array.isArray(decision.candidates) ? decision.candidates : [];
+  const selectedCandidate = candidates.find((item) => item.mode === decision.mode);
+  const escalation = decision.pre_execution_escalation || {};
   $("#planning-mode").textContent = modeLabels[decision.mode] || decision.mode;
   $("#planning-mode").dataset.mode = decision.mode;
   $("#planning-reason").textContent = (decision.reasons || []).join(" ");
@@ -322,7 +327,47 @@ function renderPlanning(planning) {
     ["规划预算", `$${Number(budget.max_cost || 0).toFixed(4)} · ${Math.round(Number(budget.task_budget_ratio || 0) * 100)}%`],
     ["调用 / 时延上限", `${Number(budget.max_calls || 0)} 次 · ${Number(budget.max_latency_ms || 0)} ms`],
     ["管理深度", `${Number(limits.max_management_depth || 0)} 层（固定）`],
+    ["预期总损失", selectedCandidate ? Number(selectedCandidate.expected_loss?.total || 0).toFixed(4) : "—"],
+    ["MultiPlanner VoD", `${Number(decision.value_of_deliberation || 0).toFixed(4)} / 门槛 ${Number(decision.vod_margin || 0).toFixed(4)}`],
   ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  const dimensionLabels = {
+    ambiguity: "目标歧义",
+    decomposition_uncertainty: "拆解不确定",
+    novelty: "新颖性",
+    domain_specialization: "领域专业性",
+    cross_domain_coupling: "跨域耦合",
+    context_multimodal_load: "上下文/多模态",
+    tool_chain_depth: "工具链",
+    verification_difficulty: "验收难度",
+    error_loss: "错误损失",
+    irreversibility: "不可逆性",
+    concurrency_deadline_pressure: "并发/期限",
+  };
+  const dimensions = Object.entries(difficulty.dimensions || {})
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 6);
+  $("#planning-difficulty").innerHTML = difficulty.overall
+    ? `<div class="difficulty-interval">
+        <span>难度区间</span>
+        <strong>${Math.round(Number(interval.lower || 0) * 100)}–${Math.round(Number(interval.upper || 0) * 100)}%</strong>
+        <small>中心 ${Math.round(Number(interval.expected || 0) * 100)}% · 判断置信 ${Math.round(Number(difficulty.confidence || 0) * 100)}%</small>
+      </div>
+      <div class="difficulty-signals">${dimensions.map(([key, value]) => `<span><b>${escapeHtml(dimensionLabels[key] || key)}</b><i style="--signal:${Math.round(Number(value) * 100)}%"></i><em>${Math.round(Number(value) * 100)}%</em></span>`).join("")}</div>`
+    : "";
+  $("#planning-escalation").textContent = escalation.required
+    ? `执行前升级：${(escalation.reasons || []).join("；")}`
+    : "执行前升级门未触发：当前置信度、风险与本地容量允许按已选路线继续。";
+  $("#planning-escalation").dataset.required = escalation.required ? "true" : "false";
+  $("#planning-candidates").innerHTML = candidates.map((item) => {
+    const selected = item.mode === decision.mode;
+    const rejection = (item.hard_rejections || []).join("；");
+    return `<article data-selected="${selected}" data-feasible="${Boolean(item.feasible)}">
+      <div><strong>${escapeHtml(modeLabels[item.mode] || item.mode)}</strong><span>${item.feasible ? "可行" : "淘汰"}</span></div>
+      <p>成功 ${Math.round(Number(item.expected_success || 0) * 100)}% · 下界 ${Math.round(Number(item.success_lower_bound || 0) * 100)}%</p>
+      <small>总损失 ${Number(item.expected_loss?.total || 0).toFixed(4)} · 规划 $${Number(item.planning_cost || 0).toFixed(4)}</small>
+      ${rejection ? `<em>${escapeHtml(rejection)}</em>` : ""}
+    </article>`;
+  }).join("");
   const assignments = Array.isArray(panel.selected_assignments) ? panel.selected_assignments : [];
   $("#planning-roles").innerHTML = assignments.length
     ? assignments.map((item) => `<article>
@@ -337,7 +382,7 @@ function renderPlanning(planning) {
   $("#planning-details").innerHTML = `
     <ul>${rejected}</ul>
     <p>最多 ${Number(limits.max_planners_per_round || 0)} 个 Planner、${Number(limits.max_adjudication_rounds || 0)} 次裁决、${Number(limits.max_full_replans || 0)} 次全局重规划；Planner 不得再创建 Planner。</p>
-    <small>离线可重复仿真 · ${escapeHtml(decision.policy_version || "")} · 指纹 ${escapeHtml(String(decision.fingerprint || "").slice(0, 16))}</small>`;
+    <small>规则优先、置信度感知 · ${escapeHtml(decision.policy_version || "")} · 指纹 ${escapeHtml(String(decision.fingerprint || "").slice(0, 16))}</small>`;
   card.classList.remove("hidden");
 }
 
