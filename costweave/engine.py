@@ -13,6 +13,7 @@ from .compat_v4 import (
     artifact_dag_enabled,
     contracts_v4_enabled,
     evidence_recovery_enabled,
+    handoff_intelligence_enabled,
     outcome_forecast_enabled,
     media_workflow_enabled,
     parallel_runtime_enabled,
@@ -44,6 +45,12 @@ from .recovery import (
     RecoveryDecision,
     RecoveryPolicy,
 )
+from .adaptive_recovery import (
+    CompletionEstimator,
+    PollutionAnalyzer,
+    RecoveryGate,
+)
+from .handoff_compiler import HandoffPreflightError
 from .router import PredictiveRouter
 from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
@@ -66,8 +73,14 @@ class RunRecord:
     current_success_probability: float = 0.0
     spent: float = 0.0
     replans: int = 0
+    global_replans: int = 0
     recovery_count: int = 0
     recovery_history: list[dict[str, Any]] = field(default_factory=list)
+    handoff_history: list[dict[str, Any]] = field(default_factory=list)
+    completion_checkpoints: list[dict[str, Any]] = field(
+        default_factory=list
+    )
+    pollution_reports: list[dict[str, Any]] = field(default_factory=list)
     peak_parallelism: int = 0
     error: str | None = None
     runtime_revision: int = 0
@@ -118,6 +131,7 @@ class RunRecord:
                     "spent": round(self.spent, 4),
                     "budget": self.request.budget,
                     "replans": self.replans,
+                    "global_replans": self.global_replans,
                     "recoveries": self.recovery_count,
                     "peak_parallelism": self.peak_parallelism,
                     "duration_ms": duration_ms,
@@ -129,6 +143,34 @@ class RunRecord:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "recovery_history": list(self.recovery_history),
+                "handoff_history": list(self.handoff_history),
+                "completion_checkpoints": list(
+                    self.completion_checkpoints
+                ),
+                "pollution_reports": list(self.pollution_reports),
+                "recovery_control": {
+                    "latest_checkpoint": (
+                        self.completion_checkpoints[-1]
+                        if self.completion_checkpoints
+                        else None
+                    ),
+                    "latest_pollution_report": (
+                        self.pollution_reports[-1]
+                        if self.pollution_reports
+                        else None
+                    ),
+                    "handoffs_admitted": sum(
+                        bool(item.get("admitted"))
+                        for item in self.handoff_history
+                    ),
+                    "handoffs_rejected": sum(
+                        not bool(item.get("admitted"))
+                        for item in self.handoff_history
+                    ),
+                    "global_replans_remaining": max(
+                        0, 1 - self.global_replans
+                    ),
+                },
                 "planning": {
                     "decision": self.planning_decision,
                     "proposals": list(self.planning_proposals),
@@ -145,7 +187,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v5.4",
+                    "schema_version": "v5.5",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -227,6 +269,9 @@ class OrchestrationEngine:
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
         self.recovery_policy = RecoveryPolicy()
+        self.completion_estimator = CompletionEstimator()
+        self.pollution_analyzer = PollutionAnalyzer()
+        self.recovery_gate = RecoveryGate()
         self.forecaster = DagMonteCarlo()
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
@@ -443,6 +488,9 @@ class OrchestrationEngine:
                         },
                     )
             self._recalculate_probability(record)
+            self._record_completion_checkpoint(
+                record, "plan_validated"
+            )
             self._event(
                 record,
                 "plan_ready",
@@ -464,6 +512,9 @@ class OrchestrationEngine:
                     source="engine.run.completed",
                 )
                 self._recalculate_probability(record)
+                self._record_completion_checkpoint(
+                    record, "final_acceptance"
+                )
                 self._event(record, "completed", "最终成果通过全局验收，运行结束")
             else:
                 raise RuntimeError("执行结束时仍有未处理节点")
@@ -578,6 +629,9 @@ class OrchestrationEngine:
                     source="engine.recovery.completed",
                 )
                 self._recalculate_probability(record)
+                self._record_completion_checkpoint(
+                    record, "resume_final_acceptance"
+                )
                 self._event(record, "completed", "恢复后的运行通过全局验收")
             else:
                 raise RuntimeError("恢复执行结束时仍有未处理节点")
@@ -645,6 +699,7 @@ class OrchestrationEngine:
                     )
                 )
                 reserved = sum(item.estimated_cost for item in active.values())
+                recovery_during_start = False
                 for task in ordered_ready:
                     if len(active) >= record.request.max_concurrency:
                         break
@@ -732,6 +787,82 @@ class OrchestrationEngine:
                                 if item.id in task.dependencies
                                 and item.result is not None
                             ]
+                    except HandoffPreflightError as exc:
+                        if reservation is not None:
+                            record.control_kernel.reservations.release(
+                                reservation.reservation_id,
+                                reason="handoff-preflight-rejected",
+                                actual_cost=0.0,
+                            )
+                        task.reservation_id = None
+                        task.queue_state = "rejected"
+                        task.blocked_reason = str(exc)
+                        task.finished_at = utc_now()
+                        set_task_status(
+                            record,
+                            task,
+                            TaskStatus.REJECTED,
+                            source="engine.task.handoff_rejected",
+                        )
+                        task.validation = {
+                            "passed": False,
+                            "level": "L0-handoff-preflight",
+                            "findings": [str(exc)],
+                            "score": 0.0,
+                            "contract_revision": (
+                                task.success_contract.get(
+                                    "revision",
+                                    "success-contract-v1",
+                                )
+                            ),
+                            "criterion_results": [],
+                            "critical_failures": list(
+                                task.critical_criteria
+                            ),
+                            "evidence_gaps": [
+                                item["evidence"]
+                                for item in (
+                                    task.handoff_receipt or {}
+                                ).get("failures", [])
+                            ],
+                            "contract_errors": [str(exc)],
+                            "layers_completed": [
+                                "receiver-contract-preflight"
+                            ],
+                            "false_positive_risk": 0.01,
+                            "false_negative_risk": 0.05,
+                        }
+                        self._recalculate_probability(record)
+                        self._record_completion_checkpoint(
+                            record,
+                            "handoff_preflight_rejected",
+                            active_tasks=len(active),
+                        )
+                        self._event(
+                            record,
+                            "handoff_preflight_rejected",
+                            (
+                                f"{task.title} was rejected before "
+                                "execution by receiver preflight"
+                            ),
+                            task.id,
+                            {
+                                "preflight": task.handoff_receipt,
+                                "error": str(exc),
+                            },
+                        )
+                        await self._recover_from_failure(
+                            record,
+                            task,
+                            run_router,
+                            reserved_cost=sum(
+                                item.estimated_cost
+                                for item in active.values()
+                            ),
+                            exception=exc,
+                        )
+                        recovery_during_start = True
+                        break
                     except Exception:
                         if reservation is not None:
                             record.control_kernel.reservations.release(
@@ -776,6 +907,8 @@ class OrchestrationEngine:
 
                 record.peak_parallelism = max(record.peak_parallelism, len(active))
                 if not active:
+                    if recovery_during_start:
+                        continue
                     if ready and any(
                         task.queue_state
                         in {"queued", "waiting_approval"}
@@ -841,6 +974,11 @@ class OrchestrationEngine:
                                 actual_total=0.0,
                             )
                         self._recalculate_probability(record)
+                        self._record_completion_checkpoint(
+                            record,
+                            "adapter_failure",
+                            active_tasks=len(active),
+                        )
                         self._event(record, "task_rejected", f"{task.title} 执行异常：{exc}", task.id)
                         await self._recover_from_failure(
                             record,
@@ -894,6 +1032,11 @@ class OrchestrationEngine:
                             source="engine.task.validated",
                         )
                         self._recalculate_probability(record)
+                        self._record_completion_checkpoint(
+                            record,
+                            "node_validated",
+                            active_tasks=len(active),
+                        )
                         self._event(record, "task_validated", f"{task.title} 通过 {task.validation['level']} 验收", task.id)
                     else:
                         task.queue_state = "rejected"
@@ -904,6 +1047,11 @@ class OrchestrationEngine:
                             source="engine.task.validation_rejected",
                         )
                         self._recalculate_probability(record)
+                        self._record_completion_checkpoint(
+                            record,
+                            "node_validation_failed",
+                            active_tasks=len(active),
+                        )
                         self._event(record, "task_rejected", f"{task.title} 未通过验收：{'; '.join(task.validation['findings'])}", task.id)
                         await self._recover_from_failure(
                             record,
@@ -986,16 +1134,72 @@ class OrchestrationEngine:
                 ),
             ),
         )
-        descendants = self.validator.descendants(
-            record.plan.tasks, failed.id
+        proposed_decision = decision
+        checkpoint = self._record_completion_checkpoint(
+            record, "pre_recovery"
         )
-        affected = (
-            {failed.id}
-            if decision.scope == "node"
-            else {failed.id, *descendants}
-        )
-        if decision.scope == "global":
-            affected = {task.id for task in record.plan.tasks}
+        pollution = None
+        gate = None
+        if handoff_intelligence_enabled():
+            pollution = self.pollution_analyzer.analyze(
+                record.plan,
+                failed_task_id=failed.id,
+                requested_scope=decision.scope,
+                failure_class=failure.classification,
+            )
+            affected = set(pollution.invalidated_task_ids)
+            approval_status = None
+            if (
+                record.control_kernel is not None
+                and failed.approval_id
+            ):
+                approval = (
+                    record.control_kernel.approval_store.get(
+                        failed.approval_id
+                    )
+                )
+                approval_status = (
+                    str(approval.get("status"))
+                    if approval is not None
+                    else None
+                )
+            gate = self.recovery_gate.evaluate(
+                record=record,
+                task=failed,
+                failure=failure,
+                decision=decision,
+                approval_status=approval_status,
+            )
+            if record.control_kernel is not None:
+                record.control_kernel.record_pollution_report(
+                    record, pollution
+                )
+            else:
+                record.pollution_reports.append(
+                    pollution.to_dict()
+                )
+            if not gate.allowed:
+                decision = RecoveryDecision(
+                    action=RecoveryAction.STOP.value,
+                    reason=gate.reason,
+                    scope="none",
+                    allowed=False,
+                    estimated_cost=decision.estimated_cost,
+                    policy_revision=gate.policy_revision,
+                )
+        else:
+            descendants = self.validator.descendants(
+                record.plan.tasks, failed.id
+            )
+            affected = (
+                {failed.id}
+                if decision.scope == "node"
+                else {failed.id, *descendants}
+            )
+            if decision.scope == "global":
+                affected = {
+                    task.id for task in record.plan.tasks
+                }
         patch = None
         if decision.action in {
             RecoveryAction.UPGRADE_NODE.value,
@@ -1014,7 +1218,21 @@ class OrchestrationEngine:
         entry = {
             "failure": failure.to_dict(),
             "decision": decision.to_dict(),
+            "proposed_decision": proposed_decision.to_dict(),
             "affected_task_ids": sorted(affected),
+            "checkpoint": checkpoint,
+            "pollution": (
+                pollution.to_dict()
+                if pollution is not None
+                else None
+            ),
+            "gate": gate.to_dict() if gate is not None else None,
+            "escalation_receipt": {
+                "reason": decision.reason,
+                "evidence": list(failure.signals),
+                "estimated_cost": decision.estimated_cost,
+                "impact_scope": sorted(affected),
+            },
             "plan_patch": (
                 patch.to_dict() if patch is not None else None
             ),
@@ -1029,7 +1247,23 @@ class OrchestrationEngine:
                 failure,
                 decision,
                 sorted(affected),
-                patch,
+                patch=patch,
+                recovery_receipt={
+                    "checkpoint": checkpoint,
+                    "pollution": (
+                        pollution.to_dict()
+                        if pollution is not None
+                        else None
+                    ),
+                    "gate": (
+                        gate.to_dict()
+                        if gate is not None
+                        else None
+                    ),
+                    "escalation": entry[
+                        "escalation_receipt"
+                    ],
+                },
             )
         if not decision.allowed:
             self._event(
@@ -1074,6 +1308,7 @@ class OrchestrationEngine:
             decision=decision,
             patch=patch,
             affected=affected,
+            gate=gate,
         )
 
     async def _global_replan(
@@ -1087,24 +1322,33 @@ class OrchestrationEngine:
         decision: RecoveryDecision | None = None,
         patch: PlanPatch | None = None,
         affected: set[str] | None = None,
+        gate: Any = None,
     ) -> None:
+        if (
+            decision is not None
+            and decision.action
+            == RecoveryAction.REPLAN_GLOBAL.value
+            and record.global_replans
+            >= self.recovery_gate.limits.max_full_replans
+        ):
+            raise RuntimeError(
+                "global replan limit reached before plan mutation"
+            )
         set_run_status(
             record,
             RunStatus.REPLANNING,
             source="engine.run.replanning",
         )
         record.replans += 1
+        if (
+            decision is not None
+            and decision.action
+            == RecoveryAction.REPLAN_GLOBAL.value
+        ):
+            record.global_replans += 1
         descendants = self.validator.descendants(record.plan.tasks, failed.id)
         affected = affected or {failed.id, *descendants}
         if artifact_dag_enabled() and record.control_kernel is not None:
-            if (
-                decision is None
-                or decision.action
-                != RecoveryAction.REPLAN_GLOBAL.value
-            ):
-                affected = self.graph_compiler.affected_subgraph(
-                    record.plan, {failed.id}
-                )
             invalidation_scope = {
                 task.id
                 for task in record.plan.tasks
@@ -1119,7 +1363,11 @@ class OrchestrationEngine:
                 reason=f"task {failed.id} failed validation",
             )
         for task in record.plan.tasks:
-            if task.id in descendants and task.status != TaskStatus.VALIDATED:
+            if (
+                task.id in affected
+                and task.id != failed.id
+                and task.status != TaskStatus.VALIDATED
+            ):
                 set_task_status(
                     record,
                     task,
@@ -1130,6 +1378,7 @@ class OrchestrationEngine:
                 task.validation = None
                 task.input_artifact_refs = []
                 task.handoff_message_id = None
+                task.handoff_receipt = None
         set_task_status(
             record,
             failed,
@@ -1137,6 +1386,28 @@ class OrchestrationEngine:
             source="engine.task.invalidated",
         )
         replacement = self.planner.replan(record.plan, failed.id)
+        if gate is not None and gate.requires_approval:
+            replacement.requires_approval = True
+            replacement.approval_kind = (
+                "irreversible-action"
+                if set(failed.requires_tools)
+                & self.recovery_gate.IRREVERSIBLE_TOOLS
+                else failed.approval_kind
+            )
+            replacement.approval_reason = (
+                "recovery replacement requires a fresh approval; "
+                "prior authority is not inherited"
+            )
+            replacement.approval_id = None
+        if (
+            set(replacement.data_permissions)
+            - set(failed.data_permissions)
+            or set(replacement.requires_tools)
+            - set(failed.requires_tools)
+        ):
+            raise RuntimeError(
+                "recovery planner attempted to expand task authority"
+            )
         if (
             decision is not None
             and decision.action
@@ -1202,6 +1473,9 @@ class OrchestrationEngine:
         if issues:
             raise PlanValidationError("重规划未通过：" + "；".join(issues))
         self._recalculate_probability(record)
+        self._record_completion_checkpoint(
+            record, "replan_validated"
+        )
         set_run_status(
             record,
             RunStatus.EXECUTING,
@@ -1258,6 +1532,34 @@ class OrchestrationEngine:
         probability = weighted / total_weight if total_weight else .05
         probability -= min(.12, unresolved_high_risk * .025)
         record.current_success_probability = max(.05, min(.98, probability))
+
+    def _record_completion_checkpoint(
+        self,
+        record: RunRecord,
+        stage: str,
+        *,
+        active_tasks: int = 0,
+    ) -> dict[str, Any] | None:
+        if (
+            not handoff_intelligence_enabled()
+            or record.plan is None
+        ):
+            return None
+        checkpoint = self.completion_estimator.estimate(
+            record,
+            stage=stage,
+            active_tasks=active_tasks,
+        )
+        record.current_success_probability = checkpoint.pcomplete
+        if record.control_kernel is not None:
+            record.control_kernel.record_completion_checkpoint(
+                record, checkpoint
+            )
+        else:
+            record.completion_checkpoints.append(
+                checkpoint.to_dict()
+            )
+        return checkpoint.to_dict()
 
     @staticmethod
     def _raise_if_cancelled(record: RunRecord) -> None:
@@ -1511,6 +1813,66 @@ class RunManager:
         return self.control_kernel.artifacts(
             run_id, include_content=include_content
         )
+
+    def handoffs(self, run_id: str) -> list[dict[str, Any]]:
+        record = self.get(run_id)
+        if record is None or self.control_kernel is None:
+            return []
+        stored = self.control_kernel.handoffs(run_id)
+        stored_ids = {
+            item.get("message_id") for item in stored
+        }
+        rejected = [
+            {
+                "schema_version": "v5.5",
+                "kind": "task.handoff.rejected",
+                "message_id": None,
+                "run_id": run_id,
+                "recipient_task_id": item.get("task_id"),
+                "plan_revision": item.get("plan_revision"),
+                "attempt": item.get("attempt"),
+                "preflight": item.get("preflight", {}),
+                "contract_digest": "",
+                "compiler_revision": (
+                    item.get("preflight", {}).get(
+                        "policy_revision",
+                        "handoff-compiler-0.5.5",
+                    )
+                ),
+            }
+            for item in record.handoff_history
+            if item.get("message_id") not in stored_ids
+        ]
+        return [*stored, *rejected]
+
+    def recovery_control(
+        self, run_id: str
+    ) -> dict[str, Any] | None:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        with record.lock:
+            return {
+                "run_id": str(record.id),
+                "current_pcomplete": (
+                    record.current_success_probability
+                ),
+                "checkpoints": list(
+                    record.completion_checkpoints
+                ),
+                "pollution_reports": list(
+                    record.pollution_reports
+                ),
+                "recovery_history": list(
+                    record.recovery_history
+                ),
+                "global_replans": record.global_replans,
+                "global_replans_remaining": max(
+                    0,
+                    self.engine.recovery_gate.limits.max_full_replans
+                    - record.global_replans,
+                ),
+            }
 
     def graph(self, run_id: str) -> dict[str, Any] | None:
         record = self.get(run_id)

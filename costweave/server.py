@@ -31,6 +31,14 @@ from .planning_contracts import (
     PlanningMode,
 )
 from .role_registry import RoleRegistry
+from .handoff_compiler import (
+    HANDOFF_POLICY_REVISION,
+    HANDOFF_SCHEMA_VERSION,
+)
+from .adaptive_recovery import (
+    CHECKPOINT_SCHEMA_VERSION,
+    RECOVERY_GATE_REVISION,
+)
 
 
 MANAGER: RunManager | None = None
@@ -57,7 +65,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.4"
+    server_version = "CostWeave/0.5.5"
 
     def setup(self) -> None:
         super().setup()
@@ -94,6 +102,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "schema_version": PLANNING_SCHEMA_VERSION,
                     "policy_version": PLANNING_POLICY_VERSION,
                     "paid_calls_enabled": False,
+                },
+                "handoff_contract": {
+                    "schema_version": HANDOFF_SCHEMA_VERSION,
+                    "compiler_revision": HANDOFF_POLICY_REVISION,
+                    "checkpoint_schema": CHECKPOINT_SCHEMA_VERSION,
+                    "recovery_policy": RECOVERY_GATE_REVISION,
                 },
                 **contracts,
                 "control_kernel": runtime_health,
@@ -290,6 +304,44 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            if suffix.endswith("/handoffs"):
+                run_id = suffix.removesuffix(
+                    "/handoffs"
+                ).strip("/")
+                if self.manager.get(run_id) is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                handoffs = self.manager.handoffs(run_id)
+                self._json({
+                    "run_id": run_id,
+                    "schema_version": HANDOFF_SCHEMA_VERSION,
+                    "handoffs": handoffs,
+                    "admitted": sum(
+                        bool(
+                            item.get("preflight", {}).get(
+                                "admitted"
+                            )
+                        )
+                        for item in handoffs
+                    ),
+                })
+                return
+            if suffix.endswith("/recovery"):
+                run_id = suffix.removesuffix(
+                    "/recovery"
+                ).strip("/")
+                recovery = self.manager.recovery_control(run_id)
+                if recovery is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json(recovery)
+                return
             if suffix.endswith("/planning"):
                 run_id = suffix.removesuffix("/planning").strip("/")
                 planning = self.manager.planning(run_id)
@@ -1140,7 +1192,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.4 cross-provider economics prototype"
+        description="Run the CostWeave v0.5.5 handoff and adaptive recovery prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

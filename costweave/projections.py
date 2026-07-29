@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v5.4"
+PROJECTION_SCHEMA_VERSION = "v5.5"
 
 
 class ProjectionError(ValueError):
@@ -73,6 +73,7 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                 "success_probability": record.current_success_probability,
                 "spent": record.spent,
                 "replans": record.replans,
+                "global_replans": record.global_replans,
                 "recoveries": record.recovery_count,
                 "peak_parallelism": record.peak_parallelism,
             },
@@ -82,6 +83,15 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
             "error": record.error,
             "recovery_history": copy.deepcopy(
                 record.recovery_history
+            ),
+            "handoff_history": copy.deepcopy(
+                record.handoff_history
+            ),
+            "completion_checkpoints": copy.deepcopy(
+                record.completion_checkpoints
+            ),
+            "pollution_reports": copy.deepcopy(
+                record.pollution_reports
             ),
             "planning": {
                 "decision": copy.deepcopy(record.planning_decision),
@@ -130,7 +140,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     schema = snapshot.get("projection_schema_version")
     if schema not in {
         None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6", "v4.7",
-        "v4.9", "v5.1", "v5.2", "v5.3",
+        "v4.9", "v5.1", "v5.2", "v5.3", "v5.4",
         PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")
@@ -181,11 +191,23 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "current_success_probability": float(metrics.get("success_probability", 0.0)),
         "spent": float(metrics.get("spent", 0.0)),
         "replans": int(metrics.get("replans", 0)),
+        "global_replans": int(
+            metrics.get("global_replans", 0)
+        ),
         "recovery_count": int(metrics.get("recoveries", 0)),
         "peak_parallelism": int(metrics.get("peak_parallelism", 0)),
         "error": snapshot.get("error"),
         "recovery_history": copy.deepcopy(
             snapshot.get("recovery_history", [])
+        ),
+        "handoff_history": copy.deepcopy(
+            snapshot.get("handoff_history", [])
+        ),
+        "completion_checkpoints": copy.deepcopy(
+            snapshot.get("completion_checkpoints", [])
+        ),
+        "pollution_reports": copy.deepcopy(
+            snapshot.get("pollution_reports", [])
         ),
         "runtime_revision": int(runtime.get("revision", 0)),
         "recovered": bool(runtime.get("recovered", False)),

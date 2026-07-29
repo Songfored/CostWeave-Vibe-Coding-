@@ -214,6 +214,7 @@ class EvidenceRecoveryStore:
         decision: RecoveryDecision,
         affected_task_ids: list[str],
         patch: PlanPatch | None = None,
+        recovery_receipt: dict[str, Any] | None = None,
     ) -> None:
         canonical_task = canonical_identifier(
             "task", f"{run_id}:{task.id}"
@@ -225,14 +226,17 @@ class EvidenceRecoveryStore:
                     "INSERT INTO failure_records(failure_id,run_id,task_id,"
                     "attempt,classifier_revision,classification,confidence,"
                     "signals_json,source,recovery_action,recovery_reason,"
-                    "affected_tasks_json,estimated_recovery_cost,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "affected_tasks_json,estimated_recovery_cost,created_at,"
+                    "recovery_receipt_json)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(failure_id) DO UPDATE SET "
                     "recovery_action=excluded.recovery_action,"
                     "recovery_reason=excluded.recovery_reason,"
                     "affected_tasks_json=excluded.affected_tasks_json,"
                     "estimated_recovery_cost="
-                    "excluded.estimated_recovery_cost",
+                    "excluded.estimated_recovery_cost,"
+                    "recovery_receipt_json="
+                    "excluded.recovery_receipt_json",
                     (
                         failure.failure_id,
                         run_id,
@@ -248,6 +252,11 @@ class EvidenceRecoveryStore:
                         json.dumps(sorted(affected_task_ids)),
                         decision.estimated_cost,
                         failure.created_at,
+                        json.dumps(
+                            recovery_receipt or {},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
                     ),
                 )
                 if patch is not None:
@@ -306,6 +315,9 @@ class EvidenceRecoveryStore:
             item["signals"] = json.loads(item.pop("signals_json"))
             item["affected_tasks"] = json.loads(
                 item.pop("affected_tasks_json")
+            )
+            item["recovery_receipt"] = json.loads(
+                item.pop("recovery_receipt_json") or "{}"
             )
             result.append(item)
         return result

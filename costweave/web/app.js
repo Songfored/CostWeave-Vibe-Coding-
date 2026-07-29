@@ -252,6 +252,7 @@ function render(run) {
   renderRunError(run);
   renderPlanning(run.planning);
   renderForecast(run.forecast);
+  renderRecovery(run.recovery_control);
   renderMediaProject(run.media_project);
   if (!run.plan) return;
 
@@ -454,6 +455,40 @@ function renderForecast(forecast) {
     ? `分布外提醒：${(forecast.ood_reasons || []).join("、")}`
     : "当前任务位于已知策略范围内";
   $("#forecast-note").textContent = `${ood} · 固定种子 ${forecast.seed} · ${forecast.policy_revision}`;
+  card.classList.remove("hidden");
+}
+
+function renderRecovery(control) {
+  const card = $("#recovery-card");
+  const checkpoint = control?.latest_checkpoint;
+  if (!checkpoint) {
+    card.classList.add("hidden");
+    return;
+  }
+  const probability = Number(checkpoint.pcomplete || 0);
+  const threshold = Number(checkpoint.threshold || 0);
+  const pollution = control.latest_pollution_report || {};
+  const invalidated = pollution.invalidated_task_ids || [];
+  const preserved = pollution.preserved_task_ids || [];
+  const state = $("#recovery-state");
+  state.textContent = checkpoint.recovery_recommended ? "低于目标门槛 · 监控中" : "当前门禁通过";
+  state.dataset.recommended = checkpoint.recovery_recommended ? "true" : "false";
+  $("#recovery-meter").style.width = `${Math.max(0, Math.min(100, probability * 100))}%`;
+  $("#recovery-metrics").innerHTML = [
+    ["完成概率 / 门槛", `${Math.round(probability * 100)}% / ${Math.round(threshold * 100)}%`],
+    ["交接预检", `${Number(control.handoffs_admitted || 0)} 通过 · ${Number(control.handoffs_rejected || 0)} 拒绝`],
+    ["污染隔离", pollution.failed_task_id ? `${invalidated.length} 受影响 · ${preserved.length} 保留` : "尚无失败传播"],
+    ["全局重规划", `${Number(control.global_replans_remaining || 0)} 次可用`],
+  ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  const signals = checkpoint.signals || {};
+  const evidence = [
+    `检查点 ${checkpoint.stage || "unknown"}`,
+    `验收覆盖 ${Math.round(Number(signals.constraint_coverage || 0) * 100)}%`,
+    `证据完整 ${Math.round(Number(signals.evidence_completeness || 0) * 100)}%`,
+    `预算消耗 ${Math.round(Number(signals.budget_burn || 0) * 100)}%`,
+    `${Number(signals.blocked_dependencies || 0)} 个阻塞依赖`,
+  ];
+  $("#recovery-note").textContent = evidence.join(" · ");
   card.classList.remove("hidden");
 }
 
@@ -694,7 +729,10 @@ function renderContract(task) {
   const criterionResults = (task.validation?.criterion_results || []).map((criterion) =>
     `${criterion.passed ? "✓" : "✕"} ${criterion.critical ? "[关键] " : ""}${criterion.criterion}${criterion.independent_evidence ? " · 独立证据" : ""}`);
   const recoveryRecords = (task.recovery_history || []).map((record) =>
-    `${record.classification || "unknown"} → ${record.action || "stop"} · ${record.scope || "none"}`);
+    `${record.failure?.classification || record.classification || "unknown"} → ${record.decision?.action || record.action || "stop"} · ${record.decision?.scope || record.scope || "none"}`);
+  const preflight = task.handoff_receipt || {};
+  const preflightFailures = (preflight.failures || []).map((item) =>
+    `${item.name}: ${item.evidence}`);
   $("#contract").innerHTML = `
     <div class="contract-heading">
       <div><h4>${escapeHtml(task.title)}</h4><code>${escapeHtml(task.id)} · 计划 v${task.plan_version}</code></div>
@@ -707,6 +745,11 @@ function renderContract(task) {
       <dt>输出 Artifact</dt><dd>${list(artifactOutputs)}</dd>
       <dt>成果 ID</dt><dd>${list(task.artifact_ids)}</dd>
       <dt>交接消息</dt><dd>${escapeHtml(task.handoff_message_id || "尚未发送")}</dd>
+      <dt>接收方预检</dt><dd>${preflight.admitted === true
+        ? `${escapeHtml(preflight.receiver_id || "已分配")} · ${(preflight.checks || []).length} 项通过`
+        : preflight.admitted === false
+          ? `已拒绝 · ${list(preflightFailures)}`
+          : "尚未执行"}</dd>
       <dt>所需能力</dt><dd>${list(task.required_capabilities)}</dd>
       <dt>验收标准</dt><dd>${list(task.acceptance_criteria)}</dd>
       <dt>关键成功标准</dt><dd>${list(criticalCriteria)}</dd>

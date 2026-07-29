@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.4 使用跨供应商期望成本、部署后验和预执行容量分流的多模型编排原型">
+  <meta name="description" content="CostWeave v0.5.5 使用可验证交接、完成概率检查点和污染感知恢复的多模型编排原型">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.4">
+  <link rel="stylesheet" href="/styles.css?v=0.5.5">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.4 Cross-provider Economics</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.5 Handoff Intelligence</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,7 +29,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">EXPECTED VALUE ROUTING · V0.5.4</p>
+        <p class="eyebrow">VERIFIABLE ORCHESTRATION · V0.5.5</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -173,6 +173,19 @@
             <div id="forecast-probabilities" class="forecast-probabilities"></div>
             <div id="forecast-intervals" class="forecast-intervals"></div>
             <p id="forecast-note"></p>
+          </section>
+
+          <section id="recovery-card" class="recovery-card hidden" aria-labelledby="recovery-title">
+            <div class="recovery-heading">
+              <div>
+                <span class="section-kicker">ADAPTIVE RECOVERY</span>
+                <h3 id="recovery-title">交接与恢复控制</h3>
+              </div>
+              <span id="recovery-state"></span>
+            </div>
+            <div class="recovery-progress" aria-hidden="true"><i id="recovery-meter"></i></div>
+            <div id="recovery-metrics" class="recovery-metrics"></div>
+            <p id="recovery-note"></p>
           </section>
 
           <section id="outcome-card" class="outcome-card hidden" aria-labelledby="outcome-title">
@@ -364,7 +377,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.4 / Cross-provider Economics Prototype</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.4" defer></script>
+  <footer><span>CostWeave v0.5.5 / Handoff Intelligence Prototype</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.5" defer></script>
 </body>
 </html>

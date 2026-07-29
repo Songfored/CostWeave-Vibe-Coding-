@@ -142,6 +142,7 @@ class TaskContract:
     output_artifact_specs: list[dict[str, Any]] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
     handoff_message_id: str | None = None
+    handoff_receipt: dict[str, Any] | None = None
     data_permissions: list[str] = field(
         default_factory=lambda: ["public", "internal"]
     )

@@ -1,5 +1,22 @@
 # CostWeave
 
+## v0.5.5：Handoff Intelligence & Adaptive Recovery
+
+v0.5.5 把“把提示词发给下一个模型”升级为可验证的执行合同与证据匹配恢复：
+
+- `HandoffCompiler` 为每个节点生成版本化 `WorkOrder`、最小 Context Manifest、确定性幂等键和合同摘要；Artifact 正文不复制进 Prompt，只传可信元数据与内容哈希。
+- 接收方在执行前验证计划版本、依赖完整性、Artifact 哈希/Schema/敏感度、模型工具、模态、上下文、输出容量和审批状态；不满足合同会在消耗模型算力前拒绝。
+- Pcomplete 检查点融合路由下界、验收通过率、约束覆盖、证据完整度、规划冲突、预算消耗、依赖阻塞和剩余关键路径；低/中/高风险门槛分别为 0.60、0.75 和 0.90。
+- 污染分析只沿 `hard` 与 `validation` 依赖传播失效，`soft` 依赖仅标记可疑；无关且已验收的 Artifact 保留。
+- 恢复按节点重试、节点升级、子图重规划、一次全局重规划的有界顺序执行；每次升级都保存原因、证据、预计成本、影响范围和门禁回执。
+- 恢复节点复制而不扩大原任务的数据权限、工具和依赖 Schema；高风险与不可逆操作继续受独立证据和全新审批约束。
+- 新增 `GET /api/v1/runs/{id}/handoffs` 与 `GET /api/v1/runs/{id}/recovery`；页面展示当前 Pcomplete、门槛、交接预检与污染隔离结果。
+- Runtime / Projection Schema 升级到 `v5.5`，migration 013 持久化交接合同摘要、预检与恢复回执；旧 `v5.4` 投影继续可读。
+
+> 能力边界：本版实现了确定性、可回放的交接与恢复控制面，并未证明这些启发式门槛已经在真实生产流量中完成校准。默认执行器仍是离线模拟，不调用付费模型，也不执行真实不可逆操作。
+
+升级说明见 [`docs/V0.5.5_MIGRATION.md`](docs/V0.5.5_MIGRATION.md)，完整路线见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+
 ## v0.5.4：Cross-provider Economics & Admission
 
 v0.5.4 把“模型单价比较”升级为可审计的跨供应商期望价值路由：
@@ -261,7 +278,14 @@ CostWeave v0.4.8 新增受控图片、短视频和 AI 电影生产工作流：�
 python -m costweave.server
 ```
 
-v0.4.9 默认启用媒体工作流、Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG、并行运行时和发布加固。只关闭媒体工作流：
+v0.5.5 默认启用智能交接、媒体工作流、Outcome 预测、证据恢复、Placement、合同守卫、持久运行时、Artifact DAG、并行运行时和发布加固。只关闭智能交接与自适应恢复，回到 v0.5.4 兼容路径：
+
+```powershell
+$env:COSTWEAVE_HANDOFF_INTELLIGENCE="0"
+python -B -m costweave.server
+```
+
+只关闭媒体工作流：
 
 ```powershell
 $env:COSTWEAVE_MEDIA_WORKFLOW="0"
@@ -465,6 +489,8 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/forecast` | 读取五结局、质量/成本/时间区间与 OOD |
 | `GET` | `/api/v1/runs/{id}/planning` | 读取 MetaPlanner / MultiPlanner 决策回执 |
 | `GET` | `/api/v1/runs/{id}/economics` | 读取跨 Provider 准入、成本、后验和路由回执 |
+| `GET` | `/api/v1/runs/{id}/handoffs` | 读取 WorkOrder、最小上下文清单、合同摘要与接收方预检 |
+| `GET` | `/api/v1/runs/{id}/recovery` | 读取 Pcomplete 检查点、污染分析、恢复门禁与全局重规划余额 |
 | `GET` | `/api/v1/evaluations` | 读取冻结基准、Brier、ECE、Log Loss 与覆盖率 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
@@ -488,7 +514,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 389 项自动化测试。v0.5.4 新增 10 项跨供应商专项测试，覆盖部署身份、预期返工、本地满载、显存分流、期限 P95、Provider 熔断、质量模式、预算内质量重平衡、部署后验学习和决策回执持久化；v0.5.3 及更早的 379 项合同、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
+当前基线为 402 项自动化测试。v0.5.5 新增 13 项专项测试，覆盖最小上下文、工具/Schema/权限预检、旧消息兼容、计划版本同步、Pcomplete 风险门槛、硬/软污染传播、全局重规划硬上限、不可逆审批、恢复权限不扩张和完整持久化；此前 389 项跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
 
 测试覆盖：
 
@@ -513,6 +539,7 @@ python -B -m unittest discover -s tests -v
 - 页面结构、响应式基础规则和管理交互绑定
 - MetaPlanner 回执、淘汰路线、跨 Provider 角色、零付费 Adapter 和两层管理上限
 - 难度区间、ExpectedLoss、VoD、容量预检、执行前升级和六路线可解释性
+- WorkOrder、接收方预检、最小上下文、Pcomplete、污染隔离和恢复权限门禁
 
 ## 当前边界
 
@@ -521,7 +548,7 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.4 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.5 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -532,7 +559,7 @@ python -B -m unittest discover -s tests -v
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.4 路线已经完成；后续进入真实 Provider 适配、实时遥测和受控在线评估前，应先保留本版作为可重复的控制平面基线。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+v0.5.1～v0.5.5 路线已经完成；下一步是 v0.5.6 Outcome Dataset & Learned Predictors。进入真实 Provider 适配、实时遥测和受控在线评估前，应保留本版作为可重复的控制平面基线。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

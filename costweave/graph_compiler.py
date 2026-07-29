@@ -47,6 +47,7 @@ class GraphCompiler:
             raise GraphCompileError("task producer IDs must be unique")
 
         for task in plan.tasks:
+            task.plan_version = int(plan.version)
             self._normalize_task_contract(task)
 
         edges: list[dict[str, Any]] = []

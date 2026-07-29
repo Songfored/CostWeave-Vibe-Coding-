@@ -1,6 +1,8 @@
-# CostWeave v0.5.4 架构说明
+# CostWeave v0.5.5 架构说明
 
-v0.5.4 在 v0.5.3 的受限 MultiPlanner 之后加入跨供应商经济与预执行准入层。它把模型、Provider、Endpoint、推理档位和任务族组合成稳定部署键，使用历史验收形成分层后验，再把成功率下界、预计返工、完整成本、完成 P95、本地负载、显存、Bulkhead 和熔断共同用于 Placement 选择。目录数据和运行容量都通过合同输入，核心路由不包含厂商名称分支。
+v0.5.5 在跨供应商经济与预执行准入之后加入智能交接和证据匹配恢复。每个执行节点先被编译为 WorkOrder 与最小 Context Manifest；接收方在执行前验证版本、依赖、Artifact 完整性、Schema、权限、工具、模态、上下文、输出容量和审批。执行中通过 Pcomplete 检查点持续更新完成预期，失败时沿依赖类型分析污染范围，并在权限不扩张、全局重规划最多一次的门禁下选择最小恢复动作。
+
+v0.5.4 把模型、Provider、Endpoint、推理档位和任务族组合成稳定部署键，使用历史验收形成分层后验，再把成功率下界、预计返工、完整成本、完成 P95、本地负载、显存、Bulkhead 和熔断共同用于 Placement 选择。目录数据和运行容量都通过合同输入，核心路由不包含厂商名称分支。
 
 CostWeave v0.5.3 在 Planning Governor 之后加入受限 MultiPlanner：第 1 层继续用难度区间、硬门、容量、ExpectedLoss 和 VoD 决定是否值得规划；第 2 层最多三个互补 Planner 并行提出方案。提案先匿名，再按统一约束评分、检测冲突，最多经过一轮裁决后由 Plan Compiler 写入现有 Artifact DAG。管理层不得递归扩张，默认仍使用确定性的离线适配器，不产生付费模型调用。
 
@@ -40,10 +42,16 @@ ReservationManager       ApprovalStore
           │                   │
           └─────────┬─────────┘
                     ▼
+HandoffCompiler：WorkOrder + 最小上下文 + 接收方预检
+                    │
+                    ▼
 SuccessContract + Validator：关键标准、逐条证据与误验风险
                     │
                     ▼
 FailureClassifier + RecoveryPolicy：节点 / 子图 / 全局恢复
+                    │
+                    ▼
+Pcomplete + PollutionAnalyzer + RecoveryGate
                     │
                     ▼
 DagMonteCarlo + OutcomeStore：结局分布 / 归因 / 校准
@@ -80,6 +88,7 @@ SQLite WAL      哈希与血缘      合同编译门      合法转换表
 - `COSTWEAVE_EVIDENCE_RECOVERY=0` 关闭高级恢复并失败即终止，不放宽验收。
 - `COSTWEAVE_OUTCOME_FORECAST=0` 停止新预测和学习写入，旧预测保持可读。
 - `COSTWEAVE_MEDIA_WORKFLOW=0` 停止创建新媒体项目，通用编排、旧媒体记录和其他功能保持可用。
+- `COSTWEAVE_HANDOFF_INTELLIGENCE=0` 关闭 v0.5.5 WorkOrder 预检、Pcomplete 与污染感知门禁，回到 v0.5.4 兼容交接和恢复路径。
 - EventStore 是运行事实源；`runs`、`tasks`、`attempts` 和 `projections` 是可重建索引。
 
 ## 0.1 Planning Governor 决策边界
@@ -125,6 +134,14 @@ limit_exceeded        → stop
 ```
 
 `PlanPatch` 只能由规划层生成，并且从当前修订精确推进到下一修订。恢复前计算受影响任务集合；已验证且与失败无关的兄弟 Artifact 保持 `validated`。`validation_results`、`criterion_results`、`failure_records` 和 `plan_revisions` 记录完整审计链。
+
+### 0.3.1 交接、完成概率与污染边界
+
+交接不复制整段会话。Context Manifest 只含任务合同、接收方能力和 Artifact 元数据；Artifact 正文通过受控运行时通道交付，Prompt 只携带引用、哈希和 Schema。接收方预检的任何硬失败都会在执行前拒绝该节点，并进入合同错误恢复。
+
+Pcomplete 不是模型自报置信度，而是路由先验与运行证据的组合。它记录测试通过率、约束覆盖、证据完整度、模型冲突、预算消耗、阻塞依赖和剩余关键路径；低、中、高风险恢复判断阈值分别为 0.60、0.75、0.90。
+
+污染传播遵守依赖语义：`hard` 和 `validation` 边传播失效，`soft` 边只产生可疑标记。全局重规划可以重新审视全图，但不能因此删除没有污染血缘的已验收 Artifact。恢复节点必须复制原工具、权限和依赖 Schema，不得静默扩权；不可逆替换节点需要新的审批单。
 
 ## 0.4 Outcome 预测与校准边界
 

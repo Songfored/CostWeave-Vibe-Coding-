@@ -60,16 +60,21 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.4", health["version"])
+        self.assertEqual("0.5.5", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.4", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.5", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
         self.assertTrue(health["features"]["outcome_forecast"])
+        self.assertTrue(health["features"]["handoff_intelligence"])
+        self.assertEqual(
+            "v0.5.5",
+            health["handoff_contract"]["schema_version"],
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -345,7 +350,8 @@ class ServerTests(unittest.TestCase):
             method="POST",
         )
         self.assertEqual(202, status)
-        for _ in range(100):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
             _, current = self.fetch_json(f"/api/v1/runs/{run['id']}")
             if current["status"] in {"completed", "failed", "cancelled"}:
                 break
@@ -397,6 +403,24 @@ class ServerTests(unittest.TestCase):
             f"/api/v1/runs/{run['id']}/failures"
         )
         self.assertEqual([], failures["failures"])
+        _, handoffs = self.fetch_json(
+            f"/api/v1/runs/{run['id']}/handoffs"
+        )
+        self.assertEqual(
+            len(current["plan"]["tasks"]),
+            handoffs["admitted"],
+        )
+        self.assertTrue(
+            all(
+                item["contract_digest"]
+                for item in handoffs["handoffs"]
+            )
+        )
+        _, recovery = self.fetch_json(
+            f"/api/v1/runs/{run['id']}/recovery"
+        )
+        self.assertTrue(recovery["checkpoints"])
+        self.assertEqual(1, recovery["global_replans_remaining"])
         _, forecast = self.fetch_json(
             f"/api/v1/runs/{run['id']}/forecast"
         )

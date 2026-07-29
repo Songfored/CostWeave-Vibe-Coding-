@@ -25,6 +25,7 @@ PLACEMENT_FEATURE_FLAG = "COSTWEAVE_PLACEMENT_V4"
 EVIDENCE_RECOVERY_FEATURE_FLAG = "COSTWEAVE_EVIDENCE_RECOVERY"
 OUTCOME_FORECAST_FEATURE_FLAG = "COSTWEAVE_OUTCOME_FORECAST"
 MEDIA_WORKFLOW_FEATURE_FLAG = "COSTWEAVE_MEDIA_WORKFLOW"
+HANDOFF_INTELLIGENCE_FEATURE_FLAG = "COSTWEAVE_HANDOFF_INTELLIGENCE"
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 _TRACE_LIMIT = 2048
 _TRACE: deque[EventEnvelope] = deque(maxlen=_TRACE_LIMIT)
@@ -80,6 +81,14 @@ def media_workflow_enabled() -> bool:
     )
 
 
+def handoff_intelligence_enabled() -> bool:
+    raw = os.environ.get(HANDOFF_INTELLIGENCE_FEATURE_FLAG, "1")
+    return (
+        evidence_recovery_enabled()
+        and raw.strip().lower() not in _FALSE_VALUES
+    )
+
+
 def contract_health() -> dict[str, Any]:
     return {
         "contract_schema": CONTRACT_SCHEMA_VERSION,
@@ -91,6 +100,7 @@ def contract_health() -> dict[str, Any]:
             "evidence_recovery": evidence_recovery_enabled(),
             "outcome_forecast": outcome_forecast_enabled(),
             "media_workflow": media_workflow_enabled(),
+            "handoff_intelligence": handoff_intelligence_enabled(),
         },
         "contract_trace_persistent": False,
     }

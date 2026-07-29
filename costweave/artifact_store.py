@@ -272,8 +272,9 @@ class ArtifactStore:
                     )
                 connection.execute(
                     "INSERT INTO messages(message_id,run_id,recipient_task_id,"
-                    "plan_revision,attempt,kind,envelope_json,envelope_hash,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?,?)",
+                    "plan_revision,attempt,kind,envelope_json,envelope_hash,"
+                    "created_at,contract_hash,preflight_json)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         message.message_id,
                         message.run_id,
@@ -284,6 +285,12 @@ class ArtifactStore:
                         raw,
                         fingerprint,
                         message.issued_at,
+                        message.contract_digest,
+                        json.dumps(
+                            dict(message.preflight),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
                     ),
                 )
                 connection.commit()
@@ -291,6 +298,30 @@ class ArtifactStore:
             except Exception:
                 connection.rollback()
                 raise
+
+    def list_messages(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT envelope_json,contract_hash,preflight_json "
+                "FROM messages WHERE run_id=? "
+                "ORDER BY created_at,message_id",
+                (run_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            envelope = MessageEnvelope.from_dict(
+                json.loads(row["envelope_json"])
+            ).to_dict()
+            envelope["contract_hash"] = (
+                str(row["contract_hash"])
+                or envelope.get("contract_digest", "")
+            )
+            if not envelope.get("preflight"):
+                envelope["preflight"] = json.loads(
+                    row["preflight_json"] or "{}"
+                )
+            result.append(envelope)
+        return result
 
     def sync_graph(self, graph: CompiledGraph) -> None:
         with self._lock, self._connection() as connection:

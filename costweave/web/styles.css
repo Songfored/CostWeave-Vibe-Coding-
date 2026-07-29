@@ -557,6 +557,25 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .forecast-intervals b { margin-right: 5px; color: var(--muted); }
 #forecast-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
 
+.recovery-card {
+  padding: 18px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(112, 240, 181, .09), transparent 36%),
+    linear-gradient(135deg, rgba(18, 51, 44, .72), rgba(12, 29, 34, .68));
+  border: 1px solid rgba(112, 240, 181, .2);
+  border-radius: 16px;
+}
+.recovery-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.recovery-heading h3 { margin: 5px 0 0; font-size: 19px; }
+#recovery-state { padding: 6px 9px; color: var(--accent); border: 1px solid rgba(112, 240, 181, .28); border-radius: 999px; font-size: 10px; font-weight: 800; }
+#recovery-state[data-recommended="true"] { color: var(--accent-2); border-color: rgba(244, 191, 103, .32); }
+.recovery-progress { height: 5px; margin-top: 13px; overflow: hidden; background: rgba(255,255,255,.06); border-radius: 99px; }
+.recovery-progress i { display: block; height: 100%; background: linear-gradient(90deg, var(--blue), var(--accent)); border-radius: inherit; transition: width .25s ease; }
+.recovery-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
+.recovery-metrics span { min-width: 0; padding: 9px 10px; color: var(--soft); background: rgba(3, 12, 14, .3); border: 1px solid rgba(112, 240, 181, .1); border-radius: 10px; font-size: 10px; }
+.recovery-metrics b { display: block; margin-bottom: 4px; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+#recovery-note { margin: 10px 0 0; color: var(--muted); font: 10px/1.55 ui-monospace, monospace; }
+
 .outcome-card {
   padding: 22px;
   background:
@@ -894,6 +913,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .media-project-heading, .media-project-footer { align-items: flex-start; flex-direction: column; }
   .media-project-footer > span { text-align: left; }
   .forecast-probabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .recovery-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topbar, main, footer { width: min(100% - 28px, 1380px); }
   .topbar { min-height: 64px; gap: 12px; }
   .runtime { font-size: 11px; }
@@ -934,6 +954,8 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 @media (max-width: 480px) {
   .planning-metrics { grid-template-columns: 1fr; }
   .difficulty-signals, .planning-candidates { grid-template-columns: 1fr; }
+  .recovery-heading { display: grid; }
+  .recovery-metrics { grid-template-columns: 1fr; }
   .deliberation-heading { align-items: flex-start; flex-direction: column; }
   #planning-adjudication { text-align: left; }
   .media-project-metrics { grid-template-columns: 1fr; }

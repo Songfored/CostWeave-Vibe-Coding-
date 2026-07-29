@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.4."""
+"""Persistent command/event/projection owner for CostWeave v0.5.5."""
 
 from __future__ import annotations
 
@@ -12,10 +12,14 @@ from .artifact_store import ArtifactStore
 from .artifacts import Artifact, ArtifactStatus
 from .approvals import ApprovalStore
 from .contracts_v4 import CommandEnvelope, EventEnvelope, canonical_identifier, new_command_id
-from .domain import Event, RunRequest, RunStatus, TaskStatus
+from .domain import Event, RunRequest, RunStatus, TaskStatus, WorkerProfile
 from .event_store import EventStore, ProjectionUpdate
 from .graph_compiler import GraphCompiler
 from .messages import MessageEnvelope
+from .handoff_compiler import (
+    HandoffCompiler,
+    HandoffPreflightError,
+)
 from .placements import PlacementStore
 from .recovery import EvidenceRecoveryStore
 from .outcome_store import OutcomeStore
@@ -44,6 +48,7 @@ class ControlKernel:
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
         self.graph_compiler = GraphCompiler()
+        self.handoff_compiler = HandoffCompiler()
         self._lock = threading.RLock()
 
     @staticmethod
@@ -274,6 +279,7 @@ class ControlKernel:
         from .compat_v4 import (
             artifact_dag_enabled,
             evidence_recovery_enabled,
+            handoff_intelligence_enabled,
             outcome_forecast_enabled,
             media_workflow_enabled,
             parallel_runtime_enabled,
@@ -294,6 +300,7 @@ class ControlKernel:
             "evidence_recovery": evidence_recovery_enabled(),
             "outcome_forecast": outcome_forecast_enabled(),
             "media_workflow": media_workflow_enabled(),
+            "handoff_intelligence": handoff_intelligence_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "persistent": True,
         }
@@ -313,18 +320,122 @@ class ControlKernel:
             task.dependencies,
             validated_only=True,
         )
-        found_producers = {artifact.producer_task_id for artifact in inputs}
-        required = {
-            canonical_identifier("task", f"{record.id}:{dependency}")
-            for dependency in task.dependencies
-            if task.dependency_types.get(dependency, "hard") != "soft"
-        }
-        missing = required - found_producers
-        if missing:
-            raise ValueError(
-                f"handoff is missing validated producer artifacts: {sorted(missing)}"
-            )
+        from .compat_v4 import handoff_intelligence_enabled
+
+        if not handoff_intelligence_enabled():
+            found_producers = {
+                artifact.producer_task_id for artifact in inputs
+            }
+            required = {
+                canonical_identifier(
+                    "task", f"{record.id}:{dependency}"
+                )
+                for dependency in task.dependencies
+                if task.dependency_types.get(dependency, "hard")
+                != "soft"
+            }
+            missing = required - found_producers
+            if missing:
+                raise ValueError(
+                    "handoff is missing validated producer artifacts: "
+                    f"{sorted(missing)}"
+                )
         task.input_artifact_refs = [artifact.artifact_id for artifact in inputs]
+        compiled = None
+        if handoff_intelligence_enabled():
+            worker_data = next(
+                (
+                    item
+                    for item in record.worker_snapshot
+                    if str(item.get("id")) == str(task.selected_worker)
+                ),
+                None,
+            )
+            worker = (
+                WorkerProfile(**worker_data)
+                if worker_data is not None
+                else WorkerProfile(
+                    id=str(task.selected_worker or "compat-receiver"),
+                    name="Compatibility receiver",
+                    specialty=task.task_type,
+                    capabilities={
+                        item: 1.0
+                        for item in task.required_capabilities
+                    },
+                    cost_per_task=max(
+                        0.0, float(task.estimated_cost)
+                    ),
+                    latency_factor=1.0,
+                    reliability=max(
+                        0.5, float(task.predicted_success or 0.8)
+                    ),
+                    context_window=max(
+                        32_000,
+                        int(task.estimated_input_tokens),
+                    ),
+                    max_output_tokens=max(
+                        8_000,
+                        int(task.estimated_output_tokens),
+                    ),
+                    modalities=list(task.required_modalities),
+                    tools=list(task.requires_tools),
+                )
+            )
+            approval = (
+                self.approval_store.get(task.approval_id)
+                if task.approval_id
+                else None
+            )
+            assumptions = (
+                record.plan.analysis.get("assumptions", [])
+                if isinstance(record.plan.analysis, dict)
+                else []
+            )
+            try:
+                compiled = self.handoff_compiler.compile(
+                    run_id=str(record.id),
+                    goal=record.request.goal,
+                    plan=record.plan,
+                    task=task,
+                    artifacts=inputs,
+                    worker=worker,
+                    approval=approval,
+                    assumptions=assumptions,
+                    remaining_budget=max(
+                        0.0,
+                        record.request.budget - record.spent,
+                    ),
+                )
+            except HandoffPreflightError as exc:
+                receipt = exc.receipt.to_dict()
+                task.handoff_receipt = receipt
+                entry = {
+                    "message_id": None,
+                    "task_id": str(task.id),
+                    "attempt": int(task.attempt),
+                    "plan_revision": int(record.plan.version),
+                    "admitted": False,
+                    "preflight": receipt,
+                }
+                if not any(
+                    item.get("task_id") == task.id
+                    and item.get("attempt") == task.attempt
+                    for item in record.handoff_history
+                ):
+                    record.handoff_history.append(entry)
+                self._persist(
+                    record,
+                    kind=CommandKind.RECORD_HANDOFF,
+                    event_kind="message.handoff.rejected",
+                    source="control_kernel.prepare_handoff",
+                    task_id=str(task.id),
+                    payload=entry,
+                    idempotency_key=(
+                        f"internal:{record.id}:handoff-rejected:"
+                        f"{task.id}:{task.attempt}"
+                    ),
+                )
+                raise
         message = MessageEnvelope.create(
             run_id=str(record.id),
             recipient_task_id=canonical_task_id(str(record.id), str(task.id)),
@@ -337,9 +448,59 @@ class ControlKernel:
             acceptance_criteria=task.acceptance_criteria,
             include=task.include,
             exclude=task.exclude,
+            context_manifest=(
+                [
+                    dict(item)
+                    for item in compiled.context_manifest
+                ]
+                if compiled is not None
+                else None
+            ),
+            work_order=(
+                compiled.work_order.to_dict()
+                if compiled is not None
+                else None
+            ),
+            preflight=(
+                compiled.preflight.to_dict()
+                if compiled is not None
+                else None
+            ),
+            contract_digest=(
+                compiled.contract_digest
+                if compiled is not None
+                else None
+            ),
+            compiled_prompt=(
+                compiled.compiled_prompt
+                if compiled is not None
+                else task.handoff_prompt
+            ),
+            compiler_revision=(
+                compiled.compiler_revision
+                if compiled is not None
+                else "legacy-envelope"
+            ),
         )
         stored, replayed = self.artifact_store.put_message(message)
         task.handoff_message_id = stored.message_id
+        task.handoff_prompt = stored.compiled_prompt or task.handoff_prompt
+        task.handoff_receipt = dict(stored.preflight)
+        history_entry = {
+            "message_id": stored.message_id,
+            "task_id": str(task.id),
+            "attempt": int(task.attempt),
+            "plan_revision": int(stored.plan_revision),
+            "admitted": bool(stored.preflight.get("admitted", True)),
+            "contract_digest": stored.contract_digest,
+            "compiler_revision": stored.compiler_revision,
+            "preflight": dict(stored.preflight),
+        }
+        if not any(
+            item.get("message_id") == stored.message_id
+            for item in record.handoff_history
+        ):
+            record.handoff_history.append(history_entry)
         if not replayed:
             self._persist(
                 record,
@@ -351,6 +512,10 @@ class ControlKernel:
                     "message_id": stored.message_id,
                     "input_artifact_refs": list(stored.input_artifact_refs),
                     "plan_revision": stored.plan_revision,
+                    "admitted": history_entry["admitted"],
+                    "contract_digest": stored.contract_digest,
+                    "compiler_revision": stored.compiler_revision,
+                    "preflight": dict(stored.preflight),
                 },
                 idempotency_key=(
                     f"internal:{record.id}:handoff:{stored.message_id}"
@@ -441,6 +606,52 @@ class ControlKernel:
     def artifacts(self, run_id: str, *, include_content: bool = False) -> list[dict[str, Any]]:
         return self.artifact_store.list_run(
             run_id, include_content=include_content
+        )
+
+    def handoffs(self, run_id: str) -> list[dict[str, Any]]:
+        return self.artifact_store.list_messages(run_id)
+
+    def record_completion_checkpoint(
+        self,
+        record: Any,
+        checkpoint: Any,
+    ) -> None:
+        payload = checkpoint.to_dict()
+        if not any(
+            item.get("checkpoint_id") == payload["checkpoint_id"]
+            for item in record.completion_checkpoints
+        ):
+            record.completion_checkpoints.append(payload)
+        self._persist(
+            record,
+            kind=CommandKind.CHECKPOINT,
+            event_kind="runtime.completion_checkpointed",
+            source="control_kernel.record_completion_checkpoint",
+            payload=payload,
+            idempotency_key=(
+                f"internal:{record.id}:pcomplete:"
+                f"{payload['checkpoint_id']}"
+            ),
+        )
+
+    def record_pollution_report(
+        self,
+        record: Any,
+        report: Any,
+    ) -> None:
+        payload = report.to_dict()
+        record.pollution_reports.append(payload)
+        self._persist(
+            record,
+            kind=CommandKind.CHECKPOINT,
+            event_kind="runtime.pollution_analyzed",
+            source="control_kernel.record_pollution_report",
+            payload=payload,
+            idempotency_key=(
+                f"internal:{record.id}:pollution:"
+                f"{len(record.pollution_reports)}:"
+                f"{payload['failed_task_id']}"
+            ),
         )
 
     def artifact(self, artifact_id: str) -> dict[str, Any] | None:
@@ -574,6 +785,7 @@ class ControlKernel:
         decision: Any,
         affected_task_ids: list[str],
         patch: Any = None,
+        recovery_receipt: dict[str, Any] | None = None,
     ) -> None:
         self.evidence_store.record_failure(
             run_id=str(record.id),
@@ -582,6 +794,7 @@ class ControlKernel:
             decision=decision,
             affected_task_ids=affected_task_ids,
             patch=patch,
+            recovery_receipt=recovery_receipt,
         )
 
     def validations(self, run_id: str) -> list[dict[str, Any]]:

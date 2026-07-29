@@ -463,6 +463,19 @@ class HeuristicPlanner:
             objective=f"根据失败证据重新执行“{failed.objective}”，纠正原有假设并保留独立可验证成果。",
             task_type=failed.task_type,
             dependencies=failed.dependencies.copy(),
+            dependency_types=failed.dependency_types.copy(),
+            input_artifact_schemas=failed.input_artifact_schemas.copy(),
+            output_artifact_specs=[
+                dict(item) for item in failed.output_artifact_specs
+            ],
+            data_permissions=failed.data_permissions.copy(),
+            resource_slots=failed.resource_slots,
+            cpu_cores=failed.cpu_cores,
+            gpu_count=failed.gpu_count,
+            vram_mb=failed.vram_mb,
+            requires_approval=failed.requires_approval,
+            approval_kind=failed.approval_kind,
+            approval_reason=failed.approval_reason,
             required_capabilities=list(dict.fromkeys([*failed.required_capabilities, "planning", "risk"])),
             acceptance_criteria=[*failed.acceptance_criteria, "解释原方案失败原因", "证明新方案与下游合同兼容"],
             output_schema=failed.output_schema.copy(),
@@ -494,11 +507,21 @@ class HeuristicPlanner:
             criticality=max(.9, failed.criticality),
             classification_confidence=failed.classification_confidence,
             escalation_policy="failure-cause-upgrade",
+            critical_criteria=failed.critical_criteria.copy(),
             plan_version=plan.version,
         )
         replacement.handoff_prompt = self._handoff(replacement, RunRequest(goal=failed.objective))
         for task in plan.tasks:
             task.dependencies = [replacement_id if dep == failed_task_id else dep for dep in task.dependencies]
+            if failed_task_id in task.dependency_types:
+                task.dependency_types[replacement_id] = (
+                    task.dependency_types.pop(failed_task_id)
+                )
+            if failed_task_id in task.input_artifact_schemas:
+                task.input_artifact_schemas[replacement_id] = (
+                    task.input_artifact_schemas.pop(failed_task_id)
+                )
+            task.plan_version = plan.version
         plan.tasks.append(replacement)
         plan.predicted_success = max(.35, plan.predicted_success * .94)
         plan.risks.append(f"计划 v{plan.version} 已用高级模型候选替换失败节点 {failed_task_id}")
