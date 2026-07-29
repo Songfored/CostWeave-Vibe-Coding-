@@ -108,7 +108,7 @@ class PlanningContractTests(unittest.TestCase):
 
     def test_work_order_is_json_safe(self):
         payload = work_order().to_dict()
-        self.assertEqual("v0.5.2", payload["schema_version"])
+        self.assertEqual("v0.5.3", payload["schema_version"])
         self.assertEqual(["summary exists"], payload["acceptance_tests"])
 
     def test_work_order_requires_acceptance_tests(self):

@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.2", health["version"])
+        self.assertEqual("0.5.3", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.2", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.3", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -80,9 +80,9 @@ class ServerTests(unittest.TestCase):
     def test_planning_policy_and_run_receipt_are_explainable(self):
         status, policy = self.fetch_json("/api/v1/planning/policy")
         self.assertEqual(200, status)
-        self.assertEqual("v0.5.2", policy["schema_version"])
+        self.assertEqual("v0.5.3", policy["schema_version"])
         self.assertEqual(
-            "rule-first-confidence-aware-governor",
+            "bounded-identity-blind-multiplanner",
             policy["scope"],
         )
         self.assertEqual(
@@ -93,6 +93,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(2, policy["limits"]["max_management_depth"])
         self.assertIn("MULTI_PLANNER", policy["modes"])
         self.assertEqual(3, len(policy["roles"]))
+        self.assertTrue(policy["deliberation"]["parallel_proposals"])
+        self.assertTrue(policy["deliberation"]["identity_blind_scoring"])
+        self.assertFalse(policy["deliberation"]["majority_vote"])
 
         headers = {
             "Content-Type": "application/json",
@@ -123,6 +126,15 @@ class ServerTests(unittest.TestCase):
         self.assertIn("difficulty_vector", planning["decision"])
         self.assertEqual(6, len(planning["decision"]["candidates"]))
         self.assertIn("expected_loss", planning["decision"]["candidates"][0])
+        self.assertIsNotNone(planning["deliberation"])
+        self.assertEqual(
+            "v0.5.3",
+            planning["deliberation"]["schema_version"],
+        )
+        self.assertLessEqual(
+            planning["deliberation"]["adjudication"]["rounds_used"],
+            1,
+        )
 
     def test_high_risk_governor_inserts_pre_execution_review(self):
         status, run = self.request_json(

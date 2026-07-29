@@ -25,15 +25,24 @@ class V051ProjectionTests(unittest.TestCase):
                 "proposal_id": "proposal-test",
                 "planner_role": "domain-planner",
             }],
+            planning_deliberation={
+                "proposal_count": 1,
+                "parallel": False,
+                "fingerprint": "receipt-abc",
+            },
         )
         snapshot = record_to_projection(record, revision=1)
         restored = record_from_snapshot(snapshot)
-        self.assertEqual("v5.2", snapshot["projection_schema_version"])
+        self.assertEqual("v5.3", snapshot["projection_schema_version"])
         self.assertEqual(
             "SINGLE_PLANNER",
             restored.planning_decision["mode"],
         )
         self.assertEqual(1, len(restored.planning_proposals))
+        self.assertEqual(
+            "receipt-abc",
+            restored.planning_deliberation["fingerprint"],
+        )
 
     def test_legacy_v49_projection_hydrates_without_planning_receipt(self):
         record = RunRecord(
@@ -73,7 +82,7 @@ class V051ProjectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runtime.sqlite3"
             first = ControlKernel(path)
-            self.assertEqual(10, first.health()["migrations"])
+            self.assertEqual(11, first.health()["migrations"])
             connection = sqlite3.connect(path)
             try:
                 indexes = {
@@ -85,9 +94,10 @@ class V051ProjectionTests(unittest.TestCase):
             finally:
                 connection.close()
             self.assertIn("idx_events_run_kind_revision", indexes)
+            self.assertIn("idx_events_kind_run_revision", indexes)
             second = ControlKernel(path)
-            self.assertEqual(10, second.health()["migrations"])
-            self.assertEqual("v5.2", second.health()["runtime_schema"])
+            self.assertEqual(11, second.health()["migrations"])
+            self.assertEqual("v5.3", second.health()["runtime_schema"])
 
 
 if __name__ == "__main__":

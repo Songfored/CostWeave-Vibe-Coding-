@@ -1,4 +1,4 @@
-"""Provider-neutral planning-governance contracts for CostWeave v0.5.2."""
+"""Provider-neutral planning-governance contracts for CostWeave v0.5.3."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 
-PLANNING_SCHEMA_VERSION = "v0.5.2"
-PLANNING_POLICY_VERSION = "planning-governor-0.5.2"
+PLANNING_SCHEMA_VERSION = "v0.5.3"
+PLANNING_POLICY_VERSION = "planning-governor-0.5.3"
 
 
 class PlanningContractError(ValueError):
@@ -44,7 +44,7 @@ class ManagementLimits:
         if not 1 <= self.max_planners_per_round <= 3:
             raise PlanningContractError("planner panel must contain one to three roles")
         if self.max_adjudication_rounds != 1 or self.max_full_replans != 1:
-            raise PlanningContractError("v0.5.2 permits only one adjudication and one full replan")
+            raise PlanningContractError("v0.5.3 permits only one adjudication and one full replan")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -149,6 +149,9 @@ class PlanProposal:
     estimated_planning_latency_ms: int
     confidence: float
     assignment: Mapping[str, Any] = field(default_factory=dict)
+    hard_constraints: tuple[str, ...] = ()
+    strategy: Mapping[str, Any] = field(default_factory=dict)
+    evidence: tuple[str, ...] = ()
     schema_version: str = PLANNING_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -168,13 +171,214 @@ class PlanProposal:
             "assumptions",
             "risks",
             "acceptance_strategy",
+            "hard_constraints",
+            "evidence",
         ):
             data[key] = list(data[key])
         data["assignment"] = dict(self.assignment)
+        data["strategy"] = dict(self.strategy)
         data["estimated_planning_cost"] = round(
             self.estimated_planning_cost, 6
         )
         data["confidence"] = round(self.confidence, 4)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class AnonymousProposal:
+    """Identity-blind view used by the scorer and adjudicator."""
+
+    alias: str
+    objective_interpretation: str
+    decomposition_outline: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    risks: tuple[str, ...]
+    acceptance_strategy: tuple[str, ...]
+    hard_constraints: tuple[str, ...]
+    strategy: Mapping[str, Any]
+    evidence: tuple[str, ...]
+    confidence: float
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.alias.strip() or not self.decomposition_outline:
+            raise PlanningContractError("anonymous proposal requires an alias and decomposition")
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError("anonymous proposal confidence must be between zero and one")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in (
+            "decomposition_outline",
+            "assumptions",
+            "risks",
+            "acceptance_strategy",
+            "hard_constraints",
+            "evidence",
+        ):
+            data[key] = list(data[key])
+        data["strategy"] = dict(self.strategy)
+        data["confidence"] = round(self.confidence, 4)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalScorecard:
+    alias: str
+    scores: Mapping[str, float]
+    total: float
+    hard_constraints_passed: bool
+    failed_constraints: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.alias.strip() or not self.scores:
+            raise PlanningContractError("scorecard requires an alias and scores")
+        if any(not 0 <= float(value) <= 1 for value in self.scores.values()):
+            raise PlanningContractError("score dimensions must be between zero and one")
+        if not 0 <= self.total <= 1:
+            raise PlanningContractError("score total must be between zero and one")
+        if self.hard_constraints_passed and self.failed_constraints:
+            raise PlanningContractError("passing scorecard cannot contain failed constraints")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "alias": self.alias,
+            "scores": {
+                key: round(float(value), 4)
+                for key, value in self.scores.items()
+            },
+            "total": round(self.total, 4),
+            "hard_constraints_passed": self.hard_constraints_passed,
+            "failed_constraints": list(self.failed_constraints),
+            "reasons": list(self.reasons),
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalConflict:
+    conflict_id: str
+    conflict_type: str
+    severity: str
+    aliases: tuple[str, ...]
+    evidence: tuple[str, ...]
+    resolution_required: bool
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.severity not in {"low", "medium", "high"}:
+            raise PlanningContractError("conflict severity must be low, medium, or high")
+        if len(self.aliases) < 2 or not self.evidence:
+            raise PlanningContractError("conflict requires at least two aliases and evidence")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "conflict_id": self.conflict_id,
+            "conflict_type": self.conflict_type,
+            "severity": self.severity,
+            "aliases": list(self.aliases),
+            "evidence": list(self.evidence),
+            "resolution_required": self.resolution_required,
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AdjudicationResult:
+    outcome: str
+    rounds_used: int
+    selected_aliases: tuple[str, ...]
+    rejected_aliases: tuple[str, ...]
+    rejection_reasons: Mapping[str, str]
+    compiler_directives: tuple[str, ...]
+    reasons: tuple[str, ...]
+    confidence: float
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.outcome not in {"not_required", "selected", "merged", "degraded"}:
+            raise PlanningContractError("unsupported adjudication outcome")
+        if self.rounds_used not in {0, 1}:
+            raise PlanningContractError("adjudication is limited to zero or one round")
+        if not self.selected_aliases and self.outcome != "not_required":
+            raise PlanningContractError("adjudication must select at least one proposal")
+        if not 0 <= self.confidence <= 1:
+            raise PlanningContractError("adjudication confidence must be between zero and one")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "rounds_used": self.rounds_used,
+            "selected_aliases": list(self.selected_aliases),
+            "rejected_aliases": list(self.rejected_aliases),
+            "rejection_reasons": dict(self.rejection_reasons),
+            "compiler_directives": list(self.compiler_directives),
+            "reasons": list(self.reasons),
+            "confidence": round(self.confidence, 4),
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeliberationReceipt:
+    decision_id: str
+    mode: PlanningMode
+    parallel: bool
+    proposal_count: int
+    anonymous_proposals: tuple[AnonymousProposal, ...]
+    scorecards: tuple[ProposalScorecard, ...]
+    conflicts: tuple[ProposalConflict, ...]
+    adjudication: AdjudicationResult
+    actual_cost: float
+    actual_latency_ms: int
+    calls_used: int
+    budget_degraded: bool
+    early_stopped: bool
+    stop_reason: str
+    schema_version: str = PLANNING_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.proposal_count != len(self.anonymous_proposals):
+            raise PlanningContractError("proposal count and anonymous proposal count disagree")
+        if self.proposal_count != len(self.scorecards):
+            raise PlanningContractError("every proposal requires one scorecard")
+        if self.actual_cost < 0 or self.actual_latency_ms < 0 or self.calls_used < 0:
+            raise PlanningContractError("deliberation measurements cannot be negative")
+        if self.adjudication.rounds_used > 1:
+            raise PlanningContractError("recursive adjudication is forbidden")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {
+            "decision_id": self.decision_id,
+            "mode": self.mode.value,
+            "parallel": self.parallel,
+            "proposal_count": self.proposal_count,
+            "anonymous_proposals": [
+                proposal.to_dict() for proposal in self.anonymous_proposals
+            ],
+            "scorecards": [score.to_dict() for score in self.scorecards],
+            "conflicts": [conflict.to_dict() for conflict in self.conflicts],
+            "adjudication": self.adjudication.to_dict(),
+            "actual_cost": round(self.actual_cost, 6),
+            "actual_latency_ms": self.actual_latency_ms,
+            "calls_used": self.calls_used,
+            "budget_degraded": self.budget_degraded,
+            "early_stopped": self.early_stopped,
+            "stop_reason": self.stop_reason,
+            "schema_version": self.schema_version,
+        }
+        semantic = dict(data)
+        data["fingerprint"] = hashlib.sha256(
+            json.dumps(
+                semantic,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
         return data
 
 

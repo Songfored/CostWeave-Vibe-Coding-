@@ -49,6 +49,7 @@ from .scheduler import ParallelScheduler
 from .validator import ContractValidator, PlanValidationError
 from .dag_simulation import DagMonteCarlo
 from .deliberation import DeliberationSimulator
+from .multiplanner import MultiPlannerEngine, PlanCompiler
 from .planning_governor import PlanningGovernor
 
 
@@ -75,6 +76,7 @@ class RunRecord:
     retry_of: str | None = None
     planning_decision: dict[str, Any] | None = None
     planning_proposals: list[dict[str, Any]] = field(default_factory=list)
+    planning_deliberation: dict[str, Any] | None = None
     worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
     control_kernel: Any = field(default=None, repr=False)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -130,6 +132,7 @@ class RunRecord:
                 "planning": {
                     "decision": self.planning_decision,
                     "proposals": list(self.planning_proposals),
+                    "deliberation": self.planning_deliberation,
                 },
                 "forecast": (
                     self.control_kernel.forecast(str(self.id))
@@ -142,7 +145,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v5.2",
+                    "schema_version": "v5.3",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -211,6 +214,8 @@ class OrchestrationEngine:
         self.planner = HeuristicPlanner()
         self.deliberation = DeliberationSimulator()
         self.planning_governor = PlanningGovernor()
+        self.multiplanner = MultiPlannerEngine()
+        self.plan_compiler = PlanCompiler()
         self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
@@ -253,15 +258,18 @@ class OrchestrationEngine:
                 analysis,
                 run_router.workers,
             )
-            planning_proposals = self.deliberation.proposals(
+            planning_proposals, deliberation_receipt = (
+                await self.multiplanner.deliberate(
                 planning_decision,
                 record.request,
                 analysis,
+                )
             )
             record.planning_decision = planning_decision.to_dict()
             record.planning_proposals = [
                 proposal.to_dict() for proposal in planning_proposals
             ]
+            record.planning_deliberation = deliberation_receipt.to_dict()
             if bool(
                 planning_decision.pre_execution_escalation.get(
                     "required"
@@ -294,10 +302,38 @@ class OrchestrationEngine:
                     "simulated": False,
                 },
             )
+            self._event(
+                record,
+                "planning_deliberated",
+                (
+                    f"MultiPlanner produced {deliberation_receipt.proposal_count} "
+                    f"proposal(s); adjudication outcome "
+                    f"{deliberation_receipt.adjudication.outcome}"
+                ),
+                detail={
+                    "decision_id": planning_decision.decision_id,
+                    "parallel": deliberation_receipt.parallel,
+                    "proposal_count": deliberation_receipt.proposal_count,
+                    "conflict_count": len(deliberation_receipt.conflicts),
+                    "rounds_used": (
+                        deliberation_receipt.adjudication.rounds_used
+                    ),
+                    "selected_aliases": list(
+                        deliberation_receipt.adjudication.selected_aliases
+                    ),
+                    "fingerprint": (
+                        record.planning_deliberation["fingerprint"]
+                    ),
+                },
+            )
             plan = (
                 self.planner.plan(record.request, analysis)
                 if isinstance(self.planner, HeuristicPlanner)
                 else self.planner.plan(record.request)
+            )
+            plan = self.plan_compiler.compile(
+                plan,
+                deliberation_receipt,
             )
             issues = self.validator.validate_plan(plan)
             if issues:
@@ -1455,6 +1491,7 @@ class RunManager:
                 "run_id": str(record.id),
                 "decision": record.planning_decision,
                 "proposals": list(record.planning_proposals),
+                "deliberation": record.planning_deliberation,
             }
 
     def evaluations(self) -> list[dict[str, Any]]:

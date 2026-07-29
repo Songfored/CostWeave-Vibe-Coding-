@@ -508,6 +508,30 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .planning-roles span { margin-top: 4px; color: var(--blue); font-size: 11px; }
 .planning-roles small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .planning-roles p { margin: 0; color: var(--muted); font-size: 11px; }
+.planning-deliberation {
+  margin-top: 11px;
+  padding: 12px;
+  background: rgba(121, 168, 255, .045);
+  border: 1px solid rgba(121, 168, 255, .16);
+  border-radius: 12px;
+}
+.deliberation-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.deliberation-heading strong { color: var(--text); font-size: 12px; }
+#planning-adjudication { color: var(--blue); font-size: 10px; text-align: right; }
+.planning-proposals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
+.planning-proposals article { padding: 9px; background: rgba(3, 12, 14, .36); border: 1px solid rgba(150, 218, 235, .12); border-radius: 9px; }
+.planning-proposals article[data-selected="true"] { border-color: rgba(112, 240, 181, .38); box-shadow: inset 0 0 0 1px rgba(112, 240, 181, .06); }
+.planning-proposals article[data-hard-pass="false"] { border-color: rgba(255, 142, 135, .35); }
+.planning-proposals article > div { display: flex; justify-content: space-between; gap: 8px; }
+.planning-proposals strong { font-size: 11px; }
+.planning-proposals span { color: var(--accent); font: 750 11px ui-monospace, monospace; }
+.planning-proposals p, .planning-proposals small { display: block; margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.planning-conflicts { display: grid; gap: 6px; margin-top: 8px; }
+.planning-conflicts article { display: grid; grid-template-columns: minmax(120px, .7fr) minmax(100px, .5fr) minmax(200px, 1.8fr); gap: 8px; padding: 7px 9px; background: rgba(244, 191, 103, .04); border-left: 2px solid rgba(244, 191, 103, .42); border-radius: 7px; }
+.planning-conflicts article[data-severity="high"] { border-left-color: var(--danger); }
+.planning-conflicts strong, .planning-conflicts span, .planning-conflicts small { min-width: 0; font-size: 9px; }
+.planning-conflicts span { color: var(--accent-2); }
+.planning-conflicts small, .planning-conflicts > p, .planning-proposals > p { margin: 0; color: var(--muted); }
 .planning-explain { margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(244, 191, 103, .12); }
 .planning-explain summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 750; }
 #planning-details { color: var(--muted); font-size: 10px; line-height: 1.55; }
@@ -864,6 +888,8 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .planning-difficulty { grid-template-columns: 1fr; }
   .planning-candidates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .planning-roles { grid-template-columns: 1fr; }
+  .planning-proposals { grid-template-columns: 1fr; }
+  .planning-conflicts article { grid-template-columns: 1fr; }
   .media-project-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .media-project-heading, .media-project-footer { align-items: flex-start; flex-direction: column; }
   .media-project-footer > span { text-align: left; }
@@ -908,6 +934,8 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 @media (max-width: 480px) {
   .planning-metrics { grid-template-columns: 1fr; }
   .difficulty-signals, .planning-candidates { grid-template-columns: 1fr; }
+  .deliberation-heading { align-items: flex-start; flex-direction: column; }
+  #planning-adjudication { text-align: left; }
   .media-project-metrics { grid-template-columns: 1fr; }
   .topbar, main, footer { width: min(100% - 20px, 1380px); }
   .brand { font-size: 17px; }

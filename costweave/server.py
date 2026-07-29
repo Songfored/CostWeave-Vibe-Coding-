@@ -57,7 +57,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.2"
+    server_version = "CostWeave/0.5.3"
 
     def setup(self) -> None:
         super().setup()
@@ -120,7 +120,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "provider_calls": 0,
                 },
                 "decision_objective": "minimum-expected-total-loss",
-                "scope": "rule-first-confidence-aware-governor",
+                "scope": "bounded-identity-blind-multiplanner",
+                "deliberation": {
+                    "parallel_proposals": True,
+                    "identity_blind_scoring": True,
+                    "majority_vote": False,
+                    "max_adjudication_rounds": 1,
+                    "compiler_target": "artifact-dag",
+                },
             })
             return
         if path == "/api/catalog":
@@ -1092,7 +1099,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.2 planning-governor prototype"
+        description="Run the CostWeave v0.5.3 bounded-MultiPlanner prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

@@ -47,6 +47,10 @@ class WebUiRegressionTests(unittest.TestCase):
             "planning-escalation",
             "planning-candidates",
             "planning-roles",
+            "planning-deliberation",
+            "planning-proposals",
+            "planning-conflicts",
+            "planning-adjudication",
             "outcome-card",
             "copy-result",
             "download-result",
@@ -114,7 +118,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.2 Planning Governor", self.html)
+        self.assertIn("v0.5.3 Bounded MultiPlanner", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)
         self.assertIn("关键成功标准", self.js)
@@ -128,6 +132,9 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("difficulty_vector", self.js)
         self.assertIn("pre_execution_escalation", self.js)
         self.assertIn("expected_loss", self.js)
+        self.assertIn("anonymous_proposals", self.js)
+        self.assertIn("hard_constraints_passed", self.js)
+        self.assertIn("selected_aliases", self.js)
 
 
 if __name__ == "__main__":

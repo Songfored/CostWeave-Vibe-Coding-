@@ -299,6 +299,7 @@ function render(run) {
 function renderPlanning(planning) {
   const card = $("#planning-card");
   const decision = planning?.decision;
+  const deliberation = planning?.deliberation;
   if (!decision) {
     card.classList.add("hidden");
     return;
@@ -376,6 +377,41 @@ function renderPlanning(planning) {
         <small>${escapeHtml(item.provider || "provider-neutral")} · ${escapeHtml(item.deployment || "未部署")} · 匹配 ${Math.round(Number(item.score || 0) * 100)}%</small>
       </article>`).join("")
     : '<p>本模式不创建额外 Planner，避免无意义管理开销。</p>';
+  const deliberationPanel = $("#planning-deliberation");
+  if (deliberation) {
+    const scorecards = Array.isArray(deliberation.scorecards) ? deliberation.scorecards : [];
+    const anonymous = Array.isArray(deliberation.anonymous_proposals) ? deliberation.anonymous_proposals : [];
+    const conflicts = Array.isArray(deliberation.conflicts) ? deliberation.conflicts : [];
+    const adjudication = deliberation.adjudication || {};
+    const proposalsByAlias = new Map(anonymous.map((item) => [item.alias, item]));
+    $("#planning-proposals").innerHTML = scorecards.length
+      ? scorecards.map((score) => {
+          const proposal = proposalsByAlias.get(score.alias) || {};
+          const selected = (adjudication.selected_aliases || []).includes(score.alias);
+          return `<article data-selected="${selected}" data-hard-pass="${Boolean(score.hard_constraints_passed)}">
+            <div><strong>Proposal ${escapeHtml(score.alias || "?")}</strong><span>${Math.round(Number(score.total || 0) * 100)}%</span></div>
+            <p>${escapeHtml((proposal.decomposition_outline || []).slice(0, 2).join(" · "))}</p>
+            <small>${score.hard_constraints_passed ? "Hard constraints passed" : `Failed: ${(score.failed_constraints || []).join(" · ")}`}</small>
+          </article>`;
+        }).join("")
+      : "<p>No planner call was permitted by the planning budget.</p>";
+    $("#planning-conflicts").innerHTML = conflicts.length
+      ? conflicts.map((item) => `<article data-severity="${escapeHtml(item.severity || "low")}">
+          <strong>${escapeHtml(humanize(item.conflict_type || "conflict"))}</strong>
+          <span>${escapeHtml((item.aliases || []).join(" ↔ "))} · ${escapeHtml(item.severity || "")}</span>
+          <small>${escapeHtml((item.evidence || []).join(" · "))}</small>
+        </article>`).join("")
+      : "<p>No material proposal conflict detected.</p>";
+    $("#planning-adjudication").textContent = `${humanize(adjudication.outcome || "not required")} · ${Number(adjudication.rounds_used || 0)}/1 round · ${(adjudication.selected_aliases || []).join(" + ") || "none"}`;
+    $("#planning-adjudication").dataset.outcome = adjudication.outcome || "not_required";
+    deliberationPanel.dataset.parallel = deliberation.parallel ? "true" : "false";
+    deliberationPanel.classList.remove("hidden");
+  } else {
+    deliberationPanel.classList.add("hidden");
+    $("#planning-proposals").innerHTML = "";
+    $("#planning-conflicts").innerHTML = "";
+    $("#planning-adjudication").textContent = "";
+  }
   const rejected = Object.entries(decision.rejected_modes || {})
     .map(([mode, reason]) => `<li><b>${escapeHtml(modeLabels[mode] || mode)}</b>：${escapeHtml(reason)}</li>`)
     .join("");

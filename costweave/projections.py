@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v5.2"
+PROJECTION_SCHEMA_VERSION = "v5.3"
 
 
 class ProjectionError(ValueError):
@@ -86,6 +86,9 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
             "planning": {
                 "decision": copy.deepcopy(record.planning_decision),
                 "proposals": copy.deepcopy(record.planning_proposals),
+                "deliberation": copy.deepcopy(
+                    record.planning_deliberation
+                ),
             },
             "runtime": {
                 "schema_version": PROJECTION_SCHEMA_VERSION,
@@ -127,7 +130,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     schema = snapshot.get("projection_schema_version")
     if schema not in {
         None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6", "v4.7",
-        "v4.9", "v5.1",
+        "v4.9", "v5.1", "v5.2",
         PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")
@@ -191,6 +194,9 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "planning_decision": copy.deepcopy(planning.get("decision")),
         "planning_proposals": copy.deepcopy(
             planning.get("proposals", [])
+        ),
+        "planning_deliberation": copy.deepcopy(
+            planning.get("deliberation")
         ),
         "worker_snapshot": copy.deepcopy(internal.get("worker_snapshot", [])),
     }
