@@ -6,6 +6,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from .cross_provider import (
+    CROSS_PROVIDER_POLICY_REVISION,
+    CrossProviderPolicy,
+    PosteriorLookup,
+)
 from .domain import RunMode, TaskContract
 from .inference_policy import InferencePolicy
 from .placements import PlacementCandidate, placement_id
@@ -33,10 +38,12 @@ class ResourcePortfolioOptimizer:
         self,
         *,
         economics: ResourceEconomics | None = None,
+        posterior_lookup: PosteriorLookup | None = None,
         switch_minimum_usd: float = 0.00001,
         switch_minimum_ratio: float = 0.03,
     ) -> None:
         self.economics = economics or ResourceEconomics()
+        self.cross_provider = CrossProviderPolicy(posterior_lookup)
         self.switch_minimum_usd = switch_minimum_usd
         self.switch_minimum_ratio = switch_minimum_ratio
 
@@ -50,6 +57,7 @@ class ResourcePortfolioOptimizer:
         availability: dict[str, dict[str, Any]] | None = None,
         deadline_ms: int | None = None,
         value_of_time_per_second: float | None = None,
+        admission_audit: list[dict[str, Any]] | None = None,
     ) -> list[PlacementCandidate]:
         availability = availability or {}
         candidates: list[PlacementCandidate] = []
@@ -79,32 +87,48 @@ class ResourcePortfolioOptimizer:
                     },
                 )
                 for profile in InferencePolicy.candidates(worker, task):
-                    lower = max(
-                        0.03,
-                        min(
-                            0.995,
-                            route.success_lower_bound
-                            + profile.quality_delta,
+                    assessment = self.cross_provider.assess(
+                        task=task,
+                        worker=worker,
+                        pool=pool,
+                        profile=profile,
+                        prior_mean=max(
+                            0.03,
+                            min(
+                                0.997,
+                                route.predicted_success
+                                + profile.quality_delta,
+                            ),
                         ),
-                    )
-                    mean = max(
-                        lower,
-                        min(
-                            0.997,
-                            route.predicted_success
-                            + profile.quality_delta,
+                        prior_lower=max(
+                            0.03,
+                            min(
+                                0.995,
+                                route.success_lower_bound
+                                + profile.quality_delta,
+                            ),
                         ),
+                        prior_uncertainty=route.prediction_uncertainty,
+                        base_latency_ms=route.estimated_latency_ms,
+                        availability=available,
+                        deadline_ms=deadline_ms,
                     )
+                    assessment_data = assessment.to_dict()
+                    if admission_audit is not None:
+                        admission_audit.append(
+                            {
+                                "task_id": task.id,
+                                "worker_id": worker.id,
+                                **assessment_data,
+                            }
+                        )
+                    if not assessment.admitted:
+                        continue
+                    lower = assessment.success_lower_bound
+                    mean = assessment.predicted_success
                     if lower + 1e-12 < quality_floor:
                         continue
-                    execution_ms = max(
-                        1,
-                        round(
-                            route.estimated_latency_ms
-                            * profile.latency_multiplier
-                            + profile.cold_start_ms
-                        ),
-                    )
+                    execution_ms = assessment.execution_p50_ms
                     queue_depth = max(
                         0, int(available.get("queue_depth", 0))
                     )
@@ -113,12 +137,7 @@ class ResourcePortfolioOptimizer:
                         / max(1, pool.slots_total)
                         * execution_ms
                     )
-                    finish_p95 = queue_ms + round(execution_ms * 1.35)
-                    if (
-                        deadline_ms is not None
-                        and finish_p95 > deadline_ms
-                    ):
-                        continue
+                    finish_p95 = assessment.finish_p95_ms
                     forecast = self.economics.forecast(
                         task=task,
                         worker=worker,
@@ -175,6 +194,34 @@ class ResourcePortfolioOptimizer:
                                 "gpu_memory_mb": max(0, task.vram_mb),
                                 "duration_p95_ms": finish_p95 - queue_ms,
                             },
+                            deployment=assessment.deployment.to_dict(),
+                            posterior={
+                                "level": assessment.posterior_level,
+                                "samples": assessment.posterior_samples,
+                                "cold_start": assessment.cold_start,
+                                "catalog_freshness": (
+                                    assessment.catalog_freshness
+                                ),
+                                "predicted_success": mean,
+                                "success_lower_bound": lower,
+                                "uncertainty": assessment.uncertainty,
+                            },
+                            admission={
+                                "admitted": True,
+                                "code": assessment.admission_code,
+                                "reasons": [],
+                                "capacity": assessment.capacity,
+                                "policy_revision": (
+                                    CROSS_PROVIDER_POLICY_REVISION
+                                ),
+                            },
+                            latency_forecast={
+                                "execution_p50_ms": execution_ms,
+                                "finish_p95_ms": finish_p95,
+                                "deadline_miss_probability": (
+                                    assessment.deadline_miss_probability
+                                ),
+                            },
                             rationale=(
                                 f"质量下界 {lower:.0%}；"
                                 f"端到端预期成本 "
@@ -209,6 +256,7 @@ class ResourcePortfolioOptimizer:
         value_of_time_per_second: float | None = None,
     ) -> OptimizationResult:
         all_candidates: dict[str, list[PlacementCandidate]] = {}
+        admission_audit: list[dict[str, Any]] = []
         for task in tasks:
             capacity_match = any(
                 pool.provider == route.worker.provider
@@ -242,6 +290,7 @@ class ResourcePortfolioOptimizer:
                 availability=availability,
                 deadline_ms=deadline_ms,
                 value_of_time_per_second=value_of_time_per_second,
+                admission_audit=admission_audit,
             )
             if not task_candidates:
                 raise PlacementError(
@@ -268,6 +317,16 @@ class ResourcePortfolioOptimizer:
             )
             self._repair_validator_independence(
                 tasks, all_candidates, selected
+            )
+        budget_rebalances = 0
+        if budget is not None:
+            budget_rebalances = self._repair_budget(
+                tasks=tasks,
+                candidates=all_candidates,
+                selected=selected,
+                budget=budget,
+                mode=mode,
+                deadline_ms=deadline_ms,
             )
         total = sum(
             item.expected_total_cost_usd
@@ -301,14 +360,58 @@ class ResourcePortfolioOptimizer:
             item.direct_model_cost_usd
             for item in selected.values()
         )
+        selected_routes = [
+            {
+                "task_id": task.id,
+                "model_id": selected[task.id].model_id,
+                "provider": selected[task.id].provider,
+                "deployment": selected[task.id].deployment,
+                "reasoning_effort": selected[task.id].inference_profile[
+                    "reasoning_effort"
+                ],
+                "predicted_success": round(
+                    selected[task.id].predicted_quality_mean, 6
+                ),
+                "success_lower_bound": round(
+                    selected[task.id].predicted_quality_lower, 6
+                ),
+                "expected_total_cost_usd": round(
+                    selected[task.id].expected_total_cost_usd, 8
+                ),
+                "direct_model_cost_usd": round(
+                    selected[task.id].direct_model_cost_usd, 8
+                ),
+                "expected_rework_usd": round(
+                    float(
+                        selected[task.id].forecast_cost["p50"].get(
+                            "expected_rework", 0.0
+                        )
+                    ),
+                    8,
+                ),
+                "finish_p95_ms": selected[
+                    task.id
+                ].predicted_finish_p95_ms,
+                "deadline_miss_probability": selected[
+                    task.id
+                ].latency_forecast["deadline_miss_probability"],
+                "admission": selected[task.id].admission,
+                "posterior": selected[task.id].posterior,
+            }
+            for task in tasks
+        ]
+        rejected_assessments = [
+            item for item in admission_audit
+            if not item["admitted"]
+        ]
         return OptimizationResult(
             selected=selected,
             backups=backups,
             summary={
                 "strategy": (
-                    "end-to-end placement economics v1"
+                    "cross-provider expected-value portfolio v2"
                 ),
-                "policy_revision": "placement-policy-v1",
+                "policy_revision": CROSS_PROVIDER_POLICY_REVISION,
                 "estimated_total_cost_usd": round(total, 6),
                 "direct_model_cost_usd": round(direct_total, 6),
                 "non_model_cost_usd": round(
@@ -321,10 +424,43 @@ class ResourcePortfolioOptimizer:
                 "backup_placements": sum(
                     len(items) for items in backups.values()
                 ),
+                "budget_rebalances": budget_rebalances,
                 "local_assignments": sum(
                     item.provider == "local"
                     for item in selected.values()
                 ),
+                "cross_provider": {
+                    "schema_version": "v0.5.4",
+                    "policy_revision": (
+                        CROSS_PROVIDER_POLICY_REVISION
+                    ),
+                    "pre_execution_admission": True,
+                    "assessments": len(admission_audit),
+                    "admitted_candidates": sum(
+                        bool(item["admitted"])
+                        for item in admission_audit
+                    ),
+                    "diverted_or_rejected": len(
+                        rejected_assessments
+                    ),
+                    "cold_start_assessments": sum(
+                        bool(item["cold_start"])
+                        for item in admission_audit
+                    ),
+                    "selected_routes": selected_routes,
+                    "rejections": rejected_assessments[:24],
+                    "expected_rework_usd": round(
+                        sum(
+                            float(
+                                item.forecast_cost["p50"].get(
+                                    "expected_rework", 0.0
+                                )
+                            )
+                            for item in selected.values()
+                        ),
+                        8,
+                    ),
+                },
             },
         )
 
@@ -351,6 +487,15 @@ class ResourcePortfolioOptimizer:
             ]
             return min(
                 frontier,
+                key=lambda item: (
+                    -item.predicted_quality_lower,
+                    item.expected_total_cost_usd,
+                    item.predicted_finish_p95_ms,
+                ),
+            )
+        if mode == RunMode.QUALITY:
+            return min(
+                candidates,
                 key=lambda item: (
                     -item.predicted_quality_lower,
                     item.expected_total_cost_usd,
@@ -393,6 +538,166 @@ class ResourcePortfolioOptimizer:
                 ]
             if alternatives:
                 selected[task.id] = alternatives[0]
+
+    @classmethod
+    def _repair_budget(
+        cls,
+        *,
+        tasks: list[TaskContract],
+        candidates: dict[str, list[PlacementCandidate]],
+        selected: dict[str, PlacementCandidate],
+        budget: float,
+        mode: RunMode,
+        deadline_ms: int | None,
+    ) -> int:
+        """Find a lower-cost feasible portfolio before rejecting a run.
+
+        Initial mode selection is intentionally unconstrained so Quality and
+        Turbo can express their ideal portfolio. This pass then walks the
+        cost/quality/latency frontier, preserving validator independence and
+        the deadline, until the hard placement budget is met.
+        """
+
+        task_weights = {
+            task.id: max(0.25, task.criticality)
+            for task in tasks
+        }
+        total = sum(
+            item.expected_total_cost_usd
+            for item in selected.values()
+        )
+        changes = 0
+        maximum_changes = max(
+            1, sum(len(items) for items in candidates.values()) * 2
+        )
+        while total > budget + 1e-9 and changes < maximum_changes:
+            replacements: list[
+                tuple[
+                    float,
+                    float,
+                    float,
+                    str,
+                    dict[str, PlacementCandidate],
+                ]
+            ] = []
+            for task in tasks:
+                current = selected[task.id]
+                for candidate in candidates[task.id]:
+                    if candidate.placement_id == current.placement_id:
+                        continue
+                    trial = dict(selected)
+                    trial[task.id] = candidate
+                    cls._repair_validator_independence(
+                        tasks, candidates, trial
+                    )
+                    if not cls._validator_portfolio_is_independent(
+                        tasks, candidates, trial
+                    ):
+                        continue
+                    if (
+                        deadline_ms is not None
+                        and cls._critical_path_ms(tasks, trial)
+                        > deadline_ms
+                    ):
+                        continue
+                    trial_total = sum(
+                        item.expected_total_cost_usd
+                        for item in trial.values()
+                    )
+                    saving = total - trial_total
+                    if saving <= 1e-12:
+                        continue
+                    penalty = cls._portfolio_downgrade_penalty(
+                        tasks=tasks,
+                        current=selected,
+                        replacement=trial,
+                        mode=mode,
+                        task_weights=task_weights,
+                    )
+                    replacements.append(
+                        (
+                            penalty / saving,
+                            penalty,
+                            -saving,
+                            task.id,
+                            trial,
+                        )
+                    )
+            if not replacements:
+                break
+            _, _, _, _, replacement = min(replacements)
+            selected.clear()
+            selected.update(replacement)
+            total = sum(
+                item.expected_total_cost_usd
+                for item in selected.values()
+            )
+            changes += 1
+        return changes
+
+    @staticmethod
+    def _portfolio_downgrade_penalty(
+        *,
+        tasks: list[TaskContract],
+        current: dict[str, PlacementCandidate],
+        replacement: dict[str, PlacementCandidate],
+        mode: RunMode,
+        task_weights: dict[str, float],
+    ) -> float:
+        penalty = 0.0
+        for task in tasks:
+            before = current[task.id]
+            after = replacement[task.id]
+            if before.placement_id == after.placement_id:
+                continue
+            weight = task_weights[task.id]
+            quality_loss = max(
+                0.0,
+                before.predicted_quality_lower
+                - after.predicted_quality_lower,
+            )
+            latency_loss = max(
+                0.0,
+                after.predicted_finish_p95_ms
+                - before.predicted_finish_p95_ms,
+            ) / max(1_000, before.predicted_finish_p95_ms)
+            if mode == RunMode.QUALITY:
+                component = quality_loss + latency_loss * 0.02
+            elif mode == RunMode.TURBO:
+                component = latency_loss + quality_loss * 0.15
+            elif mode == RunMode.BALANCED:
+                component = quality_loss + latency_loss * 0.25
+            else:
+                component = quality_loss * 0.05
+            penalty += component * weight
+        return penalty
+
+    @staticmethod
+    def _validator_portfolio_is_independent(
+        tasks: list[TaskContract],
+        candidates: dict[str, list[PlacementCandidate]],
+        selected: dict[str, PlacementCandidate],
+    ) -> bool:
+        for task in tasks:
+            if task.task_type != "validation" or not task.dependencies:
+                continue
+            producer = selected.get(task.dependencies[0])
+            validator = selected.get(task.id)
+            if producer is None or validator is None:
+                continue
+            if validator.model_id == producer.model_id:
+                return False
+            if (
+                task.risk_level == "high"
+                and validator.provider == producer.provider
+                and any(
+                    item.model_id != producer.model_id
+                    and item.provider != producer.provider
+                    for item in candidates[task.id]
+                )
+            ):
+                return False
+        return True
 
     @classmethod
     def _repair_deadline(

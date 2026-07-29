@@ -57,7 +57,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.3"
+    server_version = "CostWeave/0.5.4"
 
     def setup(self) -> None:
         super().setup()
@@ -300,6 +300,45 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     )
                     return
                 self._json(planning)
+                return
+            if suffix.endswith("/economics"):
+                run_id = suffix.removesuffix(
+                    "/economics"
+                ).strip("/")
+                record = self.manager.get(run_id)
+                if record is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                routing = (
+                    record.plan.routing_summary
+                    if record.plan is not None
+                    else {}
+                )
+                self._json({
+                    "run_id": run_id,
+                    "strategy": routing.get("strategy"),
+                    "estimated_total_cost_usd": routing.get(
+                        "estimated_total_cost_usd"
+                    ),
+                    "direct_model_cost_usd": routing.get(
+                        "direct_model_cost_usd"
+                    ),
+                    "non_model_cost_usd": routing.get(
+                        "non_model_cost_usd"
+                    ),
+                    "critical_path_p95_ms": routing.get(
+                        "critical_path_p95_ms"
+                    ),
+                    "budget_rebalances": routing.get(
+                        "budget_rebalances", 0
+                    ),
+                    "cross_provider": routing.get(
+                        "cross_provider", {}
+                    ),
+                })
                 return
             if suffix.endswith("/forecast"):
                 run_id = suffix.removesuffix(
@@ -571,7 +610,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             try:
                 mode = RunMode(payload.get("mode", "balanced"))
             except ValueError as exc:
-                raise ValueError("mode必须是 economy、balanced 或 turbo") from exc
+                raise ValueError(
+                    "mode必须是 economy、balanced、turbo 或 quality"
+                ) from exc
             simulate_replan = payload.get("simulate_replan", False)
             if not isinstance(simulate_replan, bool):
                 raise ValueError("simulate_replan必须是布尔值")
@@ -1099,7 +1140,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.3 bounded-MultiPlanner prototype"
+        description="Run the CostWeave v0.5.4 cross-provider economics prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

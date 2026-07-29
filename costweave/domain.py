@@ -9,6 +9,7 @@ class RunMode(StrEnum):
     ECONOMY = "economy"
     BALANCED = "balanced"
     TURBO = "turbo"
+    QUALITY = "quality"
 
 
 class RunStatus(StrEnum):

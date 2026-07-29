@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from .calibration import BetaPosterior
 from .catalog_store import CATALOG_STORE, CatalogStore
 from .compat_v4 import placement_v4_enabled
 from .domain import RunMode, TaskContract, WorkerProfile
@@ -69,10 +70,15 @@ class PredictiveRouter:
         *,
         store: CatalogStore | None = None,
         catalog_revision: str | None = None,
+        capability_store: Any | None = None,
     ) -> None:
         self._static_workers = workers
         self.store = None if workers is not None else (store or CATALOG_STORE)
         self._catalog_revision = catalog_revision
+        self.capability_store = capability_store
+        self._posterior_snapshot: dict[
+            str, tuple[str, BetaPosterior]
+        ] | None = None
 
     @property
     def workers(self) -> tuple[WorkerProfile, ...]:
@@ -93,6 +99,44 @@ class PredictiveRouter:
         return PredictiveRouter(
             workers=self.workers,
             catalog_revision=self.catalog_revision,
+            capability_store=self.capability_store,
+        )
+
+    def _deployment_posteriors(
+        self,
+        deployment: Any,
+        task: TaskContract,
+    ) -> list[tuple[str, Any]]:
+        if self.capability_store is None:
+            return []
+        if self._posterior_snapshot is not None:
+            keys = (
+                *self.capability_store.deployment_scope_keys(
+                    model_id=deployment.model_id,
+                    provider=deployment.provider,
+                    endpoint=deployment.endpoint,
+                    reasoning_effort=deployment.reasoning_effort,
+                    task_type=task.task_type,
+                    risk_level=task.risk_level,
+                ),
+                *self.capability_store.scope_keys(
+                    deployment.model_id,
+                    task.task_type,
+                    task.risk_level,
+                ),
+            )
+            return [
+                self._posterior_snapshot[scope_key]
+                for _, scope_key in keys
+                if scope_key in self._posterior_snapshot
+            ]
+        return self.capability_store.deployment_candidates(
+            model_id=deployment.model_id,
+            provider=deployment.provider,
+            endpoint=deployment.endpoint,
+            reasoning_effort=deployment.reasoning_effort,
+            task_type=task.task_type,
+            risk_level=task.risk_level,
         )
 
     @staticmethod
@@ -254,6 +298,13 @@ class PredictiveRouter:
                     + worker.speed * 0.30
                     - cost_score * 0.08
                     - uncertainty * 0.15
+                )
+            elif mode == RunMode.QUALITY:
+                utility = (
+                    lower_bound * (0.80 + criticality * 0.08)
+                    + worker.reasoning * 0.08
+                    - cost_score * 0.035
+                    - uncertainty * 0.24
                 )
             else:
                 utility = (
@@ -448,10 +499,20 @@ class PredictiveRouter:
             target_success = min(
                 0.97,
                 quality_floor
-                + (0.055 if mode == RunMode.BALANCED else 0.045),
+                + (
+                    0.085
+                    if mode == RunMode.QUALITY
+                    else 0.055
+                    if mode == RunMode.BALANCED
+                    else 0.045
+                ),
             )
             minimum_efficiency = (
-                0.18 if mode == RunMode.BALANCED else 0.08
+                0.04
+                if mode == RunMode.QUALITY
+                else 0.18
+                if mode == RunMode.BALANCED
+                else 0.08
             )
             upgrades: list[tuple[float, int, RouteDecision]] = []
             for index, (task, pool, _) in enumerate(pools):
@@ -617,6 +678,17 @@ class PredictiveRouter:
                 tasks, mode, quality_floor, budget
             )
 
+        if self.capability_store is not None:
+            self._posterior_snapshot = {
+                str(row["scope_key"]): (
+                    str(row["level"]),
+                    BetaPosterior(
+                        float(row["successes"]),
+                        float(row["failures"]),
+                    ),
+                )
+                for row in self.capability_store.list()
+            }
         route_pools: dict[str, list[RouteDecision]] = {}
         rejections_by_task: dict[str, list[dict[str, Any]]] = {}
         for task in tasks:
@@ -637,7 +709,9 @@ class PredictiveRouter:
             self.workers,
             max_concurrency=max_concurrency,
         )
-        optimizer = ResourcePortfolioOptimizer()
+        optimizer = ResourcePortfolioOptimizer(
+            posterior_lookup=self._deployment_posteriors,
+        )
         placement_budget = budget
         recovery_budget = 0.0
         if budget is not None and reserve_recovery_budget:

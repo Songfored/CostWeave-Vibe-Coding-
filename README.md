@@ -1,5 +1,21 @@
 # CostWeave
 
+## v0.5.4：Cross-provider Economics & Admission
+
+v0.5.4 把“模型单价比较”升级为可审计的跨供应商期望价值路由：
+
+- 每个“模型 × Provider × Endpoint × 推理档位 × 任务族”拥有独立部署键和分层 Beta 后验；样本不足时保守回退，验收结果持续回写。
+- 路由同时预测成功率及下界、端到端成本、预计返工、执行 P50、完成 P95 和 deadline miss 概率。
+- 本地满载、显存不足、队列超限、Provider Bulkhead 饱和或熔断开启时，在第一次执行前分流，而不是先失败再升级。
+- 经济、均衡、极速和质量四种策略共享同一组硬约束，只改变可行候选之间的选择目标。
+- 质量或极速模式的理想组合超过预算时，会在保持质量门槛、独立验收和期限约束的前提下寻找预算内最优降配组合；只有不存在可行组合才拒绝运行。
+- `GET /api/v1/runs/{id}/economics` 返回跨 Provider 判定回执；Placement API 同时返回部署、后验、准入和时延预测。
+- Runtime / Projection Schema 升级到 `v5.4`，migration 012 持久化每个 Placement 的决策回执；旧投影继续可读。
+
+> 能力边界：本版实现的是离线可验证的决策与模拟执行控制平面，不会调用付费模型 API，也不宣称当前启发式预测已达到生产流量中的最优策略。真实 Provider 适配、实时价格/配额采集与在线 A/B 策略学习仍需后续接入。
+
+升级说明见 [`docs/V0.5.4_MIGRATION.md`](docs/V0.5.4_MIGRATION.md)，完整路线见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+
 ## v0.5.3：Bounded MultiPlanner
 
 v0.5.3 把 v0.5.2 已经决定“何时值得多规划”的 Governor 接到真正受限的 MultiPlanner 控制流程：
@@ -447,6 +463,8 @@ costweave/
 | `GET` | `/api/v1/runs/{id}/validations` | 读取逐标准验收、证据和误验风险 |
 | `GET` | `/api/v1/runs/{id}/failures` | 读取失败分类、影响范围与恢复决策 |
 | `GET` | `/api/v1/runs/{id}/forecast` | 读取五结局、质量/成本/时间区间与 OOD |
+| `GET` | `/api/v1/runs/{id}/planning` | 读取 MetaPlanner / MultiPlanner 决策回执 |
+| `GET` | `/api/v1/runs/{id}/economics` | 读取跨 Provider 准入、成本、后验和路由回执 |
 | `GET` | `/api/v1/evaluations` | 读取冻结基准、Brier、ECE、Log Loss 与覆盖率 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
@@ -470,7 +488,7 @@ costweave/
 python -B -m unittest discover -s tests -v
 ```
 
-当前基线为 379 项自动化测试。v0.5.3 新增 10 项 MultiPlanner 专项测试，覆盖并行波次、匿名隔离、六维评分、硬约束、显式冲突、限一轮裁决、无多数投票、预算降级、稳定指纹和 DAG 编译；v0.5.2 及更早的 369 项合同、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
+当前基线为 389 项自动化测试。v0.5.4 新增 10 项跨供应商专项测试，覆盖部署身份、预期返工、本地满载、显存分流、期限 P95、Provider 熔断、质量模式、预算内质量重平衡、部署后验学习和决策回执持久化；v0.5.3 及更早的 379 项合同、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面测试继续作为完整回归集。
 
 测试覆盖：
 
@@ -503,18 +521,18 @@ python -B -m unittest discover -s tests -v
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.3 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.4 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
 - 真实外部 Provider 尚未接入，因此幂等保证目前覆盖控制状态和模拟执行；真实外部副作用仍需 Provider 幂等协议。
 - 失败分类与 PlanPatch 当前采用可审计确定性规则；尚未用真实生产失败数据完成统计校准。
 - 固定基准中的 ECE、Brier 和 95% 覆盖率只证明评估实现与仿真数据一致，不代表真实模型生产表现。
-- 当前后验只记录和校准，不根据单次 Outcome 自动修改生产路由。
+- 部署后验已参与后续路由校准，但不会因单次 Outcome 训练模型权重；真实流量仍需样本门槛、漂移监控和受控策略发布。
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-下一版本 v0.5.3 将实现 2～3 个 Planner 的真正并行提案、匿名化约束评分、一轮受限裁决、冲突检测和 Plan Compiler；总体设计见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
+v0.5.1～v0.5.4 路线已经完成；后续进入真实 Provider 适配、实时遥测和受控在线评估前，应先保留本版作为可重复的控制平面基线。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

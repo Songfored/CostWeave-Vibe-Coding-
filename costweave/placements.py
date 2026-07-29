@@ -37,6 +37,10 @@ class PlacementCandidate:
     expected_total_cost_usd: float
     forecast_cost: dict[str, Any]
     reservation: dict[str, Any]
+    deployment: dict[str, Any]
+    posterior: dict[str, Any]
+    admission: dict[str, Any]
+    latency_forecast: dict[str, Any]
     rationale: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,7 +133,8 @@ class PlacementStore:
                             "plan_revision,status,rank,predicted_quality_lower,"
                             "predicted_start_p50_ms,predicted_finish_p95_ms,"
                             "forecast_cost_json,expected_total_cost,"
-                            "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                            "decision_json,created_at) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                             "ON CONFLICT(run_id,task_id,plan_revision,rank) "
                             "DO UPDATE SET "
                             "policy_revision=excluded.policy_revision,"
@@ -143,7 +148,8 @@ class PlacementStore:
                             "predicted_start_p50_ms=excluded.predicted_start_p50_ms,"
                             "predicted_finish_p95_ms=excluded.predicted_finish_p95_ms,"
                             "forecast_cost_json=excluded.forecast_cost_json,"
-                            "expected_total_cost=excluded.expected_total_cost",
+                            "expected_total_cost=excluded.expected_total_cost,"
+                            "decision_json=excluded.decision_json",
                             (
                                 candidate["placement_id"],
                                 run_id,
@@ -170,6 +176,24 @@ class PlacementStore:
                                     sort_keys=True,
                                 ),
                                 candidate["expected_total_cost_usd"],
+                                json.dumps(
+                                    {
+                                        "deployment": candidate.get(
+                                            "deployment", {}
+                                        ),
+                                        "posterior": candidate.get(
+                                            "posterior", {}
+                                        ),
+                                        "admission": candidate.get(
+                                            "admission", {}
+                                        ),
+                                        "latency_forecast": candidate.get(
+                                            "latency_forecast", {}
+                                        ),
+                                    },
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
                                 utc_now(),
                             ),
                         )
@@ -289,6 +313,10 @@ class PlacementStore:
             item["forecast_cost"] = json.loads(
                 item.pop("forecast_cost_json")
             )
+            decision = json.loads(
+                item.pop("decision_json", "{}")
+            )
+            item.update(decision)
             result.append(item)
         return result
 

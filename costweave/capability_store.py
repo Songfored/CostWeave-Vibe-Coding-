@@ -40,6 +40,31 @@ class CapabilityStore:
             ("global", "*"),
         )
 
+    @staticmethod
+    def deployment_scope_keys(
+        *,
+        model_id: str,
+        provider: str,
+        endpoint: str,
+        reasoning_effort: str,
+        task_type: str,
+        risk_level: str,
+    ) -> tuple[tuple[str, str], ...]:
+        deployment = (
+            f"{model_id}|{provider}|{endpoint}|{reasoning_effort}"
+        )
+        return (
+            (
+                "deployment_exact",
+                f"deployment|{deployment}|{task_type}|{risk_level}",
+            ),
+            (
+                "deployment_task",
+                f"deployment|{deployment}|{task_type}",
+            ),
+            ("deployment", f"deployment|{deployment}"),
+        )
+
     def update(
         self,
         *,
@@ -48,12 +73,44 @@ class CapabilityStore:
         risk_level: str,
         success: bool,
     ) -> None:
+        self._update_scopes(
+            self.scope_keys(model_id, task_type, risk_level),
+            success=success,
+        )
+
+    def update_deployment(
+        self,
+        *,
+        model_id: str,
+        provider: str,
+        endpoint: str,
+        reasoning_effort: str,
+        task_type: str,
+        risk_level: str,
+        success: bool,
+    ) -> None:
+        self._update_scopes(
+            self.deployment_scope_keys(
+                model_id=model_id,
+                provider=provider,
+                endpoint=endpoint,
+                reasoning_effort=reasoning_effort,
+                task_type=task_type,
+                risk_level=risk_level,
+            ),
+            success=success,
+        )
+
+    def _update_scopes(
+        self,
+        scope_keys: tuple[tuple[str, str], ...],
+        *,
+        success: bool,
+    ) -> None:
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                for level, scope_key in self.scope_keys(
-                    model_id, task_type, risk_level
-                ):
+                for level, scope_key in scope_keys:
                     row = connection.execute(
                         "SELECT successes,failures FROM capability_posteriors "
                         "WHERE scope_key=?",
@@ -117,7 +174,37 @@ class CapabilityStore:
     def candidates(
         self, *, model_id: str, task_type: str, risk_level: str
     ) -> list[tuple[str, BetaPosterior]]:
-        keys = self.scope_keys(model_id, task_type, risk_level)
+        return self._candidates(
+            self.scope_keys(model_id, task_type, risk_level)
+        )
+
+    def deployment_candidates(
+        self,
+        *,
+        model_id: str,
+        provider: str,
+        endpoint: str,
+        reasoning_effort: str,
+        task_type: str,
+        risk_level: str,
+    ) -> list[tuple[str, BetaPosterior]]:
+        keys = (
+            *self.deployment_scope_keys(
+                model_id=model_id,
+                provider=provider,
+                endpoint=endpoint,
+                reasoning_effort=reasoning_effort,
+                task_type=task_type,
+                risk_level=risk_level,
+            ),
+            *self.scope_keys(model_id, task_type, risk_level),
+        )
+        return self._candidates(keys)
+
+    def _candidates(
+        self,
+        keys: tuple[tuple[str, str], ...],
+    ) -> list[tuple[str, BetaPosterior]]:
         result = []
         with self._connection() as connection:
             for level, scope_key in keys:

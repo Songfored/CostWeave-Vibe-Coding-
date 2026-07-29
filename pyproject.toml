@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.5.3"
-description = "Bounded identity-blind MultiPlanner for cost-aware multi-model orchestration"
+version = "0.5.4"
+description = "Cross-provider expected-value control plane for cost-aware multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

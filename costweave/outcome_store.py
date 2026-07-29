@@ -127,7 +127,7 @@ class OutcomeStore:
             "data_versions": {
                 "catalog": catalog_revision or "unknown",
                 "contracts": "v4.1",
-                "runtime": "v5.3",
+                "runtime": "v5.4",
             },
             "plan_revision": record.plan.version if record.plan else 0,
         }
@@ -183,15 +183,52 @@ class OutcomeStore:
         if inserted and record.plan:
             for task in record.plan.tasks:
                 if task.selected_worker:
+                    passed = bool(
+                        task.validation
+                        and task.validation.get("passed")
+                    )
                     self.capabilities.update(
                         model_id=task.selected_worker,
                         task_type=task.task_type,
                         risk_level=task.risk_level,
-                        success=bool(
-                            task.validation
-                            and task.validation.get("passed")
-                        ),
+                        success=passed,
                     )
+                    placement = dict(task.placement or {})
+                    deployment = dict(
+                        placement.get("deployment") or {}
+                    )
+                    profile = dict(
+                        placement.get("inference_profile") or {}
+                    )
+                    if placement and profile:
+                        self.capabilities.update_deployment(
+                            model_id=str(
+                                deployment.get("model_id")
+                                or placement.get("model_id")
+                                or task.selected_worker
+                            ),
+                            provider=str(
+                                deployment.get("provider")
+                                or placement.get("provider")
+                                or "unknown"
+                            ),
+                            endpoint=str(
+                                deployment.get("endpoint")
+                                or (
+                                    f"{placement.get('provider', 'unknown')}"
+                                    f"://{placement.get('model_id', task.selected_worker)}"
+                                )
+                            ),
+                            reasoning_effort=str(
+                                deployment.get("reasoning_effort")
+                                or profile.get(
+                                    "reasoning_effort", "medium"
+                                )
+                            ),
+                            task_type=task.task_type,
+                            risk_level=task.risk_level,
+                            success=passed,
+                        )
         return outcome
 
     def outcomes(self) -> list[dict[str, Any]]:

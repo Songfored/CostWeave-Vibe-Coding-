@@ -302,7 +302,7 @@ textarea[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3
 
 .mode-fieldset { margin: 15px 0 0; padding: 0; border: 0; }
 .mode-fieldset legend { margin-bottom: 8px; }
-.mode-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.mode-switch { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
 .mode-switch label { position: relative; }
 .mode-switch input { position: absolute; opacity: 0; pointer-events: none; }
 .mode-switch span {

@@ -1,4 +1,6 @@
-# CostWeave v0.5.3 架构说明
+# CostWeave v0.5.4 架构说明
+
+v0.5.4 在 v0.5.3 的受限 MultiPlanner 之后加入跨供应商经济与预执行准入层。它把模型、Provider、Endpoint、推理档位和任务族组合成稳定部署键，使用历史验收形成分层后验，再把成功率下界、预计返工、完整成本、完成 P95、本地负载、显存、Bulkhead 和熔断共同用于 Placement 选择。目录数据和运行容量都通过合同输入，核心路由不包含厂商名称分支。
 
 CostWeave v0.5.3 在 Planning Governor 之后加入受限 MultiPlanner：第 1 层继续用难度区间、硬门、容量、ExpectedLoss 和 VoD 决定是否值得规划；第 2 层最多三个互补 Planner 并行提出方案。提案先匿名，再按统一约束评分、检测冲突，最多经过一轮裁决后由 Plan Compiler 写入现有 Artifact DAG。管理层不得递归扩张，默认仍使用确定性的离线适配器，不产生付费模型调用。
 

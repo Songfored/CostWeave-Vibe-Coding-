@@ -145,7 +145,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v5.3",
+                    "schema_version": "v5.4",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -216,7 +216,14 @@ class OrchestrationEngine:
         self.planning_governor = PlanningGovernor()
         self.multiplanner = MultiPlannerEngine()
         self.plan_compiler = PlanCompiler()
-        self.router = PredictiveRouter(store=catalog_store or CATALOG_STORE)
+        self.router = PredictiveRouter(
+            store=catalog_store or CATALOG_STORE,
+            capability_store=(
+                control_kernel.outcome_store.capabilities
+                if control_kernel is not None
+                else None
+            ),
+        )
         self.validator = ContractValidator()
         self.failure_classifier = FailureClassifier()
         self.recovery_policy = RecoveryPolicy()
@@ -355,6 +362,34 @@ class OrchestrationEngine:
                 ),
                 availability=self._resource_availability(record),
             )
+            economics_receipt = plan.routing_summary.get(
+                "cross_provider", {}
+            )
+            if economics_receipt:
+                self._event(
+                    record,
+                    "routing_economics_decided",
+                    (
+                        "Cross-provider expected-cost routing and "
+                        "pre-execution admission completed"
+                    ),
+                    detail={
+                        "policy_revision": economics_receipt.get(
+                            "policy_revision"
+                        ),
+                        "assessments": economics_receipt.get(
+                            "assessments", 0
+                        ),
+                        "diverted_or_rejected": (
+                            economics_receipt.get(
+                                "diverted_or_rejected", 0
+                            )
+                        ),
+                        "expected_rework_usd": economics_receipt.get(
+                            "expected_rework_usd", 0.0
+                        ),
+                    },
+                )
             if artifact_dag_enabled() and record.control_kernel is not None:
                 record.control_kernel.compile_graph(record)
             if (
@@ -507,7 +542,15 @@ class OrchestrationEngine:
                 task.finished_at = None
         workers = tuple(WorkerProfile(**item) for item in record.worker_snapshot)
         run_router = (
-            PredictiveRouter(workers=workers, catalog_revision=record.plan.model_snapshot)
+            PredictiveRouter(
+                workers=workers,
+                catalog_revision=record.plan.model_snapshot,
+                capability_store=(
+                    record.control_kernel.outcome_store.capabilities
+                    if record.control_kernel is not None
+                    else None
+                ),
+            )
             if workers
             else self.router.freeze()
         )
@@ -1257,16 +1300,41 @@ class OrchestrationEngine:
             if kernel is not None:
                 kernel.record_runtime_event(record, event, source=f"engine.event.{kind}")
 
-    @staticmethod
     def _resource_availability(
+        self,
         record: RunRecord,
     ) -> dict[str, dict[str, Any]] | None:
         if record.control_kernel is None:
             return None
-        return {
-            item["pool_id"]: dict(item["availability"])
-            for item in record.control_kernel.resources()
-        }
+        result: dict[str, dict[str, Any]] = {}
+        for item in record.control_kernel.resources():
+            availability = dict(item["availability"])
+            provider = str(item.get("provider", "unknown"))
+            circuit = (
+                self.scheduler.circuits.get(provider)
+                if self.scheduler is not None
+                else None
+            )
+            if circuit is not None:
+                availability["circuit_state"] = (
+                    circuit.snapshot()["state"]
+                )
+            slots_total = max(1, int(item.get("slots_total", 1)))
+            slots_available = max(
+                0, int(availability.get("slots", slots_total))
+            )
+            availability.update(
+                {
+                    "state": item.get("state", "available"),
+                    "bulkhead_limit": slots_total,
+                    "bulkhead_active": max(
+                        0, slots_total - slots_available
+                    ),
+                    "provider_health": 1.0,
+                }
+            )
+            result[str(item["pool_id"])] = availability
+        return result
 
 
 class RunManager:

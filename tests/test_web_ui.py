@@ -118,7 +118,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.3 Bounded MultiPlanner", self.html)
+        self.assertIn("v0.5.4 Cross-provider Economics", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)
         self.assertIn("关键成功标准", self.js)

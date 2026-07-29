@@ -275,9 +275,14 @@ function render(run) {
     analysis.needs_fresh_data ? "需要时效数据" : "静态知识可用",
   ].map((item) => `<span>${escapeHtml(item)}</span>`).join("");
   const routing = run.plan.routing_summary || {};
+  const economics = routing.cross_provider || {};
+  const economicsSuffix = economics.pre_execution_admission
+    ? ` · 预执行评估 ${Number(economics.assessments || 0)} 个候选 · 分流/拒绝 ${Number(economics.diverted_or_rejected || 0)} 个 · 预计返工 $${Number(economics.expected_rework_usd || 0).toFixed(5)}`
+    : "";
   $("#routing-summary").textContent = routing.strategy
     ? `路由：${routing.strategy} · 目录 ${routing.catalog_revision || run.plan.model_snapshot || "未知"} · 最低可行 $${Number(routing.minimum_feasible_cost_usd || 0).toFixed(4)} · 当前组合 $${Number(routing.estimated_total_cost_usd || 0).toFixed(4)} · ${routing.independent_validators || 0} 个独立验收`
     : "等待模型组合决策";
+  $("#routing-summary").textContent += economicsSuffix;
   const scheduling = run.scheduling || {};
     $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
       ? `调度：关键路径优先 · Placement ${Number(scheduling.selected_placements || 0)} 个（备用 ${Math.max(0, Number(scheduling.placements || 0) - Number(scheduling.selected_placements || 0))}） · 预测总成本 $${Number(scheduling.forecast_total || 0).toFixed(4)} · 实际账本 $${Number(scheduling.actual_total || 0).toFixed(4)} · 验收 ${Number(scheduling.validation_results || 0)} 次（失败 ${Number(scheduling.failed_validations || 0)}） · 恢复 ${Number(scheduling.failure_records || 0)} 次 · 活跃租约 ${Number(scheduling.active_leases || 0)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`

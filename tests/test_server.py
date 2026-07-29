@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.3", health["version"])
+        self.assertEqual("0.5.4", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.3", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.4", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -352,6 +352,18 @@ class ServerTests(unittest.TestCase):
             time.sleep(.05)
         self.assertEqual("completed", current["status"], current.get("error"))
 
+        _, economics = self.fetch_json(
+            f"/api/v1/runs/{run['id']}/economics"
+        )
+        self.assertTrue(
+            economics["cross_provider"]["pre_execution_admission"]
+        )
+        self.assertGreater(
+            economics["cross_provider"]["assessments"], 0
+        )
+        self.assertIn("non_model_cost_usd", economics)
+        self.assertIn("critical_path_p95_ms", economics)
+        self.assertIsInstance(economics["budget_rebalances"], int)
         _, artifact_list = self.fetch_json(
             f"/api/v1/runs/{run['id']}/artifacts"
         )
