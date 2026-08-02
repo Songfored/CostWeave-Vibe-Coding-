@@ -385,6 +385,16 @@ class PredictiveRouter:
         ranked, _ = self._rank_candidates(task, mode)
         return tuple(ranked)
 
+    def rank_candidates_with_rejections(
+        self,
+        task: TaskContract,
+        mode: RunMode = RunMode.BALANCED,
+    ) -> tuple[tuple[RouteDecision, ...], tuple[dict[str, Any], ...]]:
+        """Return an advisory snapshot without mutating the task contract."""
+
+        ranked, rejections = self._rank_candidates(task, mode)
+        return tuple(ranked), tuple(dict(item) for item in rejections)
+
     @staticmethod
     def _apply(
         task: TaskContract,

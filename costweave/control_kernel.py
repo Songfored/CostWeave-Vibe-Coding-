@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.2."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.3."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from .recovery import EvidenceRecoveryStore
 from .outcome_store import OutcomeStore
 from .evaluation_store import EvaluationProtocolStore
 from .outcome_dataset_store import OutcomeDatasetStore
+from .experimental_calls import ExperimentalCallStore
+from .shadow_router import ShadowStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -50,6 +52,10 @@ class ControlKernel:
             self.store.path
         )
         self.outcome_dataset_store = OutcomeDatasetStore(self.store.path)
+        self.experimental_call_store = ExperimentalCallStore(
+            self.store.path
+        )
+        self.shadow_store = ShadowStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -301,6 +307,8 @@ class ControlKernel:
             **self.outcome_store.counts(),
             **self.evaluation_protocol_store.counts(),
             **self.outcome_dataset_store.counts(),
+            **self.experimental_call_store.counts(),
+            **self.shadow_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),

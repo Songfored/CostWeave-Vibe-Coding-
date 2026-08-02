@@ -50,6 +50,12 @@ from .outcome_dataset import (
     OUTCOME_DATASET_SCHEMA_VERSION,
     PURPOSES,
 )
+from .adapters import AdapterRuntimePolicy
+from .experimental_calls import (
+    EXPERIMENTAL_CALL_POLICY_REVISION,
+    EXPERIMENTAL_CALL_SCHEMA_VERSION,
+)
+from .shadow_router import SHADOW_POLICY_REVISION, SHADOW_SCHEMA_VERSION
 
 
 MANAGER: RunManager | None = None
@@ -76,7 +82,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.2"
+    server_version = "CostWeave/0.5.6.3"
 
     def setup(self) -> None:
         super().setup()
@@ -99,6 +105,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         path = self._normalise_api_path(parsed.path)
         if path == "/api/health":
             runtime_health = self.manager.health()
+            adapter_policy = AdapterRuntimePolicy.from_environment()
             contracts = contract_health()
             contracts["features"]["runtime_v4"] = runtime_v4_enabled()
             contracts["contract_trace_persistent"] = bool(
@@ -132,8 +139,58 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "training_enabled": False,
                     "policy_promotion_enabled": False,
                 },
+                "experimental_adapters": {
+                    "schema_version": EXPERIMENTAL_CALL_SCHEMA_VERSION,
+                    "policy_revision": EXPERIMENTAL_CALL_POLICY_REVISION,
+                    **adapter_policy.public(),
+                    "hard_budget_required": True,
+                    "secrets_persisted": False,
+                    "commercial_claims_allowed": False,
+                },
+                "shadow_router": {
+                    "schema_version": SHADOW_SCHEMA_VERSION,
+                    "policy_revision": SHADOW_POLICY_REVISION,
+                    "advisory_only": True,
+                    "intervention_count": 0,
+                },
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/experiments/policy":
+            policy = AdapterRuntimePolicy.from_environment()
+            self._json({
+                "schema_version": EXPERIMENTAL_CALL_SCHEMA_VERSION,
+                "external_call_policy_revision": (
+                    EXPERIMENTAL_CALL_POLICY_REVISION
+                ),
+                "shadow_policy_revision": SHADOW_POLICY_REVISION,
+                **policy.public(),
+                "default_external_calls": 0,
+                "provider_neutral": True,
+                "supported_adapter_families": [
+                    "openai-compatible-http",
+                    "local-loopback-http",
+                ],
+                "text_only": True,
+                "tools_enabled": False,
+                "batch_enabled": False,
+                "hard_budget_required": True,
+                "provider_budget_required": True,
+                "retry_budgeted_before_call": True,
+                "automatic_model_switching": False,
+                "secrets_source": "environment-only",
+                "secrets_persisted": False,
+                "shadow": {
+                    "advisory_only": True,
+                    "may_change_actual_route": False,
+                    "intervention_count": 0,
+                },
+                "evidence_gate": {
+                    "real_directional_tasks_required": "30-50",
+                    "fixture_results_count_as_real": False,
+                    "commercial_claims_allowed": False,
+                },
             })
             return
         if path == "/api/v1/outcomes/governance":
@@ -1261,7 +1318,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.2 governance-ready prototype"
+        description="Run the CostWeave v0.5.6.3 shadow-safe adapter prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
