@@ -56,6 +56,7 @@ from .experimental_calls import (
     EXPERIMENTAL_CALL_SCHEMA_VERSION,
 )
 from .shadow_router import SHADOW_POLICY_REVISION, SHADOW_SCHEMA_VERSION
+from .predictor_admission import public_predictor_policy
 
 
 MANAGER: RunManager | None = None
@@ -82,7 +83,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.3"
+    server_version = "CostWeave/0.5.6.4.1"
 
     def setup(self) -> None:
         super().setup()
@@ -153,9 +154,23 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "advisory_only": True,
                     "intervention_count": 0,
                 },
+                "predictor_admission": public_predictor_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
             })
+            return
+        if path == "/api/v1/predictors/policy":
+            counts = (
+                self.manager.control_kernel.predictor_admission_counts()
+                if self.manager.control_kernel is not None
+                else {
+                    "predictor_admission_reports": 0,
+                    "calibration_candidates": 0,
+                    "frozen_prediction_receipts": 0,
+                    "authoritative_learned_predictions": 0,
+                }
+            )
+            self._json({**public_predictor_policy(), "runtime_counts": counts})
             return
         if path == "/api/v1/experiments/policy":
             policy = AdapterRuntimePolicy.from_environment()
@@ -1318,7 +1333,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.3 shadow-safe adapter prototype"
+        description="Run the CostWeave v0.5.6.4.1 predictor-admission prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

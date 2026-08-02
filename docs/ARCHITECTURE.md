@@ -1,4 +1,23 @@
-# CostWeave v0.5.6.3 架构说明
+# CostWeave v0.5.6.4.1 架构说明
+
+v0.5.6.4.1 在 Outcome 数据治理与 Shadow 路由之间加入不可绕过的 Predictor Admission Plane。`DatasetEvidenceSummary` 只提取匿名化、结构化质量统计；`PredictorAdmissionGate` 对 E2 方向观察、E3 内部校准和 E4 正式基准执行不同门槛；`PredictorAdmissionStore` 通过 migration 017 保存不可变决策。数据不足或质量失败时，系统只生成 `FrozenPredictionReceipt`，不生成概率、不训练、不晋级，也不改变现有正式路线。
+
+```text
+Governed Outcome Dataset
+          |
+          v
+DatasetEvidenceSummary -- hash/replay --> PredictorAdmissionReport
+          |                                     |
+          | blocked / directional-only          | calibration-candidate
+          v                                     v
+FrozenPredictionReceipt                  future offline fitter
+probability=null, interval=[0,1]          (v0.5.6.4.1 does not fit)
+          |
+          v
+ResourcePortfolioOptimizer remains authoritative
+```
+
+三档门槛是用途门而不是“样本够了就自动上线”：30 个 E2+ 有效任务只能观察方向；200 个合格有效任务最多允许离线拟合候选；1000 个、至少 8 个任务族且每族 100 个才满足正式基准的数据规模门。任何一档都固定 `policy_promotion_allowed=false`、`routing_authority=false`。
 
 v0.5.6.3 在 Outcome 治理平面之后加入两个严格隔离的实验组件：`ExperimentalCallStore` 负责外部调用预算、幂等与遥测；`ShadowRouter` 负责只读候选判断。它们复用同一 SQLite Runtime，但不取得 Run 状态所有权，也不允许 Shadow 修改正式执行路线。
 

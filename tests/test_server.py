@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.6.3", health["version"])
+        self.assertEqual("0.5.6.4.1", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.6.3", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.6.4.1", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -105,6 +105,9 @@ class ServerTests(unittest.TestCase):
         )
         self.assertTrue(health["shadow_router"]["advisory_only"])
         self.assertEqual(0, health["shadow_router"]["intervention_count"])
+        self.assertEqual(
+            "frozen", health["predictor_admission"]["current_state"]
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -153,6 +156,21 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(policy["shadow"]["may_change_actual_route"])
         self.assertFalse(
             policy["evidence_gate"]["fixture_results_count_as_real"]
+        )
+
+    def test_predictor_policy_is_frozen_and_non_authoritative(self):
+        status, policy = self.fetch_json("/api/v1/predictors/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.6.4.1", policy["schema_version"])
+        self.assertEqual("frozen", policy["current_state"])
+        self.assertFalse(policy["training_enabled_by_default"])
+        self.assertFalse(policy["policy_promotion_enabled"])
+        self.assertEqual(
+            "legacy-resource-optimizer", policy["routing_authority"]
+        )
+        self.assertEqual(
+            0,
+            policy["runtime_counts"]["authoritative_learned_predictions"],
         )
 
     def test_planning_policy_and_run_receipt_are_explainable(self):

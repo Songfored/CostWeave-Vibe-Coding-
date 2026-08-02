@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.3."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.4.1."""
 
 from __future__ import annotations
 
@@ -27,6 +27,14 @@ from .evaluation_store import EvaluationProtocolStore
 from .outcome_dataset_store import OutcomeDatasetStore
 from .experimental_calls import ExperimentalCallStore
 from .shadow_router import ShadowStore
+from .predictor_admission import (
+    ADMISSION_PROFILES,
+    DatasetEvidenceSummary,
+    FrozenPredictionReceipt,
+    PredictorAdmissionGate,
+    PredictorAdmissionReport,
+)
+from .predictor_admission_store import PredictorAdmissionStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -56,6 +64,10 @@ class ControlKernel:
             self.store.path
         )
         self.shadow_store = ShadowStore(self.store.path)
+        self.predictor_admission_store = PredictorAdmissionStore(
+            self.store.path
+        )
+        self.predictor_admission_gate = PredictorAdmissionGate()
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -309,6 +321,7 @@ class ControlKernel:
             **self.outcome_dataset_store.counts(),
             **self.experimental_call_store.counts(),
             **self.shadow_store.counts(),
+            **self.predictor_admission_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -750,12 +763,40 @@ class ControlKernel:
         return self.evaluation_protocol_store.observations(evaluation_id)
 
     def record_outcome_dataset(self, dataset: Any) -> bool:
-        return self.outcome_dataset_store.record(dataset)
+        inserted = self.outcome_dataset_store.record(dataset)
+        summary = DatasetEvidenceSummary.from_dataset(dataset)
+        for profile in ADMISSION_PROFILES:
+            report = self.predictor_admission_gate.evaluate(
+                summary, profile=profile
+            )
+            self.predictor_admission_store.record_report(report)
+        return inserted
 
     def outcome_dataset_manifest(
         self, dataset_id: str
     ) -> dict[str, Any] | None:
         return self.outcome_dataset_store.manifest(dataset_id)
+
+    def record_predictor_admission(
+        self,
+        dataset: Any,
+        *,
+        profile: str = "internal_calibration",
+    ) -> PredictorAdmissionReport:
+        report = self.predictor_admission_gate.evaluate(
+            DatasetEvidenceSummary.from_dataset(dataset), profile=profile
+        )
+        self.predictor_admission_store.record_report(report)
+        return report
+
+    def record_frozen_prediction(
+        self,
+        receipt: FrozenPredictionReceipt,
+    ) -> bool:
+        return self.predictor_admission_store.record_receipt(receipt)
+
+    def predictor_admission_counts(self) -> dict[str, int]:
+        return self.predictor_admission_store.counts()
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

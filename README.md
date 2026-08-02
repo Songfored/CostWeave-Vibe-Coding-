@@ -1,5 +1,21 @@
 # CostWeave
 
+## v0.5.6.4.1：Predictor Admission & Replay Contract
+
+本版在不调用任何付费模型的前提下，先把学习型路由最容易被忽略的“数据准入门”做实：
+
+- 自动把受治理 Outcome 数据集分别送入方向性、内部校准和正式基准三档准入检查；
+- 30 个 E2+ 有效任务最多只形成方向性信号，不能训练；内部校准候选至少需要 200 个有效任务，正式基准需要 1000 个、8 个任务族且每族至少 100 个；
+- E0/E1 混入、项目分区泄漏、标签覆盖或冲突异常、候选路线/选择概率缺失、成本未对账、版本不可追溯都会冻结训练；
+- 即使数据达到校准候选标准，本版也不允许策略晋级或接管正式路由；现有 `ResourcePortfolioOptimizer` 继续拥有路由权；
+- 样本不足时生成可回放的冻结凭证，明确返回 `outcome_probabilities=null` 与最大不确定区间 `[0,1]`，不拿拍脑袋概率冒充学习结果；
+- migration 017 持久化不可变准入报告和冻结预测凭证，Runtime Schema 升级为 `v5.6.4.1`；
+- `GET /api/v1/predictors/policy` 可查看三档门槛、冻结状态和运行时计数。
+
+升级说明见 [`docs/V0.5.6.4.1_MIGRATION.md`](docs/V0.5.6.4.1_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.6.4.1.md`](docs/CHANGELOG-v0.5.6.4.1.md)。
+
+> 证据边界：本版没有真实 Provider 调用，也没有训练预测器。它只完成准入、冻结和重放合同，不能据此宣称真实降本、成功率提升或商业领先。
+
 ## v0.5.6.3：Experimental Adapters & Shadow Router
 
 v0.5.6.3 完成了真实连接前必须具备的安全控制面，但默认仍不会调用任何外部模型：
@@ -570,6 +586,7 @@ costweave/
 | `GET` | `/api/v1/evaluation/protocol` | 读取 v0.5.6.1 任务集、五组基线、证据等级和零真实调用边界 |
 | `GET` | `/api/v1/outcomes/governance` | 读取 v0.5.6.2 标签来源、隔离、删除、冻结训练和零策略晋级边界 |
 | `GET` | `/api/v1/experiments/policy` | 读取 v0.5.6.3 双开关、硬预算、密钥与 Shadow 零干预边界 |
+| `GET` | `/api/v1/predictors/policy` | 读取 v0.5.6.4.1 数据准入档位、训练冻结和零路由权边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -641,7 +658,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.6.3 的工程路线已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前不进入 v0.5.6.4 的学习型预测与策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.6.3 的工程路线与 v0.5.6.4.1 的学习前准入门已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，v0.5.6.4.1 只允许冻结与重放，不进行真实拟合、学习型路由或策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 
