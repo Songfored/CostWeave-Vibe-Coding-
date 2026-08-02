@@ -45,6 +45,11 @@ from .evaluation_protocol import (
     SEED_TASK_SET_VERSION,
     load_seed_tasks,
 )
+from .outcome_dataset import (
+    LABEL_SOURCES,
+    OUTCOME_DATASET_SCHEMA_VERSION,
+    PURPOSES,
+)
 
 
 MANAGER: RunManager | None = None
@@ -71,7 +76,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.1"
+    server_version = "CostWeave/0.5.6.2"
 
     def setup(self) -> None:
         super().setup()
@@ -122,8 +127,35 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "real_provider_calls_allowed": False,
                     "commercial_claims_allowed": False,
                 },
+                "outcome_dataset_governance": {
+                    "schema_version": OUTCOME_DATASET_SCHEMA_VERSION,
+                    "training_enabled": False,
+                    "policy_promotion_enabled": False,
+                },
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/outcomes/governance":
+            self._json({
+                "schema_version": OUTCOME_DATASET_SCHEMA_VERSION,
+                "label_sources": list(LABEL_SOURCES),
+                "purposes": list(PURPOSES),
+                "raw_sensitive_text_retained": False,
+                "project_partition_isolation": True,
+                "append_only_label_evidence": True,
+                "conflicting_labels_preserved": True,
+                "learning_copy_ttl_and_deletion": True,
+                "training_gate": "hard-fail-when-frozen",
+                "training_enabled": False,
+                "policy_promotion_enabled": False,
+                "real_provider_calls_allowed": False,
+                "commercial_claims_allowed": False,
+                "run_command": (
+                    "python -m costweave.outcome_dataset "
+                    "<experiment.json> --output-dir <directory> "
+                    "--privacy-salt <secret>"
+                ),
             })
             return
         if path == "/api/v1/evaluation/protocol":
@@ -1229,7 +1261,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.1 evaluation-ready prototype"
+        description="Run the CostWeave v0.5.6.2 governance-ready prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.1."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.2."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from .placements import PlacementStore
 from .recovery import EvidenceRecoveryStore
 from .outcome_store import OutcomeStore
 from .evaluation_store import EvaluationProtocolStore
+from .outcome_dataset_store import OutcomeDatasetStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -48,6 +49,7 @@ class ControlKernel:
         self.evaluation_protocol_store = EvaluationProtocolStore(
             self.store.path
         )
+        self.outcome_dataset_store = OutcomeDatasetStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -298,6 +300,7 @@ class ControlKernel:
             **self.evidence_store.counts(),
             **self.outcome_store.counts(),
             **self.evaluation_protocol_store.counts(),
+            **self.outcome_dataset_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -737,6 +740,14 @@ class ControlKernel:
         self, evaluation_id: str
     ) -> list[dict[str, Any]]:
         return self.evaluation_protocol_store.observations(evaluation_id)
+
+    def record_outcome_dataset(self, dataset: Any) -> bool:
+        return self.outcome_dataset_store.record(dataset)
+
+    def outcome_dataset_manifest(
+        self, dataset_id: str
+    ) -> dict[str, Any] | None:
+        return self.outcome_dataset_store.manifest(dataset_id)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

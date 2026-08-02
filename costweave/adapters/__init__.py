@@ -1,4 +1,4 @@
-"""Provider adapter contracts. No paid adapter is enabled in v0.5.6.1."""
+"""Provider adapter contracts. No paid adapter is enabled in v0.5.6.2."""
 
 from .base import AdapterCapabilities, ProviderAdapter
 from .mock import MockProvider, MockScenario
