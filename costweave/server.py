@@ -57,6 +57,10 @@ from .experimental_calls import (
 )
 from .shadow_router import SHADOW_POLICY_REVISION, SHADOW_SCHEMA_VERSION
 from .predictor_admission import public_predictor_policy
+from .predictor_evaluation import (
+    PREDICTOR_EVALUATION_SCHEMA_VERSION,
+    public_evaluation_policy,
+)
 
 
 MANAGER: RunManager | None = None
@@ -83,7 +87,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.4.1"
+    server_version = "CostWeave/0.5.6.4.2"
 
     def setup(self) -> None:
         super().setup()
@@ -155,6 +159,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "intervention_count": 0,
                 },
                 "predictor_admission": public_predictor_policy(),
+                "predictor_evaluation": public_evaluation_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
             })
@@ -170,7 +175,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "authoritative_learned_predictions": 0,
                 }
             )
-            self._json({**public_predictor_policy(), "runtime_counts": counts})
+            self._json({
+                "schema_version": PREDICTOR_EVALUATION_SCHEMA_VERSION,
+                "admission": public_predictor_policy(),
+                "offline_evaluation": public_evaluation_policy(),
+                "current_state": "frozen_no_real_evidence",
+                "routing_authority": "legacy-resource-optimizer",
+                "policy_promotion_enabled": False,
+                "runtime_counts": counts,
+            })
             return
         if path == "/api/v1/experiments/policy":
             policy = AdapterRuntimePolicy.from_environment()
@@ -1333,7 +1346,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.4.1 predictor-admission prototype"
+        description="Run the CostWeave v0.5.6.4.2 offline-evaluation prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

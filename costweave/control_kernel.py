@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.4.1."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.4.2."""
 
 from __future__ import annotations
 
@@ -35,6 +35,12 @@ from .predictor_admission import (
     PredictorAdmissionReport,
 )
 from .predictor_admission_store import PredictorAdmissionStore
+from .predictor_evaluation import (
+    ChallengerComparison,
+    PredictorCandidateManifest,
+    PredictorEvaluationReport,
+)
+from .predictor_evaluation_store import PredictorEvaluationStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -68,6 +74,9 @@ class ControlKernel:
             self.store.path
         )
         self.predictor_admission_gate = PredictorAdmissionGate()
+        self.predictor_evaluation_store = PredictorEvaluationStore(
+            self.store.path
+        )
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -322,6 +331,7 @@ class ControlKernel:
             **self.experimental_call_store.counts(),
             **self.shadow_store.counts(),
             **self.predictor_admission_store.counts(),
+            **self.predictor_evaluation_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -796,7 +806,25 @@ class ControlKernel:
         return self.predictor_admission_store.record_receipt(receipt)
 
     def predictor_admission_counts(self) -> dict[str, int]:
-        return self.predictor_admission_store.counts()
+        return {
+            **self.predictor_admission_store.counts(),
+            **self.predictor_evaluation_store.counts(),
+        }
+
+    def record_predictor_artifact(
+        self, artifact: PredictorCandidateManifest
+    ) -> bool:
+        return self.predictor_evaluation_store.record_artifact(artifact)
+
+    def record_predictor_evaluation(
+        self, report: PredictorEvaluationReport
+    ) -> bool:
+        return self.predictor_evaluation_store.record_report(report)
+
+    def record_predictor_comparison(
+        self, comparison: ChallengerComparison
+    ) -> bool:
+        return self.predictor_evaluation_store.record_comparison(comparison)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

@@ -1,5 +1,21 @@
 # CostWeave
 
+## v0.5.6.4.2：Offline Evaluation & Promotion Freeze
+
+本版不依赖真实数据训练，而是先把未来预测器必须经过的科学验收流程固定下来：
+
+- 新增不可变 `PredictorCandidateManifest`，绑定准入报告、数据版本、特征/目标 Schema、代码版本、训练配置和模型载荷哈希；制品固定为 `frozen_candidate`；
+- 用五类 Outcome 分布计算成功率置信区间、Brier、ECE、高风险 ECE、难度—失败 Spearman、P95 覆盖率、Cost per Accepted Task 与 Time per Accepted Task；
+- 测试集必须匿名、项目化、版本一致、样本唯一且只来自 test 分区；E0/E1 即使指标完美也会被硬冻结；
+- E2 最多形成 `offline_pass`，E3+ 且全部预注册阈值通过才可成为 `shadow_candidate`；Shadow 候选仍然没有正式路由权；
+- Champion/Challenger 必须使用相同 Cohort，同时满足成功率非劣、校准不恶化、高风险不恶化，以及成本至少改善 3% 或时延至少改善 10%；
+- migration 018 保存冻结预测制品、离线评估报告与挑战者比较，Runtime Schema 升级为 `v5.6.4.2`；
+- `/api/v1/predictors/policy` 现在同时公开数据准入与离线评估阈值，默认状态为 `frozen_no_real_evidence`。
+
+升级说明见 [`docs/V0.5.6.4.2_MIGRATION.md`](docs/V0.5.6.4.2_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.6.4.2.md`](docs/CHANGELOG-v0.5.6.4.2.md)。
+
+> 证据边界：内置观察仅用于验证公式和合同，不能作为真实模型效果。当前没有训练预测器、没有真实 Provider 调用、没有 Shadow 实验，也没有策略晋级。
+
 ## v0.5.6.4.1：Predictor Admission & Replay Contract
 
 本版在不调用任何付费模型的前提下，先把学习型路由最容易被忽略的“数据准入门”做实：
@@ -586,7 +602,7 @@ costweave/
 | `GET` | `/api/v1/evaluation/protocol` | 读取 v0.5.6.1 任务集、五组基线、证据等级和零真实调用边界 |
 | `GET` | `/api/v1/outcomes/governance` | 读取 v0.5.6.2 标签来源、隔离、删除、冻结训练和零策略晋级边界 |
 | `GET` | `/api/v1/experiments/policy` | 读取 v0.5.6.3 双开关、硬预算、密钥与 Shadow 零干预边界 |
-| `GET` | `/api/v1/predictors/policy` | 读取 v0.5.6.4.1 数据准入档位、训练冻结和零路由权边界 |
+| `GET` | `/api/v1/predictors/policy` | 读取 v0.5.6.4.2 数据准入、离线评估、Shadow 候选和零晋级边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -658,7 +674,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.6.3 的工程路线与 v0.5.6.4.1 的学习前准入门已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，v0.5.6.4.1 只允许冻结与重放，不进行真实拟合、学习型路由或策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.6.3 的工程路线、v0.5.6.4.1 的学习前准入门和 v0.5.6.4.2 的离线验收防线已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，系统只验证合同与指标算法，不进行真实拟合、学习型路由或策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

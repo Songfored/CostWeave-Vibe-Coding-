@@ -51,6 +51,22 @@ class PredictorAdmissionStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                dataset = connection.execute(
+                    "SELECT content_hash,training_allowed FROM outcome_datasets "
+                    "WHERE dataset_id=?",
+                    (report.dataset_id,),
+                ).fetchone()
+                if (
+                    dataset is None
+                    or dataset["content_hash"] != report.dataset_content_hash
+                ):
+                    raise PredictorAdmissionError(
+                        "admission report does not match a persisted dataset version"
+                    )
+                if report.training_allowed and not bool(dataset["training_allowed"]):
+                    raise PredictorAdmissionError(
+                        "admission report cannot bypass the dataset training freeze"
+                    )
                 existing = connection.execute(
                     "SELECT report_json FROM predictor_admission_reports "
                     "WHERE report_id=?",

@@ -1,4 +1,33 @@
-# CostWeave v0.5.6.4.1 架构说明
+# CostWeave v0.5.6.4.2 架构说明
+
+v0.5.6.4.2 在准入门之后加入 Offline Evaluation Plane。预测器首先成为绑定数据、代码、Schema、配置和载荷哈希的冻结制品；随后只能在匿名且隔离的 test cohort 上生成离线评估报告。评估同时检查成功概率校准、高风险行为、难度排序、完整成本与端到端时延，不允许用单一平均分掩盖风险退化。
+
+```text
+Predictor Admission Report (training_allowed)
+                    |
+                    v
+Frozen Predictor Candidate Manifest
+ data + feature + target + code + config + payload hashes
+                    |
+                    v
+Anonymous Test Prediction Observations
+                    |
+                    v
+Offline Evaluation Gate
+ Brier / ECE / High-risk ECE / Spearman / P95 coverage / CPS / Time
+          |                          |
+          | E0/E1 or failed gate     | E2 pass / E3+ pass
+          v                          v
+       BLOCKED             OFFLINE_PASS / SHADOW_CANDIDATE
+                                      |
+                                      v
+                         Champion-Challenger Comparison
+                                      |
+                                      v
+                        routing_authority=false always
+```
+
+E2 通过只说明评估流程得到方向性信号，不能进入 Shadow；E3+ 也只是 Shadow 候选。migration 018 的所有制品、报告和比较均固定 `policy_promotion_allowed=false`，正式路由继续由 `ResourcePortfolioOptimizer` 掌握。
 
 v0.5.6.4.1 在 Outcome 数据治理与 Shadow 路由之间加入不可绕过的 Predictor Admission Plane。`DatasetEvidenceSummary` 只提取匿名化、结构化质量统计；`PredictorAdmissionGate` 对 E2 方向观察、E3 内部校准和 E4 正式基准执行不同门槛；`PredictorAdmissionStore` 通过 migration 017 保存不可变决策。数据不足或质量失败时，系统只生成 `FrozenPredictionReceipt`，不生成概率、不训练、不晋级，也不改变现有正式路线。
 

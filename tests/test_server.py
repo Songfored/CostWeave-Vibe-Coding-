@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.6.4.1", health["version"])
+        self.assertEqual("0.5.6.4.2", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.6.4.1", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.6.4.2", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -107,6 +107,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(0, health["shadow_router"]["intervention_count"])
         self.assertEqual(
             "frozen", health["predictor_admission"]["current_state"]
+        )
+        self.assertEqual(
+            "frozen_no_real_evidence",
+            health["predictor_evaluation"]["current_state"],
         )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
@@ -161,10 +165,17 @@ class ServerTests(unittest.TestCase):
     def test_predictor_policy_is_frozen_and_non_authoritative(self):
         status, policy = self.fetch_json("/api/v1/predictors/policy")
         self.assertEqual(200, status)
-        self.assertEqual("v0.5.6.4.1", policy["schema_version"])
-        self.assertEqual("frozen", policy["current_state"])
-        self.assertFalse(policy["training_enabled_by_default"])
+        self.assertEqual("v0.5.6.4.2", policy["schema_version"])
+        self.assertEqual("frozen_no_real_evidence", policy["current_state"])
+        self.assertFalse(
+            policy["admission"]["training_enabled_by_default"]
+        )
         self.assertFalse(policy["policy_promotion_enabled"])
+        self.assertFalse(
+            policy["offline_evaluation"][
+                "offline_fixture_metrics_are_claimable"
+            ]
+        )
         self.assertEqual(
             "legacy-resource-optimizer", policy["routing_authority"]
         )
