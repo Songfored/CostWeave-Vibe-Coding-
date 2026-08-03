@@ -1,5 +1,20 @@
 # CostWeave
 
+## v0.5.6.4.4：Exact Oracle & Sensitivity Audit
+
+本版为上一版的有界 Beam Search 增加独立验收层，避免“启发式程序给自己打分”：
+
+- 新增小型 DAG 精确 Oracle，在默认不超过 10 个节点、10 万候选组合时穷举全部可行分配，给出可证明的最优或不可行结论；超界时固定返回 `skipped_bounds`，不冒充已验证；
+- 新增 Beam/Oracle 差分报告，同时检查可行性、选中组合、目标值、绝对与相对 Routing Regret，并核验启发式求解器的 `optimality_proven` 声明；
+- 新增价格、成功率下界、P95 时延和失败返工成本敏感性探针，报告已测试点中最接近的路线翻转值与稳健性等级；它不是连续参数的数学阈值证明；
+- 专项测试包含一个真实剪枝反例：窄 Beam 选择低价上游，而精确 Oracle 找到更低全链路损失的强上游组合，并量化其预期损失差；
+- migration 020 保存不可变 Oracle、差分和敏感性报告，数据库继续固定零正式路由权、零实际干预和零商业声明权；
+- `GET /api/v1/portfolio/policy` 现在同时公开 v0.5.6.4.3 的组合审计与 v0.5.6.4.4 的精确验收边界。
+
+升级说明见 [`docs/V0.5.6.4.4_MIGRATION.md`](docs/V0.5.6.4.4_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.6.4.4.md`](docs/CHANGELOG-v0.5.6.4.4.md)。
+
+> 证据边界：精确 Oracle 只证明给定 E0 输入、离散候选和实现约束下的数学最优，不证明输入概率、价格或时延符合现实，更不能证明真实降本或商业领先。
+
 ## v0.5.6.4.3：Global DAG Portfolio Audit
 
 本版在不使用真实模型调用、也不伪造效果数据的前提下，先把“整张任务 DAG 应该怎样分配模型与算力”的可审计决策合同做出来：
@@ -618,7 +633,7 @@ costweave/
 | `GET` | `/api/v1/outcomes/governance` | 读取 v0.5.6.2 标签来源、隔离、删除、冻结训练和零策略晋级边界 |
 | `GET` | `/api/v1/experiments/policy` | 读取 v0.5.6.3 双开关、硬预算、密钥与 Shadow 零干预边界 |
 | `GET` | `/api/v1/predictors/policy` | 读取 v0.5.6.4.2 数据准入、离线评估、Shadow 候选和零晋级边界 |
-| `GET` | `/api/v1/portfolio/policy` | 读取 v0.5.6.4.3 全局 DAG 组合目标、硬约束、证据等级和零路由权边界 |
+| `GET` | `/api/v1/portfolio/policy` | 读取 v0.5.6.4.3 全局 DAG 组合目标以及 v0.5.6.4.4 精确 Oracle、差分验收、敏感性和零路由权边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -641,7 +656,7 @@ costweave/
 python -B tests/run_isolated.py
 ```
 
-当前基线为 531 项自动化测试。v0.5.6.4.3 新增 17 项全局组合审计专项测试和 1 项策略 API 回归，覆盖强上游减少下游失效、并行关键路径、Provider 配额、同层容量、独立验收、相关失败、证据等级、确定性重放、输入边界、场景比较与零路由干预；此前测试继续作为治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
+当前基线为 547 项自动化测试。v0.5.6.4.4 新增 16 项精确 Oracle、差分验收、剪枝反例、敏感性、不可变存储与输入边界测试；此前测试继续作为全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
 
 测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
@@ -672,6 +687,7 @@ python -B tests/run_isolated.py
 - 35 个评测种子任务、五基线完整矩阵、盲评身份隔离、E0 证据边界和不可变 JSONL/CSV 导出
 - Outcome 匿名学习副本、标签证据追加、冲突保留、项目隔离、去重权重、TTL/删除审计和训练硬冻结
 - 全局 DAG 组合损失、强上游投入、并行关键路径、共享配额/容量、相关失败、独立验收和拓扑场景比较
+- 小图精确最优/不可行证明、Beam 差分 Regret、超界失败关闭和离散参数敏感性
 
 ## 当前边界
 
@@ -680,7 +696,7 @@ python -B tests/run_isolated.py
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.6.4.3 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.6.4.4 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -691,7 +707,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.6.3 的工程路线以及 v0.5.6.4.1～v0.5.6.4.3 的准入、离线评估和全局组合审计已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，全局组合审计只使用 E0 规则先验，不进行真实拟合、学习型路由、Shadow 干预或策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.6.3 的工程路线以及 v0.5.6.4.1～v0.5.6.4.4 的准入、离线评估、全局组合审计和精确小图验收已经完成；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，全局组合审计只使用 E0 规则先验，不进行真实拟合、学习型路由、Shadow 干预或策略晋级。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.4.3."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.4.4."""
 
 from __future__ import annotations
 
@@ -46,6 +46,12 @@ from .portfolio_audit import (
     PortfolioScenarioComparison,
 )
 from .portfolio_audit_store import PortfolioAuditStore
+from .portfolio_validation import (
+    ExactOracleResult,
+    PortfolioDifferentialReport,
+    PortfolioSensitivityReport,
+)
+from .portfolio_validation_store import PortfolioValidationStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -83,6 +89,9 @@ class ControlKernel:
             self.store.path
         )
         self.portfolio_audit_store = PortfolioAuditStore(self.store.path)
+        self.portfolio_validation_store = PortfolioValidationStore(
+            self.store.path
+        )
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -339,6 +348,7 @@ class ControlKernel:
             **self.predictor_admission_store.counts(),
             **self.predictor_evaluation_store.counts(),
             **self.portfolio_audit_store.counts(),
+            **self.portfolio_validation_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -842,6 +852,19 @@ class ControlKernel:
         self, comparison: PortfolioScenarioComparison
     ) -> bool:
         return self.portfolio_audit_store.record_comparison(comparison)
+
+    def record_portfolio_oracle(self, result: ExactOracleResult) -> bool:
+        return self.portfolio_validation_store.record_oracle(result)
+
+    def record_portfolio_differential(
+        self, report: PortfolioDifferentialReport
+    ) -> bool:
+        return self.portfolio_validation_store.record_differential(report)
+
+    def record_portfolio_sensitivity(
+        self, report: PortfolioSensitivityReport
+    ) -> bool:
+        return self.portfolio_validation_store.record_sensitivity(report)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

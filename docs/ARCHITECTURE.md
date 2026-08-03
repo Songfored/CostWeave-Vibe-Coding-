@@ -1,4 +1,35 @@
-# CostWeave v0.5.6.4.3 架构说明
+# CostWeave v0.5.6.4.4 架构说明
+
+v0.5.6.4.4 在 Global DAG Portfolio Audit 旁边加入独立的 Exact Validation Plane。生产候选仍由有界 Beam Search 生成；对于足够小的同一问题，精确 Oracle 穷举全部离散组合并复用完全相同的损失函数和硬约束，然后生成差分验收报告。
+
+```text
+PortfolioProblem
+      |----------------------------|
+      v                            v
+Bounded Beam Search        Exact small-DAG Oracle
+candidate route            exhaustive enumeration
+      |                            |
+      |----------------------------|
+                   v
+          Differential Report
+ feasibility / selection / objective / routing regret
+                   |
+                   v
+          Sensitivity Probes
+ price / success lower / P95 latency / rework cost
+ nearest observed route flip in tested points
+                   |
+                   v
+ advisory_only=true / routing_authority=false / intervention=0
+```
+
+默认 Oracle 上限为 10 个节点和 100,000 个静态候选组合。界内结果可以证明给定离散输入下的最优或不可行；界外返回 `skipped_bounds`。实现只保留当前最优组合，不把全部可行组合常驻内存。敏感性分析最多接受 32 个探针、128 个测试点，所得“翻转值”只是离散测试点中最接近的已观察翻转，不是连续函数的精确根。
+
+migration 020 保存 Oracle、差分和敏感性报告，并通过外键保证候选审计、Oracle 和敏感性基线引用同一个问题。全部记录带内容哈希，数据库约束固定零正式路由权、零实际干预与零商业声明权。
+
+---
+
+以下为 v0.5.6.4.3 的 Global DAG Portfolio Audit Plane，它仍负责生成待验收的非权威组合建议。
 
 v0.5.6.4.3 新增独立的 Global DAG Portfolio Audit Plane。它接收任务 DAG、部署候选、资源限制和损失参数，在整张图上比较候选组合，而不是让各节点独立追求最低单次价格。
 

@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.6.4.3", health["version"])
+        self.assertEqual("0.5.6.4.4", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.6.4.3", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.6.4.4", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -116,6 +116,12 @@ class ServerTests(unittest.TestCase):
             "v0.5.6.4.3", health["portfolio_audit"]["schema_version"]
         )
         self.assertFalse(health["portfolio_audit"]["may_change_actual_route"])
+        self.assertEqual(
+            "v0.5.6.4.4", health["portfolio_validation"]["schema_version"]
+        )
+        self.assertFalse(
+            health["portfolio_validation"]["may_change_actual_route"]
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -193,6 +199,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual("v0.5.6.4.3", policy["schema_version"])
         self.assertEqual(
+            "v0.5.6.4.4", policy["exact_validation"]["schema_version"]
+        )
+        self.assertTrue(
+            policy["exact_validation"]["exact_oracle"][
+                "proves_optimality_within_bounds"
+            ]
+        )
+        self.assertEqual(
             "bounded-deterministic-beam-search", policy["solver"]
         )
         self.assertTrue(policy["advisory_only"])
@@ -200,6 +214,12 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(policy["external_calls_required"])
         self.assertEqual(
             0, policy["runtime_counts"]["portfolio_route_interventions"]
+        )
+        self.assertEqual(
+            0,
+            policy["runtime_counts"][
+                "portfolio_validation_route_interventions"
+            ],
         )
 
     def test_planning_policy_and_run_receipt_are_explainable(self):
