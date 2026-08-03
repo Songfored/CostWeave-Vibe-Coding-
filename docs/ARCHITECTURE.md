@@ -1,4 +1,37 @@
-# CostWeave v0.5.6.4.2 架构说明
+# CostWeave v0.5.6.4.3 架构说明
+
+v0.5.6.4.3 新增独立的 Global DAG Portfolio Audit Plane。它接收任务 DAG、部署候选、资源限制和损失参数，在整张图上比较候选组合，而不是让各节点独立追求最低单次价格。
+
+```text
+PortfolioProblem
+ nodes + edges + deployment options + evidence levels
+                 |
+                 v
+Static fail-closed filters
+ capability / residency / success floor / declared resources
+                 |
+                 v
+Bounded deterministic beam search
+ budget / deadline / provider quota / parallel pool capacity
+ validator independence / two-level management cap
+                 |
+                 v
+Whole-DAG expected loss
+ direct + validation + tools + handoff + rework + escalation
+ + downstream invalidation + correlated failure + latency + failure loss
+                 |
+                 v
+PortfolioAuditSolution / PortfolioScenarioComparison
+ advisory_only=true / routing_authority=false / intervention=0
+```
+
+关键路径按照依赖图计算，可并行的兄弟节点只计入较慢分支；资源池容量按拓扑层保守核算。高风险验收要求模型与失败域独立。审计器可比较细粒度拆分和合并拓扑，但搜索是有界 Beam Search，因此只在未发生截断和 Beam 剪枝时标记 `optimality_proven=true`。
+
+migration 019 把审计结果和比较结果保存为不可变、带哈希的记录，并以数据库约束固定 `advisory_only=true`、`routing_authority=false`、`may_change_actual_route=false` 和 `commercial_claims_allowed=false`。当前输入是 E0 规则先验，正式路由仍由 `ResourcePortfolioOptimizer` 掌握。
+
+---
+
+以下为 v0.5.6.4.2 的离线预测器评估层，它继续作为全局审计未来接入真实校准概率之前的数据与证据防线。
 
 v0.5.6.4.2 在准入门之后加入 Offline Evaluation Plane。预测器首先成为绑定数据、代码、Schema、配置和载荷哈希的冻结制品；随后只能在匿名且隔离的 test cohort 上生成离线评估报告。评估同时检查成功概率校准、高风险行为、难度排序、完整成本与端到端时延，不允许用单一平均分掩盖风险退化。
 

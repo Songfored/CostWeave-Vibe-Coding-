@@ -61,6 +61,7 @@ from .predictor_evaluation import (
     PREDICTOR_EVALUATION_SCHEMA_VERSION,
     public_evaluation_policy,
 )
+from .portfolio_audit import public_portfolio_audit_policy
 
 
 MANAGER: RunManager | None = None
@@ -87,7 +88,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.4.2"
+    server_version = "CostWeave/0.5.6.4.3"
 
     def setup(self) -> None:
         super().setup()
@@ -160,8 +161,26 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 },
                 "predictor_admission": public_predictor_policy(),
                 "predictor_evaluation": public_evaluation_policy(),
+                "portfolio_audit": public_portfolio_audit_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/portfolio/policy":
+            counts = (
+                self.manager.control_kernel.portfolio_audit_store.counts()
+                if self.manager.control_kernel is not None
+                else {
+                    "portfolio_audits": 0,
+                    "feasible_portfolio_audits": 0,
+                    "directional_portfolio_audits": 0,
+                    "portfolio_scenario_comparisons": 0,
+                    "portfolio_route_interventions": 0,
+                }
+            )
+            self._json({
+                **public_portfolio_audit_policy(),
+                "runtime_counts": counts,
             })
             return
         if path == "/api/v1/predictors/policy":
@@ -1346,7 +1365,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.4.2 offline-evaluation prototype"
+        description="Run the CostWeave v0.5.6.4.3 global portfolio audit prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

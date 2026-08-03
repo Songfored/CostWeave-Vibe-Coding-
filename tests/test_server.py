@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.6.4.2", health["version"])
+        self.assertEqual("0.5.6.4.3", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.6.4.2", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.6.4.3", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -112,6 +112,10 @@ class ServerTests(unittest.TestCase):
             "frozen_no_real_evidence",
             health["predictor_evaluation"]["current_state"],
         )
+        self.assertEqual(
+            "v0.5.6.4.3", health["portfolio_audit"]["schema_version"]
+        )
+        self.assertFalse(health["portfolio_audit"]["may_change_actual_route"])
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -182,6 +186,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             0,
             policy["runtime_counts"]["authoritative_learned_predictions"],
+        )
+
+    def test_portfolio_policy_is_advisory_and_has_zero_interventions(self):
+        status, policy = self.fetch_json("/api/v1/portfolio/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.6.4.3", policy["schema_version"])
+        self.assertEqual(
+            "bounded-deterministic-beam-search", policy["solver"]
+        )
+        self.assertTrue(policy["advisory_only"])
+        self.assertFalse(policy["may_change_actual_route"])
+        self.assertFalse(policy["external_calls_required"])
+        self.assertEqual(
+            0, policy["runtime_counts"]["portfolio_route_interventions"]
         )
 
     def test_planning_policy_and_run_receipt_are_explainable(self):
