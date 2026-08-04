@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.7.3", health["version"])
+        self.assertEqual("0.5.7.4", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.7.3", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.7.4", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -144,6 +144,13 @@ class ServerTests(unittest.TestCase):
         )
         self.assertFalse(
             health["policy_registry"]["registry_active_is_runtime_active"]
+        )
+        self.assertEqual(
+            "v0.5.7.4", health["bounded_canary"]["schema_version"]
+        )
+        self.assertFalse(health["bounded_canary"]["runtime_enabled"])
+        self.assertEqual(
+            0.0, health["bounded_canary"]["high_risk_exploration_rate"]
         )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
@@ -302,6 +309,19 @@ class ServerTests(unittest.TestCase):
             0,
             policy["runtime_counts"]["policy_registry_runtime_activations"],
         )
+
+    def test_bounded_canary_is_default_off_and_exposes_zero_runtime_activity(self):
+        status, policy = self.fetch_json("/api/v1/canary/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.7.4", policy["schema_version"])
+        self.assertFalse(policy["runtime_enabled"])
+        self.assertEqual([5, 25, 50, 100], policy["stages_pct"])
+        self.assertEqual(0.0, policy["high_risk_exploration_rate"])
+        self.assertTrue(policy["in_flight_policy_snapshot_immutable"])
+        self.assertTrue(policy["new_runs_observe_rollback_immediately"])
+        self.assertIsNone(policy["current_runtime_state"])
+        self.assertEqual(0, policy["runtime_counts"]["canary_runtime_rollbacks"])
+        self.assertEqual(0, policy["runtime_counts"]["canary_provider_calls"])
 
     def test_portfolio_policy_is_advisory_and_has_zero_interventions(self):
         status, policy = self.fetch_json("/api/v1/portfolio/policy")

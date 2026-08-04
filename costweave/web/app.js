@@ -288,6 +288,10 @@ function render(run) {
     $("#scheduler-summary").textContent = run.runtime?.parallel_runtime
       ? `调度：关键路径优先 · Placement ${Number(scheduling.selected_placements || 0)} 个（备用 ${Math.max(0, Number(scheduling.placements || 0) - Number(scheduling.selected_placements || 0))}） · 预测总成本 $${Number(scheduling.forecast_total || 0).toFixed(4)} · 实际账本 $${Number(scheduling.actual_total || 0).toFixed(4)} · 验收 ${Number(scheduling.validation_results || 0)} 次（失败 ${Number(scheduling.failed_validations || 0)}） · 恢复 ${Number(scheduling.failure_records || 0)} 次 · 活跃租约 ${Number(scheduling.active_leases || 0)} · 待审批 ${Number(scheduling.pending_approvals || 0)}`
       : "调度：兼容模式（未启用资源感知并行运行时）";
+  const policySnapshot = run.runtime?.policy_snapshot || routing.runtime_policy_snapshot;
+  $("#runtime-policy-summary").textContent = policySnapshot
+    ? `运行时策略：${policySnapshot.selected_policy_id}@${policySnapshot.selected_policy_version} · ${policySnapshot.cohort} · 启动快照 ${String(policySnapshot.policy_snapshot_hash || "").slice(0, 12)}`
+    : "运行时策略：未启用 Canary，继续使用稳定路由";
 
   if (!state.selectedTaskId || !run.plan.tasks.some((task) => task.id === state.selectedTaskId)) {
     const finalTask = findFinalTask(run.plan.tasks);
@@ -1277,6 +1281,33 @@ async function loadPolicyRegistry() {
   }
 }
 
+async function loadCanaryPolicy() {
+  const live = $("#canary-live");
+  if (!live) return;
+  try {
+    const response = await fetch("/api/v1/canary/policy");
+    const policy = await readJson(response);
+    if (!response.ok) throw new Error("无法读取 Canary 控制状态");
+    const counts = policy.runtime_counts || {};
+    const current = policy.current_runtime_state;
+    $("#canary-stage").textContent = current ? `${Number(current.stage_pct || 0)}%` : "OFF";
+    $("#canary-runtime-state").textContent = current
+      ? humanize(current.event_type || "unknown")
+      : "尚无运行时部署";
+    $("#canary-assignment-count").textContent = String(counts.canary_assignments || 0);
+    $("#canary-rollback-count").textContent = String(counts.canary_runtime_rollbacks || 0);
+    $("#canary-route-change-count").textContent = String(counts.canary_runtime_policy_changes || 0);
+    $("#canary-boundary").textContent = policy.runtime_enabled
+      ? "已显式启用 · 仍受真实证据与阶段门约束"
+      : "默认关闭 · 等待真实证据与显式启用";
+    live.textContent = current
+      ? `部署 ${current.deployment_id} · ${current.event_type} · 高风险候选 ${counts.canary_high_risk_candidate_assignments || 0} · 外部调用 ${counts.canary_provider_calls || 0}`
+      : "没有满足启动条件的 Canary；不会改变现有任务路线，也不会产生外部模型调用。";
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "Canary 控制状态暂不可用";
+  }
+}
+
 $("#catalog-search").addEventListener("input", renderCatalog);
 $("#catalog-provider-filter").addEventListener("change", renderCatalog);
 $("#catalog-status-filter").addEventListener("change", renderCatalog);
@@ -1298,4 +1329,5 @@ $("#cancel-import").addEventListener("click", () => $("#import-dialog").close())
 updateGoalCount();
 loadCatalog();
 loadPolicyRegistry();
+loadCanaryPolicy();
 refreshHistory({ restore: true });

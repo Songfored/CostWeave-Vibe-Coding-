@@ -69,6 +69,7 @@ from .policy_candidate import (
 from .offline_replay import public_offline_replay_policy
 from .production_shadow import public_production_shadow_policy
 from .policy_registry import public_policy_registry_policy
+from .canary_control import public_canary_policy
 
 
 MANAGER: RunManager | None = None
@@ -95,7 +96,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.7.3"
+    server_version = "CostWeave/0.5.7.4"
 
     def setup(self) -> None:
         super().setup()
@@ -174,8 +175,37 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "offline_replay": public_offline_replay_policy(),
                 "production_shadow": public_production_shadow_policy(),
                 "policy_registry": public_policy_registry_policy(),
+                "bounded_canary": public_canary_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/canary/policy":
+            if self.manager.control_kernel is not None:
+                counts = self.manager.control_kernel.canary_store.counts()
+                state = self.manager.control_kernel.canary_store.current_state()
+            else:
+                counts = {
+                    "canary_deployments": 0,
+                    "canary_pointer_events": 0,
+                    "canary_assignments": 0,
+                    "canary_observation_windows": 0,
+                    "canary_stage_decisions": 0,
+                    "canary_candidate_assignments": 0,
+                    "canary_control_assignments": 0,
+                    "canary_stable_only_assignments": 0,
+                    "canary_high_risk_candidate_assignments": 0,
+                    "canary_runtime_policy_changes": 0,
+                    "canary_runtime_rollbacks": 0,
+                    "canary_stage_advances": 0,
+                    "canary_provider_calls": 0,
+                    "canary_execution_side_effects": 0,
+                }
+                state = None
+            self._json({
+                **public_canary_policy(),
+                "current_runtime_state": state,
+                "runtime_counts": counts,
             })
             return
         if path == "/api/v1/policies/registry":
@@ -1466,7 +1496,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.7.3 policy registry prototype"
+        description="Run the CostWeave v0.5.7.4 bounded canary prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

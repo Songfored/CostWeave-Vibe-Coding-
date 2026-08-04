@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.7.3 提供签名策略注册表、证据晋级门、策略卡、冻结与注册表回滚">
+  <meta name="description" content="CostWeave v0.5.7.4 提供有界 Canary、运行时策略快照与自动回滚">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.7.3">
+  <link rel="stylesheet" href="/styles.css?v=0.5.7.4">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.7.3 Policy Registry</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.7.4 Bounded Canary</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,7 +29,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">POLICY REGISTRY &amp; PROMOTION GATE · V0.5.7.3</p>
+        <p class="eyebrow">BOUNDED CANARY &amp; AUTOMATIC ROLLBACK · V0.5.7.4</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -244,6 +244,7 @@
             <div id="analysis-signals" class="analysis-signals"></div>
             <p id="routing-summary" class="routing-summary"></p>
             <p id="scheduler-summary" class="routing-summary"></p>
+            <p id="runtime-policy-summary" class="routing-summary"></p>
           </div>
 
           <section class="orchestration-section" aria-labelledby="dag-title">
@@ -314,6 +315,38 @@
         <span>Activation ≥ 1,000 例</span>
       </div>
       <p id="registry-live" class="catalog-live" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="bounded-canary-section" class="bounded-canary-section" aria-labelledby="bounded-canary-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">BOUNDED RUNTIME RELEASE</span>
+          <h2 id="bounded-canary-title">有界 Canary 与自动回滚</h2>
+        </div>
+        <span id="canary-boundary" class="registry-boundary">默认关闭 · 等待真实证据与显式启用</span>
+      </div>
+      <p class="registry-intro">只有完成签名、真实证据门、稳定回滚目标和人工批准的策略，才能从 5% 低风险任务开始。运行中的任务固定使用启动快照；任何硬门槛越界都会立即让新任务回到稳定策略。</p>
+      <ol class="canary-stage-flow" aria-label="Canary 发布阶段">
+        <li><b>5%</b><span>低风险探针<small>确定性分桶</small></span></li>
+        <li><b>25%</b><span>受限扩展<small>逐阶段验收</small></span></li>
+        <li><b>50%</b><span>半量观察<small>继续硬门监控</small></span></li>
+        <li><b>100%</b><span>全量候选<small>仍可自动回滚</small></span></li>
+      </ol>
+      <div class="canary-grid">
+        <article><span>当前阶段</span><strong id="canary-stage">OFF</strong><small id="canary-runtime-state">尚无运行时部署</small></article>
+        <article><span>策略快照</span><strong id="canary-assignment-count">0</strong><small>每个任务启动后不可变</small></article>
+        <article><span>自动回滚</span><strong id="canary-rollback-count">0</strong><small>新任务立即回稳</small></article>
+        <article><span>候选策略选择</span><strong id="canary-route-change-count">0</strong><small>不代表外部模型已被调用</small></article>
+      </div>
+      <div class="registry-gates">
+        <span>高风险探索 = 0</span>
+        <span>成功率 CI ≥ −1pp</span>
+        <span>严重错误不得上升</span>
+        <span>P95 恶化 ≤ 10%</span>
+        <span>预算 / 权限越界 = 0</span>
+        <span>重复外部副作用 = 0</span>
+      </div>
+      <p id="canary-live" class="catalog-live" role="status" aria-live="polite"></p>
     </section>
 
     <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
@@ -412,7 +445,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.7.3 / Signed Registry &amp; Evidence-gated Promotion</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.7.3" defer></script>
+  <footer><span>CostWeave v0.5.7.4 / Bounded Canary &amp; Automatic Rollback</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.7.4" defer></script>
 </body>
 </html>

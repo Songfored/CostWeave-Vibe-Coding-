@@ -81,6 +81,16 @@ class WebUiRegressionTests(unittest.TestCase):
             "registry-recovery-count",
             "registry-route-change-count",
             "registry-live",
+            "bounded-canary-section",
+            "bounded-canary-title",
+            "canary-boundary",
+            "canary-stage",
+            "canary-runtime-state",
+            "canary-assignment-count",
+            "canary-rollback-count",
+            "canary-route-change-count",
+            "canary-live",
+            "runtime-policy-summary",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -120,14 +130,17 @@ class WebUiRegressionTests(unittest.TestCase):
             "importCatalog",
             "resetCatalog",
             "loadPolicyRegistry",
+            "loadCanaryPolicy",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.7.3 Policy Registry", self.html)
+        self.assertIn("v0.5.7.4 Bounded Canary", self.html)
         self.assertIn("registry_active_is_runtime_active", self.js)
+        self.assertIn("policy_snapshot", self.js)
+        self.assertIn("canary_runtime_policy_changes", self.js)
         self.assertIn("标签治理", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)

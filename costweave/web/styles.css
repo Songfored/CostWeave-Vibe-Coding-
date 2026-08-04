@@ -877,6 +877,22 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   border-radius: 20px; background: linear-gradient(145deg, rgba(15, 34, 29, .94), rgba(7, 18, 16, .96));
   box-shadow: 0 22px 70px rgba(0, 0, 0, .18);
 }
+.bounded-canary-section {
+  margin: 28px 0; padding: 26px; border: 1px solid rgba(103, 164, 255, .24);
+  border-radius: 20px; background: linear-gradient(145deg, rgba(13, 27, 43, .95), rgba(7, 17, 27, .97));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .18);
+}
+.canary-stage-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; padding: 0; margin: 0 0 18px; list-style: none; }
+.canary-stage-flow li { position: relative; display: flex; align-items: center; gap: 11px; min-height: 68px; padding: 12px; border: 1px solid rgba(103, 164, 255, .18); border-radius: 13px; background: rgba(103, 164, 255, .035); }
+.canary-stage-flow li:not(:last-child)::after { content: "›"; position: absolute; right: -9px; z-index: 2; color: #8bb8ff; }
+.canary-stage-flow b { color: #8bb8ff; font: 700 18px ui-monospace, monospace; }
+.canary-stage-flow span, .canary-stage-flow small { display: block; }
+.canary-stage-flow span { color: var(--text); font-size: 12px; }
+.canary-stage-flow small { margin-top: 3px; color: var(--faint); font-size: 10px; }
+.canary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.canary-grid article { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0, 0, 0, .13); }
+.canary-grid span, .canary-grid small { display: block; color: var(--muted); font-size: 11px; }
+.canary-grid strong { display: block; margin: 5px 0; color: var(--text); font-size: 25px; }
 .registry-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }
 .registry-heading h2 { margin: 5px 0 0; font-size: clamp(24px, 3vw, 34px); }
 .registry-boundary { padding: 7px 10px; color: #f3cc87; border: 1px solid rgba(243, 204, 135, .28); border-radius: 999px; background: rgba(243, 204, 135, .07); font-size: 11px; white-space: nowrap; }
@@ -925,6 +941,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .catalog-search-field { grid-column: 1 / -1; }
   .registry-lifecycle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .registry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .canary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
@@ -977,6 +994,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .registry-heading { display: grid; }
   .registry-boundary { white-space: normal; }
   .registry-lifecycle { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .canary-stage-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
@@ -1009,8 +1027,11 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .principles { grid-template-columns: 1fr; }
   footer { flex-direction: column; gap: 8px; }
   .policy-registry-section { padding: 17px; }
+  .bounded-canary-section { padding: 17px; }
   .registry-lifecycle, .registry-grid { grid-template-columns: 1fr; }
+  .canary-stage-flow, .canary-grid { grid-template-columns: 1fr; }
   .registry-lifecycle li:not(:last-child)::after { content: "↓"; right: 50%; bottom: -10px; top: auto; }
+  .canary-stage-flow li:not(:last-child)::after { content: "↓"; right: 50%; bottom: -11px; top: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.7.3."""
+"""Persistent command/event/projection owner for CostWeave v0.5.7.4."""
 
 from __future__ import annotations
 
@@ -86,6 +86,14 @@ from .policy_registry import (
     RegistryPolicyCard,
 )
 from .policy_registry_store import PolicyRegistryStore
+from .canary_control import (
+    CanaryDecision,
+    CanaryDeployment,
+    CanaryWindow,
+    assign_canary_policy,
+    evaluate_canary_window,
+)
+from .canary_store import CanaryStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -130,6 +138,7 @@ class ControlKernel:
         self.offline_replay_store = OfflineReplayStore(self.store.path)
         self.production_shadow_store = ProductionShadowStore(self.store.path)
         self.policy_registry_store = PolicyRegistryStore(self.store.path)
+        self.canary_store = CanaryStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -391,6 +400,7 @@ class ControlKernel:
             **self.offline_replay_store.counts(),
             **self.production_shadow_store.counts(),
             **self.policy_registry_store.counts(),
+            **self.canary_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -1018,6 +1028,47 @@ class ControlKernel:
         item: PolicyRollbackReceipt,
     ) -> bool:
         return self.policy_registry_store.record_rollback(freeze, item)
+
+    def start_canary_deployment(self, item: CanaryDeployment) -> bool:
+        return self.canary_store.start_deployment(item)
+
+    def assign_runtime_policy(self, record: Any, analysis: Any) -> dict[str, Any] | None:
+        """Capture one immutable policy snapshot before runtime routing begins."""
+
+        if record.policy_snapshot is not None:
+            return dict(record.policy_snapshot)
+        persisted = self.canary_store.assignment_for_run(str(record.id))
+        if persisted is not None:
+            with record.lock:
+                record.policy_snapshot = dict(persisted)
+            return dict(persisted)
+        context = self.canary_store.assignment_context()
+        if context is None:
+            return None
+        deployment, stage_pct, exposure_enabled = context
+        assignment = assign_canary_policy(
+            deployment,
+            run_id=str(record.id),
+            stage_pct=stage_pct,
+            risk_level=str(getattr(analysis, "stakes", "high")),
+            task_families=tuple(getattr(analysis, "task_types", ())),
+            exposure_enabled=exposure_enabled,
+        )
+        self.canary_store.record_assignment(assignment)
+        with record.lock:
+            record.policy_snapshot = assignment.to_dict()
+        self.checkpoint(record, source="control_kernel.assign_runtime_policy")
+        return assignment.to_dict()
+
+    def record_canary_window(
+        self,
+        item: CanaryWindow,
+        *,
+        evaluated_at: str | None = None,
+    ) -> CanaryDecision:
+        decision = evaluate_canary_window(item, evaluated_at=evaluated_at)
+        self.canary_store.record_window_decision(item, decision)
+        return decision
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

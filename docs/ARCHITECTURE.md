@@ -1,4 +1,55 @@
-# CostWeave v0.5.7.3 架构说明
+# CostWeave v0.5.7.4 架构说明
+
+v0.5.7.4 在签名策略注册表之上增加一个独立的 Bounded Canary Runtime Plane。注册表 `active` 仍只是已审查资产；只有显式启用、候选/稳定版本血缘完整、Canary 门通过且人工批准后，运行时部署才获得受限的低风险策略选择权。
+
+```text
+Signed candidate in registry state=canary
+stable rollback target in registry state=active
+eligible E3+ canary gate + explicit approval + scope
+                         |
+                         v
+             Immutable CanaryDeployment
+                         |
+                         v
+                 5% low-risk stage
+                         |
+        deterministic hash(run_id + deployment_id)
+             +-----------+-----------+
+             |                       |
+             v                       v
+      candidate snapshot       stable/control snapshot
+             |                       |
+             +-----------+-----------+
+                         v
+          immutable per-run policy snapshot
+             survives restart and later rollback
+                         |
+                         v
+                CanaryWindow guardrails
+ success CI / severe errors / budget / permission / P95
+ drift / calibration / duplicate side effects / metadata
+             +-----------+-----------+
+             |                       |
+          all pass                 any fail
+             |                       |
+             v                       v
+       25% → 50% → 100%      automatic stable rollback
+                                     |
+                   in-flight snapshots unchanged
+                   new runs use stable immediately
+```
+
+分桶不是可变随机数，而是 `sha256(deployment_id:run_id) mod 10000`。任务只有同时满足签名允许任务族、不命中禁止任务族且风险为 normal/low 时才可进入候选；elevated/high 风险的探索率固定为 0。回滚后的新任务仍会写入 `stable-only` 快照，因而“没有候选曝光”和“缺失审计记录”不会混为一谈。
+
+每个运行快照包含部署、阶段、分桶、候选/稳定队列、所选策略 ID/版本和内容哈希。该快照进入 `v5.6` 权威投影；进程重启时恢复同一值。自动回滚只追加运行时指针事件，不改写旧任务，也不扩大 Provider 凭据、工具或数据权限。
+
+阶段决定先执行硬回滚门，再判断样本量。成功率非劣 95% CI 下界必须 `≥-1pp`，严重错误率不得上升，P95 恶化不得超过 10%，预算/权限/重复副作用/高风险候选必须为 0，漂移、校准和策略元数据必须通过。硬门失败即使样本很少也立即回滚；硬门通过但样本不足只保持当前阶段。
+
+migration 025 保存部署、运行时指针、运行分配、观察窗和阶段决定。所有表只追加不可修改；存储层会重新计算确定性分配和自动门决定，拒绝调用方伪造 cohort、跳级或压制回滚。当前仍没有真实 Provider 策略负载与真实 Canary 证据，因此默认开关关闭，外部调用和执行副作用计数保持为 0。
+
+---
+
+## v0.5.7.3 Policy Registry Plane
 
 v0.5.7.3 在 Production-like Shadow 之后增加 Policy Registry Control Plane。它把候选策略、证据、门报告、状态转换、策略卡和回滚目标绑定到签名版本；注册表只管理“哪些资产已被审查”，不拥有运行时路由权。
 
@@ -34,7 +85,7 @@ candidate / replay / shadow / code / objective / constraints / scope
 
 证据门按阶段逐步收紧：evaluation 为 E2/30，shadow 为 E3/30，canary 为 E3/200，activation 为 E4/1,000。正式门逐项检查成功率非劣、CPS 置信下界、并行 P95、Handoff 返工、高风险成功率、校准/漂移/隐私和硬违规；不以一个可相互抵消的总分替代硬门。
 
-一键回滚是注册表事务：先冻结当前版本，再把注册表指针指向其签名清单中指定的已审查版本。该动作不会切换正在运行或新任务的真实策略；真正的运行时 Canary 与回滚属于 v0.5.7.4。
+一键回滚是注册表事务：先冻结当前版本，再把注册表指针指向其签名清单中指定的已审查版本。该动作本身不会切换运行任务；v0.5.7.4 的独立部署授权和运行时指针负责受限选择及自动回滚。
 
 migration 024 保存策略、证据、门报告、转换、卡片、回滚和指针事件。所有表不可修改或删除；数据库约束将运行路线变化、运行时激活/回滚和执行副作用固定为零。
 

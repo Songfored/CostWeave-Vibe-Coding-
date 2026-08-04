@@ -90,6 +90,7 @@ class RunRecord:
     planning_decision: dict[str, Any] | None = None
     planning_proposals: list[dict[str, Any]] = field(default_factory=list)
     planning_deliberation: dict[str, Any] | None = None
+    policy_snapshot: dict[str, Any] | None = None
     worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
     control_kernel: Any = field(default=None, repr=False)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -187,7 +188,7 @@ class RunRecord:
                     else None
                 ),
                 "runtime": {
-                    "schema_version": "v5.5",
+                    "schema_version": "v5.6",
                     "revision": self.runtime_revision,
                     "persistent": self.control_kernel is not None,
                     "artifact_dag": (
@@ -205,6 +206,7 @@ class RunRecord:
                     "recovered": self.recovered,
                     "cancel_requested": self.cancel_requested,
                     "retry_of": self.retry_of,
+                    "policy_snapshot": self.policy_snapshot,
                 },
                 "artifacts": (
                     self.control_kernel.artifacts(
@@ -305,6 +307,8 @@ class OrchestrationEngine:
                 else HeuristicPlanner()
             )
             analysis = analysis_planner.analyze(record.request)
+            if self.control_kernel is not None:
+                self.control_kernel.assign_runtime_policy(record, analysis)
             planning_decision = self.planning_governor.decide(
                 record.request,
                 analysis,
@@ -407,6 +411,10 @@ class OrchestrationEngine:
                 ),
                 availability=self._resource_availability(record),
             )
+            if record.policy_snapshot is not None:
+                plan.routing_summary["runtime_policy_snapshot"] = dict(
+                    record.policy_snapshot
+                )
             economics_receipt = plan.routing_summary.get(
                 "cross_provider", {}
             )

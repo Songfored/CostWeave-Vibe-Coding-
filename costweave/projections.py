@@ -18,7 +18,7 @@ from .domain import (
 )
 
 
-PROJECTION_SCHEMA_VERSION = "v5.5"
+PROJECTION_SCHEMA_VERSION = "v5.6"
 
 
 class ProjectionError(ValueError):
@@ -107,6 +107,7 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                 "recovered": bool(record.recovered),
                 "cancel_requested": bool(record.cancel_requested),
                 "retry_of": record.retry_of,
+                "policy_snapshot": copy.deepcopy(record.policy_snapshot),
             },
             "_runtime_internal": {
                 "worker_snapshot": copy.deepcopy(record.worker_snapshot),
@@ -140,7 +141,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     schema = snapshot.get("projection_schema_version")
     if schema not in {
         None, "v4.2", "v4.3", "v4.4", "v4.5", "v4.6", "v4.7",
-        "v4.9", "v5.1", "v5.2", "v5.3", "v5.4",
+        "v4.9", "v5.1", "v5.2", "v5.3", "v5.4", "v5.5",
         PROJECTION_SCHEMA_VERSION
     }:
         raise ProjectionError(f"unsupported projection schema: {schema}")
@@ -213,6 +214,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "recovered": bool(runtime.get("recovered", False)),
         "cancel_requested": bool(runtime.get("cancel_requested", False)),
         "retry_of": runtime.get("retry_of"),
+        "policy_snapshot": copy.deepcopy(runtime.get("policy_snapshot")),
         "planning_decision": copy.deepcopy(planning.get("decision")),
         "planning_proposals": copy.deepcopy(
             planning.get("proposals", [])
