@@ -1251,6 +1251,32 @@ function escapeHtml(value) {
   }[char]));
 }
 
+async function loadPolicyRegistry() {
+  const live = $("#registry-live");
+  if (!live) return;
+  try {
+    const response = await fetch("/api/v1/policies/registry");
+    const policy = await readJson(response);
+    if (!response.ok) throw new Error("无法读取策略注册表");
+    const counts = policy.runtime_counts || {};
+    $("#registry-boundary").textContent = policy.registry_active_is_runtime_active
+      ? "警告：注册表状态已连接真实路由"
+      : "注册表状态不改变真实路由";
+    $("#registry-policy-count").textContent = String(counts.policy_registry_policies || 0);
+    $("#registry-gate-count").textContent = String(counts.policy_registry_gate_reports || 0);
+    $("#registry-recovery-count").textContent = String(
+      (counts.policy_registry_frozen_transitions || 0) + (counts.policy_registry_rollbacks || 0)
+    );
+    $("#registry-route-change-count").textContent = String(counts.policy_registry_runtime_route_changes || 0);
+    $("#registry-gate-note").textContent = `${counts.policy_registry_eligible_gates || 0} 个证据门通过`;
+    live.textContent = policy.current_registry_pointer
+      ? `当前注册表指针：${policy.current_registry_pointer.registry_policy_id}；真实运行路线未改变。`
+      : "尚无激活的注册表指针；系统继续使用既有运行路线。";
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "策略注册表暂不可用";
+  }
+}
+
 $("#catalog-search").addEventListener("input", renderCatalog);
 $("#catalog-provider-filter").addEventListener("change", renderCatalog);
 $("#catalog-status-filter").addEventListener("change", renderCatalog);
@@ -1271,4 +1297,5 @@ $("#cancel-import").addEventListener("click", () => $("#import-dialog").close())
 
 updateGoalCount();
 loadCatalog();
+loadPolicyRegistry();
 refreshHistory({ restore: true });

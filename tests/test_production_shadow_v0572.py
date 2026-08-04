@@ -427,8 +427,8 @@ class ProductionShadowPersistenceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_and_empty_registry(self):
-        self.assertEqual("v5.7.2", self.health["runtime_schema"])
-        self.assertEqual(23, self.health["migrations"])
+        self.assertEqual("v5.7.3", self.health["runtime_schema"])
+        self.assertEqual(24, self.health["migrations"])
         counts = self.store.counts()
         self.assertEqual(0, counts["production_shadow_inputs"])
         self.assertEqual(0, counts["production_shadow_route_interventions"])

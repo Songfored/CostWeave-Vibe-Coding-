@@ -872,6 +872,29 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .rejected-list { border-top: 1px solid var(--line); padding-top: 12px; }
 .rejected-list li span { color: #d9a49f; }
 
+.policy-registry-section {
+  margin: 28px 0; padding: 26px; border: 1px solid rgba(100, 231, 192, .2);
+  border-radius: 20px; background: linear-gradient(145deg, rgba(15, 34, 29, .94), rgba(7, 18, 16, .96));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .18);
+}
+.registry-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }
+.registry-heading h2 { margin: 5px 0 0; font-size: clamp(24px, 3vw, 34px); }
+.registry-boundary { padding: 7px 10px; color: #f3cc87; border: 1px solid rgba(243, 204, 135, .28); border-radius: 999px; background: rgba(243, 204, 135, .07); font-size: 11px; white-space: nowrap; }
+.registry-intro { max-width: 900px; margin: 16px 0 20px; color: var(--muted); line-height: 1.75; }
+.registry-lifecycle { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 0 0 18px; list-style: none; }
+.registry-lifecycle li { position: relative; display: flex; align-items: center; gap: 9px; min-height: 64px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.025); }
+.registry-lifecycle li:not(:last-child)::after { content: "›"; position: absolute; right: -8px; z-index: 2; color: var(--accent); }
+.registry-lifecycle b { color: var(--accent); font: 11px ui-monospace, monospace; }
+.registry-lifecycle span, .registry-lifecycle small { display: block; }
+.registry-lifecycle span { color: var(--text); font-size: 12px; }
+.registry-lifecycle small { margin-top: 3px; color: var(--faint); font-size: 10px; }
+.registry-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.registry-grid article { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.12); }
+.registry-grid span, .registry-grid small { display: block; color: var(--muted); font-size: 11px; }
+.registry-grid strong { display: block; margin: 5px 0; color: var(--text); font-size: 25px; }
+.registry-gates { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.registry-gates span { padding: 5px 8px; color: #b7d9cf; border: 1px solid rgba(183, 217, 207, .16); border-radius: 999px; background: rgba(183, 217, 207, .04); font-size: 10px; }
+
 footer { display: flex; justify-content: space-between; padding: 25px 0 36px; color: var(--faint); border-top: 1px solid var(--line); font: 11px ui-monospace, monospace; }
 
 @media (max-width: 1180px) {
@@ -900,6 +923,8 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .model-catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .catalog-toolbar { grid-template-columns: 1fr 1fr; }
   .catalog-search-field { grid-column: 1 / -1; }
+  .registry-lifecycle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .registry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
@@ -949,6 +974,9 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .dialog-actions { grid-template-columns: 1fr 1fr; }
   .dialog-actions span { display: none; }
   .dialog-actions button { width: 100%; }
+  .registry-heading { display: grid; }
+  .registry-boundary { white-space: normal; }
+  .registry-lifecycle { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
@@ -980,6 +1008,9 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .outcome-actions button, .inline-actions button { flex: 1; }
   .principles { grid-template-columns: 1fr; }
   footer { flex-direction: column; gap: 8px; }
+  .policy-registry-section { padding: 17px; }
+  .registry-lifecycle, .registry-grid { grid-template-columns: 1fr; }
+  .registry-lifecycle li:not(:last-child)::after { content: "↓"; right: 50%; bottom: -10px; top: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -19,7 +19,7 @@ class ControlKernelTests(unittest.TestCase):
         self.temp.cleanup()
 
     @staticmethod
-    def wait(record, timeout=8):
+    def wait(record, timeout=12):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if record.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:

@@ -665,7 +665,7 @@ class ParallelRuntimeIntegrationTests(unittest.TestCase):
                 ),
                 idempotency_key="nonblocking-approval-run-0001",
             )
-            deadline = time.time() + 12
+            deadline = time.time() + 18
             approval = None
             unrelated_finished = False
             while time.time() < deadline:

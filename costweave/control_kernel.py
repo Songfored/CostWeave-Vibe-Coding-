@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.7.2."""
+"""Persistent command/event/projection owner for CostWeave v0.5.7.3."""
 
 from __future__ import annotations
 
@@ -77,6 +77,15 @@ from .production_shadow import (
     ShadowActualOutcome,
 )
 from .production_shadow_store import ProductionShadowStore
+from .policy_registry import (
+    PolicyManifest,
+    PolicyRollbackReceipt,
+    PolicyTransitionReceipt,
+    PromotionEvidence,
+    PromotionGateReport,
+    RegistryPolicyCard,
+)
+from .policy_registry_store import PolicyRegistryStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -120,6 +129,7 @@ class ControlKernel:
         self.policy_candidate_store = PolicyCandidateStore(self.store.path)
         self.offline_replay_store = OfflineReplayStore(self.store.path)
         self.production_shadow_store = ProductionShadowStore(self.store.path)
+        self.policy_registry_store = PolicyRegistryStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -380,6 +390,7 @@ class ControlKernel:
             **self.policy_candidate_store.counts(),
             **self.offline_replay_store.counts(),
             **self.production_shadow_store.counts(),
+            **self.policy_registry_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -860,6 +871,7 @@ class ControlKernel:
             **self.policy_candidate_store.counts(),
             **self.offline_replay_store.counts(),
             **self.production_shadow_store.counts(),
+            **self.policy_registry_store.counts(),
         }
 
     def record_predictor_artifact(
@@ -972,6 +984,40 @@ class ControlKernel:
         self, item: ProductionShadowAuditReport
     ) -> bool:
         return self.production_shadow_store.record_audit(item)
+
+    def record_registered_policy(
+        self, item: PolicyManifest, *, signing_key: bytes
+    ) -> bool:
+        return self.policy_registry_store.record_manifest(
+            item, signing_key=signing_key
+        )
+
+    def record_policy_promotion_evidence(
+        self, item: PromotionEvidence
+    ) -> bool:
+        return self.policy_registry_store.record_evidence(item)
+
+    def record_policy_promotion_gate(
+        self, item: PromotionGateReport
+    ) -> bool:
+        return self.policy_registry_store.record_gate(item)
+
+    def record_policy_transition(
+        self, item: PolicyTransitionReceipt
+    ) -> bool:
+        return self.policy_registry_store.record_transition(item)
+
+    def record_registry_policy_card(
+        self, item: RegistryPolicyCard
+    ) -> bool:
+        return self.policy_registry_store.record_card(item)
+
+    def record_policy_registry_rollback(
+        self,
+        freeze: PolicyTransitionReceipt,
+        item: PolicyRollbackReceipt,
+    ) -> bool:
+        return self.policy_registry_store.record_rollback(freeze, item)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(
@@ -1100,7 +1146,10 @@ class ControlKernel:
         idempotency_key: str,
         task_id: str | None = None,
     ) -> None:
-        with self._lock, record.lock:
+        # Always acquire the per-run lock before the kernel writer lock.
+        # Runtime event writers already hold record.lock; the opposite order
+        # here could deadlock with concurrent approval resolution.
+        with record.lock, self._lock:
             previous_revision = int(record.runtime_revision)
             next_revision = previous_revision + 1
             record.runtime_revision = next_revision

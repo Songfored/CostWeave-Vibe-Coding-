@@ -74,6 +74,13 @@ class WebUiRegressionTests(unittest.TestCase):
             "model-editor",
             "model-form",
             "import-dialog",
+            "policy-registry-section",
+            "policy-registry-title",
+            "registry-policy-count",
+            "registry-gate-count",
+            "registry-recovery-count",
+            "registry-route-change-count",
+            "registry-live",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -112,13 +119,15 @@ class WebUiRegressionTests(unittest.TestCase):
             "saveModel",
             "importCatalog",
             "resetCatalog",
+            "loadPolicyRegistry",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.7.2 Production-like Shadow", self.html)
+        self.assertIn("v0.5.7.3 Policy Registry", self.html)
+        self.assertIn("registry_active_is_runtime_active", self.js)
         self.assertIn("标签治理", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)

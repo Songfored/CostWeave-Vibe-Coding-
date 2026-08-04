@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.7.2 提供生产近似 Shadow、输入快照对齐、失败隔离与开销审计">
+  <meta name="description" content="CostWeave v0.5.7.3 提供签名策略注册表、证据晋级门、策略卡、冻结与注册表回滚">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.7.2">
+  <link rel="stylesheet" href="/styles.css?v=0.5.7.3">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.7.2 Production-like Shadow</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.7.3 Policy Registry</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -29,7 +29,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">PRODUCTION-LIKE SHADOW · V0.5.7.2</p>
+        <p class="eyebrow">POLICY REGISTRY &amp; PROMOTION GATE · V0.5.7.3</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -282,6 +282,40 @@
       <article><span>04</span><h3>证据升级</h3><p>低置信规划或中途失败会触发更高级候选模型重新接管。</p></article>
     </section>
 
+    <section id="policy-registry-section" class="policy-registry-section" aria-labelledby="policy-registry-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">SIGNED POLICY CONTROL PLANE</span>
+          <h2 id="policy-registry-title">策略注册表与晋级证据门</h2>
+        </div>
+        <span id="registry-boundary" class="registry-boundary">注册表状态不改变真实路由</span>
+      </div>
+      <p class="registry-intro">候选策略只有在签名、真实证据、独立评测和全部硬门槛同时通过后，才能沿受控状态机前进。任何失败都可立即冻结；回滚只重指向已审查版本，并留下不可变收据。</p>
+      <ol class="registry-lifecycle" aria-label="策略生命周期">
+        <li><b>01</b><span>Draft<small>已签名草案</small></span></li>
+        <li><b>02</b><span>Evaluated<small>离线证据通过</small></span></li>
+        <li><b>03</b><span>Shadow<small>旁路观测通过</small></span></li>
+        <li><b>04</b><span>Canary<small>需人工批准</small></span></li>
+        <li><b>05</b><span>Active<small>仅注册表指针</small></span></li>
+        <li><b>06</b><span>Frozen / Retired<small>失败关闭或退役</small></span></li>
+      </ol>
+      <div class="registry-grid">
+        <article><span>已注册策略</span><strong id="registry-policy-count">0</strong><small>版本与签名不可变</small></article>
+        <article><span>证据门报告</span><strong id="registry-gate-count">0</strong><small id="registry-gate-note">等待真实证据</small></article>
+        <article><span>冻结 / 回滚</span><strong id="registry-recovery-count">0</strong><small>原子记录，零执行副作用</small></article>
+        <article><span>真实路由变更</span><strong id="registry-route-change-count">0</strong><small>v0.5.7.3 强制为零</small></article>
+      </div>
+      <div class="registry-gates">
+        <span>成功率 95% CI ≥ −1pp</span>
+        <span>CPS 95% CI &gt; 15%</span>
+        <span>并行 P95 ≥ 15%</span>
+        <span>交接返工 &lt; 2%</span>
+        <span>硬违规 = 0</span>
+        <span>Activation ≥ 1,000 例</span>
+      </div>
+      <p id="registry-live" class="catalog-live" role="status" aria-live="polite"></p>
+    </section>
+
     <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
       <div class="catalog-heading">
         <div><span class="section-kicker">LIVE MODEL KNOWLEDGE BASE</span><h2 id="model-catalog-title">模型管理中心</h2></div>
@@ -378,7 +412,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.7.2 / Isolated Advice &amp; Overhead Audit</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.7.2" defer></script>
+  <footer><span>CostWeave v0.5.7.3 / Signed Registry &amp; Evidence-gated Promotion</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.7.3" defer></script>
 </body>
 </html>

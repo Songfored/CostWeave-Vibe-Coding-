@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.7.2", health["version"])
+        self.assertEqual("0.5.7.3", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.7.2", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.7.3", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -139,6 +139,12 @@ class ServerTests(unittest.TestCase):
             "v0.5.7.2", health["production_shadow"]["schema_version"]
         )
         self.assertFalse(health["production_shadow"]["routing_authority"])
+        self.assertEqual(
+            "v0.5.7.3", health["policy_registry"]["schema_version"]
+        )
+        self.assertFalse(
+            health["policy_registry"]["registry_active_is_runtime_active"]
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -272,6 +278,29 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             0,
             policy["runtime_counts"]["production_shadow_route_interventions"],
+        )
+
+    def test_policy_registry_exposes_hard_gates_without_runtime_authority(self):
+        status, policy = self.fetch_json("/api/v1/policies/registry")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.7.3", policy["schema_version"])
+        self.assertEqual(
+            ["draft", "evaluated", "shadow", "canary", "active", "frozen", "retired"],
+            policy["states"],
+        )
+        self.assertEqual(1_000, policy["minimum_cases"]["activation"])
+        self.assertEqual(
+            15.0,
+            policy["promotion_gates"][
+                "cps_improvement_ci95_lower_pct_strictly_greater_than"
+            ],
+        )
+        self.assertFalse(policy["registry_active_is_runtime_active"])
+        self.assertFalse(policy["routing_authority"])
+        self.assertIsNone(policy["current_registry_pointer"])
+        self.assertEqual(
+            0,
+            policy["runtime_counts"]["policy_registry_runtime_activations"],
         )
 
     def test_portfolio_policy_is_advisory_and_has_zero_interventions(self):

@@ -1,5 +1,23 @@
 # CostWeave
 
+## v0.5.7.3：Policy Registry & Promotion Gate
+
+本版把候选策略从散落的报告提升为可签名、可追踪、可冻结和可回滚的受控资产，但仍不让注册表接管真实路由：
+
+- `PolicyManifest` 使用 HMAC-SHA256 绑定策略名称/版本、候选/回放/Shadow 来源、代码、目标、约束、适用/禁止任务族、MultiPlanner 意图和回滚目标；密钥不入库；
+- 主路径固定为 `draft → evaluated → shadow → canary → active`，并支持从受控状态失败关闭到 `frozen/retired`；跳级、过期修订、缺少签名、门报告或批准都会拒绝；
+- evaluation/shadow/canary/activation 分别要求 E2/30、E3/30、E3/200、E4/1,000 个真实且独立案例；Shadow P95 开销原则门仍为端到端成本的 10%；
+- 正式 Canary/Activation 门包含最终成功率非劣界 `≥-1pp`、高风险成功率不下降、CPS 改善 95% CI 下界 `>15%`、并行 P95 改善 `≥15%`、Handoff 返工 `<2%` 和四类硬违规为 0；
+- MultiPlanner 只有在困难集成功率提高 `≥5pp` 或 Routing Regret 改善 `≥15%` 时才允许成为默认；
+- 策略卡展示覆盖范围、失败模式、阻断原因、下一阶段和回滚目标；一键回滚在同一事务冻结当前策略并重指向已审查版本；
+- migration 024 保存七类不可变策略治理记录；`GET /api/v1/policies/registry` 公开精确门槛、注册表指针和零运行时干预计数；
+- 页面新增策略生命周期和证据门面板，并保留手机、平板和桌面响应式布局。
+- 统一运行记录锁与内核写锁顺序，修复并行分支写事件与审批解析在极端时序下互相等待的问题。
+
+升级说明见 [`docs/V0.5.7.3_MIGRATION.md`](docs/V0.5.7.3_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.7.3.md`](docs/CHANGELOG-v0.5.7.3.md)。
+
+> 证据边界：当前仓库仍没有满足门槛的真实策略证据。专项测试只证明签名、状态机、门槛计算、持久化和回滚合同。注册表中的 `active` 不是生产激活，真实路线变化、运行时激活与运行时回滚计数均固定为 0；有界 Canary 属于 v0.5.7.4。
+
 ## v0.5.7.2：Production-like Shadow
 
 本版让候选策略在旁路中接收与基线完全相同的结构化任务特征、模型目录和容量快照，生成建议但不改变实际路线：
@@ -685,6 +703,7 @@ costweave/
 | `GET` | `/api/v1/portfolio/policy` | 读取 v0.5.6.4.3 全局 DAG 组合目标以及 v0.5.6.4.4 精确 Oracle、差分验收、敏感性和零路由权边界 |
 | `GET` | `/api/v1/replay/policy` | 读取 v0.5.7.1 冻结版本回放、多基线、近似 Oracle、后悔值、未知反事实和零干预边界 |
 | `GET` | `/api/v1/shadow/policy` | 读取 v0.5.7.2 输入快照对齐、容量新鲜度、失败隔离、覆盖率、开销门和零副作用边界 |
+| `GET` | `/api/v1/policies/registry` | 读取 v0.5.7.3 签名策略生命周期、分级晋级门、注册表指针、冻结/回滚和零运行时干预边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -707,7 +726,7 @@ costweave/
 python -B tests/run_isolated.py
 ```
 
-当前基线为 621 项自动化测试。v0.5.7.2 新增 26 项输入对齐、容量新鲜度、五策略旁路建议、缺失原因、失败隔离、建议/基线比较、开销门、30 例方向性门、不可变存储与公开 API 测试；此前测试继续作为离线回放、策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
+当前基线为 644 项自动化测试。v0.5.7.3 新增 23 项签名篡改、基线身份、严格边界值、分阶段证据、MultiPlanner 价值门、状态跳级、批准、策略卡、过期修订、一键冻结、原子回滚、不可变存储、公开 API 与页面集成测试；此前测试继续作为 Production-like Shadow、离线回放、策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
 
 测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
@@ -742,6 +761,7 @@ python -B tests/run_isolated.py
 - 策略候选版本绑定、IPS/SNIPS/DR 已知值、共同支持、有效样本、探索禁区、冻结门、策略卡和带墓碑删除
 - 历史版本冻结、多基线确定性回放、近似 Oracle、观测覆盖、未知反事实、Routing Regret、选择偏差与不可变证据链
 - Shadow 输入/目录/容量快照对齐、旁路建议、容量过期、失败隔离、覆盖/缺失原因、成本与时延开销和零副作用证据链
+- 签名策略版本、指定质量/CPS 基线、四级证据门、状态机、批准、策略卡、防并发过期、一键冻结、原子注册表回滚和零运行时激活
 
 ## 当前边界
 
@@ -750,7 +770,7 @@ python -B tests/run_isolated.py
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.7.2 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.7.3 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -761,7 +781,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.7.2 的工程合同已经完成到“生产近似旁路建议与开销审计”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，Shadow 只验证工程机制，不干预基线，不进行 Canary、生产策略晋级或商业效果声明。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.7.3 的工程合同已经完成到“签名策略注册、分级证据门、策略卡与注册表回滚”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在真实证据满足更高阶段门槛前，Shadow 只验证工程机制，注册表 `active` 也不等于生产激活；系统不进行运行时 Canary、生产路由切换或商业效果声明。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

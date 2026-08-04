@@ -1,4 +1,46 @@
-# CostWeave v0.5.7.2 架构说明
+# CostWeave v0.5.7.3 架构说明
+
+v0.5.7.3 在 Production-like Shadow 之后增加 Policy Registry Control Plane。它把候选策略、证据、门报告、状态转换、策略卡和回滚目标绑定到签名版本；注册表只管理“哪些资产已被审查”，不拥有运行时路由权。
+
+```text
+Signed PolicyManifest
+candidate / replay / shadow / code / objective / constraints / scope
+                    |
+                    v
+          Stage-specific Evidence Gate
+ real origin / independent / cases / quality / CPS / latency / risk
+ calibration / drift / privacy / hard violations / MultiPlanner value
+                    |
+           blocked  |  eligible
+             +------+- - - - - - - - -+
+             |                        |
+             v                        v
+        Policy Card       Immutable State Transition
+ reasons / limits         draft → evaluated → shadow
+ next evidence stage              → canary → active
+             |                        |
+             +------------+-----------+
+                          |
+                  anomaly or regression
+                          |
+                          v
+              atomic freeze + registry rollback
+                          |
+                          v
+ runtime_route_changed=false / execution_side_effect_count=0
+```
+
+每个策略版本的内容哈希由 HMAC-SHA256 签名。密钥不入库；注册时重新验签。状态由初始 `draft` 与不可变事件推导，转换包含连续修订号并在事务中防止过期并发写入。`canary`、`active` 和 `retired` 还要求显式批准标识。
+
+证据门按阶段逐步收紧：evaluation 为 E2/30，shadow 为 E3/30，canary 为 E3/200，activation 为 E4/1,000。正式门逐项检查成功率非劣、CPS 置信下界、并行 P95、Handoff 返工、高风险成功率、校准/漂移/隐私和硬违规；不以一个可相互抵消的总分替代硬门。
+
+一键回滚是注册表事务：先冻结当前版本，再把注册表指针指向其签名清单中指定的已审查版本。该动作不会切换正在运行或新任务的真实策略；真正的运行时 Canary 与回滚属于 v0.5.7.4。
+
+migration 024 保存策略、证据、门报告、转换、卡片、回滚和指针事件。所有表不可修改或删除；数据库约束将运行路线变化、运行时激活/回滚和执行副作用固定为零。
+
+---
+
+## v0.5.7.2 Production-like Shadow Plane
 
 v0.5.7.2 在离线回放之后增加 Production-like Shadow Plane。它与基线共享相同的结构化任务特征、目录快照和容量快照，只计算建议及其预测差值；实际路线已经冻结，Shadow 无法修改任务、Prompt、工具、预算、执行顺序或外部副作用。
 

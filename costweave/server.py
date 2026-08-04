@@ -68,6 +68,7 @@ from .policy_candidate import (
 )
 from .offline_replay import public_offline_replay_policy
 from .production_shadow import public_production_shadow_policy
+from .policy_registry import public_policy_registry_policy
 
 
 MANAGER: RunManager | None = None
@@ -94,7 +95,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.7.2"
+    server_version = "CostWeave/0.5.7.3"
 
     def setup(self) -> None:
         super().setup()
@@ -172,8 +173,39 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "policy_candidates": public_policy_candidate_policy(),
                 "offline_replay": public_offline_replay_policy(),
                 "production_shadow": public_production_shadow_policy(),
+                "policy_registry": public_policy_registry_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/policies/registry":
+            counts = (
+                self.manager.control_kernel.policy_registry_store.counts()
+                if self.manager.control_kernel is not None
+                else {
+                    "policy_registry_policies": 0,
+                    "policy_registry_evidence": 0,
+                    "policy_registry_gate_reports": 0,
+                    "policy_registry_transitions": 0,
+                    "policy_registry_cards": 0,
+                    "policy_registry_rollbacks": 0,
+                    "policy_registry_pointer_events": 0,
+                    "policy_registry_eligible_gates": 0,
+                    "policy_registry_runtime_route_changes": 0,
+                    "policy_registry_runtime_activations": 0,
+                    "policy_registry_runtime_rollbacks": 0,
+                    "policy_registry_execution_side_effects": 0,
+                }
+            )
+            pointer = (
+                self.manager.control_kernel.policy_registry_store.current_registry_pointer()
+                if self.manager.control_kernel is not None
+                else None
+            )
+            self._json({
+                **public_policy_registry_policy(),
+                "current_registry_pointer": pointer,
+                "runtime_counts": counts,
             })
             return
         if path == "/api/v1/shadow/policy":
@@ -1434,7 +1466,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.7.2 production-like shadow prototype"
+        description="Run the CostWeave v0.5.7.3 policy registry prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
