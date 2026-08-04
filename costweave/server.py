@@ -67,6 +67,7 @@ from .policy_candidate import (
     public_policy_candidate_policy,
 )
 from .offline_replay import public_offline_replay_policy
+from .production_shadow import public_production_shadow_policy
 
 
 MANAGER: RunManager | None = None
@@ -93,7 +94,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.7.1"
+    server_version = "CostWeave/0.5.7.2"
 
     def setup(self) -> None:
         super().setup()
@@ -170,8 +171,31 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "portfolio_validation": public_portfolio_validation_policy(),
                 "policy_candidates": public_policy_candidate_policy(),
                 "offline_replay": public_offline_replay_policy(),
+                "production_shadow": public_production_shadow_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/shadow/policy":
+            counts = (
+                self.manager.control_kernel.production_shadow_store.counts()
+                if self.manager.control_kernel is not None
+                else {
+                    "production_shadow_inputs": 0,
+                    "production_shadow_decisions": 0,
+                    "production_shadow_failures": 0,
+                    "production_shadow_outcomes": 0,
+                    "production_shadow_comparisons": 0,
+                    "production_shadow_audit_reports": 0,
+                    "production_shadow_external_calls": 0,
+                    "production_shadow_execution_side_effects": 0,
+                    "production_shadow_route_interventions": 0,
+                    "production_shadow_production_promotions": 0,
+                }
+            )
+            self._json({
+                **public_production_shadow_policy(),
+                "runtime_counts": counts,
             })
             return
         if path == "/api/v1/replay/policy":
@@ -1410,7 +1434,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.7.1 offline replay prototype"
+        description="Run the CostWeave v0.5.7.2 production-like shadow prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

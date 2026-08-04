@@ -1,4 +1,50 @@
-# CostWeave v0.5.7.1 架构说明
+# CostWeave v0.5.7.2 架构说明
+
+v0.5.7.2 在离线回放之后增加 Production-like Shadow Plane。它与基线共享相同的结构化任务特征、目录快照和容量快照，只计算建议及其预测差值；实际路线已经冻结，Shadow 无法修改任务、Prompt、工具、预算、执行顺序或外部副作用。
+
+```text
+Authoritative Baseline Input
+task features / catalog / capacity / actual route / E2E estimate
+                    |
+                    | immutable shared hashes
+                    v
+          ProductionShadowInput
+                    |
+      stale / empty / infeasible / budget / deadline gates
+                    |
+        +-----------+-----------+
+        |                       |
+        v                       v
+ advisory route suggestion    missing reason
+ quality / cost / latency     or isolated failure receipt
+ capacity / expected loss           |
+        |                       |
+        +-----------+-----------+
+                    v
+        baseline_execution_continues=true
+        actual_route_changed=false
+        execution_side_effect_count=0
+                    |
+                    v
+             Actual baseline Outcome
+                    |
+                    v
+       Comparison + Batch Shadow Audit
+ coverage / missing / P50-P95 latency / E2E cost overhead
+                    |
+                    v
+advisory_only=true / routing_authority=false / promotion=false
+```
+
+当建议路线与实际基线路线相同，系统可以校验该路线预测误差；当两者不同时，建议路线没有实际 Outcome，必须保持 `counterfactual_outcome_known=false`。系统只展示预测差值，不生成节省声明。
+
+成本开销使用 Shadow 自身计算成本除以基线端到端估计成本，而不是用宽松预算作分母；批量 P95 不超过 10% 才通过开销原则门。容量快照必须与基线哈希一致且未超过新鲜度上限。至少 30 个 E2+ 真实、独立、完整比较案例才允许形成方向性报告。
+
+migration 023 保存输入、决定、失败、实际 Outcome、比较和批量审计。决定与失败互斥，所有表不可修改或删除；数据库约束把外部调用、执行副作用、实际路线变化、路由权、生产晋级和商业声明固定为零。
+
+---
+
+以下为 v0.5.7.1 的 Offline Replay Plane，它继续负责进入 Shadow 前的历史回放与偏差检查。
 
 v0.5.7.1 增加 Offline Replay Plane。它冻结产生历史决定所需的全部版本输入，用多个只读策略重新排序同一候选集，并把选中路线与已观测结果对照。未观测路线始终是未知；所谓近似 Oracle 只是在允许多路线比较的任务子集中，从已执行、已验收路线中选择最低实际总损失。
 

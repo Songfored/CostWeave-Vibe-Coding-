@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.7.1."""
+"""Persistent command/event/projection owner for CostWeave v0.5.7.2."""
 
 from __future__ import annotations
 
@@ -68,6 +68,15 @@ from .offline_replay import (
     ReplayVersionSnapshot,
 )
 from .offline_replay_store import OfflineReplayStore
+from .production_shadow import (
+    ProductionShadowAuditReport,
+    ProductionShadowComparison,
+    ProductionShadowDecision,
+    ProductionShadowFailureReceipt,
+    ProductionShadowInput,
+    ShadowActualOutcome,
+)
+from .production_shadow_store import ProductionShadowStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -110,6 +119,7 @@ class ControlKernel:
         )
         self.policy_candidate_store = PolicyCandidateStore(self.store.path)
         self.offline_replay_store = OfflineReplayStore(self.store.path)
+        self.production_shadow_store = ProductionShadowStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -369,6 +379,7 @@ class ControlKernel:
             **self.portfolio_validation_store.counts(),
             **self.policy_candidate_store.counts(),
             **self.offline_replay_store.counts(),
+            **self.production_shadow_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -848,6 +859,7 @@ class ControlKernel:
             **self.predictor_evaluation_store.counts(),
             **self.policy_candidate_store.counts(),
             **self.offline_replay_store.counts(),
+            **self.production_shadow_store.counts(),
         }
 
     def record_predictor_artifact(
@@ -930,6 +942,36 @@ class ControlKernel:
 
     def record_replay_benchmark(self, report: ReplayBenchmarkReport) -> bool:
         return self.offline_replay_store.record_benchmark(report)
+
+    def record_production_shadow_input(
+        self, item: ProductionShadowInput
+    ) -> bool:
+        return self.production_shadow_store.record_input(item)
+
+    def record_production_shadow_decision(
+        self, item: ProductionShadowDecision
+    ) -> bool:
+        return self.production_shadow_store.record_decision(item)
+
+    def record_production_shadow_failure(
+        self, item: ProductionShadowFailureReceipt
+    ) -> bool:
+        return self.production_shadow_store.record_failure(item)
+
+    def record_production_shadow_outcome(
+        self, item: ShadowActualOutcome
+    ) -> bool:
+        return self.production_shadow_store.record_outcome(item)
+
+    def record_production_shadow_comparison(
+        self, item: ProductionShadowComparison
+    ) -> bool:
+        return self.production_shadow_store.record_comparison(item)
+
+    def record_production_shadow_audit(
+        self, item: ProductionShadowAuditReport
+    ) -> bool:
+        return self.production_shadow_store.record_audit(item)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

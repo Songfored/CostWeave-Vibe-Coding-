@@ -1,5 +1,22 @@
 # CostWeave
 
+## v0.5.7.2：Production-like Shadow
+
+本版让候选策略在旁路中接收与基线完全相同的结构化任务特征、模型目录和容量快照，生成建议但不改变实际路线：
+
+- `ProductionShadowInput` 冻结匿名任务特征、目录、容量、实际路线、基线质量/成本/时延预测和端到端估计；原始 Prompt、用户/项目标识及密钥禁止进入 Shadow 特征；
+- 五种候选策略只在共享容量快照、硬约束和容量准入全部通过后生成建议；容量过期、无候选、无可行候选、开销超预算和超时均形成明确缺失原因；
+- Shadow 建议同时记录质量下界、预期总成本、P95 时延、容量资格及相对基线差值，`applied_to_actual_route` 永远为 `false`；
+- 失败隔离边界把校验失败和内部失败转换为不含异常正文的回执，基线继续执行，实际路线、外部调用和执行副作用计数均保持为 0；
+- 实际 Outcome 只用于校验基线路线；建议路线与实际路线不同时，反事实结果保持 `unknown`，不生成虚构节省；
+- 批量审计报告覆盖率、比较覆盖率、缺失原因、Shadow 延迟 P50/P95、成本开销 P50/P95 和延迟开销 P95；Shadow 成本开销 P95 原则门为端到端估计成本的 10%；
+- 至少 30 个 E2+ 真实、独立且完整比较案例才允许形成方向性 Shadow 证据；即使通过也没有生产晋级权；
+- migration 023 保存不可变输入、决定、失败、Outcome、比较和审计报告；`GET /api/v1/shadow/policy` 公开隔离、开销和证据边界。
+
+升级说明见 [`docs/V0.5.7.2_MIGRATION.md`](docs/V0.5.7.2_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.7.2.md`](docs/CHANGELOG-v0.5.7.2.md)。
+
+> 证据边界：当前仍没有真实生产近似负载、实时容量遥测或 30 个真实 Shadow 案例。专项测试只证明合同、计算、缺失状态和失败隔离，不证明现实开销低于 10% 或候选策略优于基线。
+
 ## v0.5.7.1：Offline Replay & Approximate Oracle
 
 本版把“策略看起来更聪明”改造成可以复查的历史回放问题，同时严格保留未知反事实：
@@ -667,6 +684,7 @@ costweave/
 | `GET` | `/api/v1/predictors/policy` | 读取数据准入、离线评估以及 v0.5.6.5 策略候选、IPS/SNIPS/DR、探索禁区、冻结门和零晋级边界 |
 | `GET` | `/api/v1/portfolio/policy` | 读取 v0.5.6.4.3 全局 DAG 组合目标以及 v0.5.6.4.4 精确 Oracle、差分验收、敏感性和零路由权边界 |
 | `GET` | `/api/v1/replay/policy` | 读取 v0.5.7.1 冻结版本回放、多基线、近似 Oracle、后悔值、未知反事实和零干预边界 |
+| `GET` | `/api/v1/shadow/policy` | 读取 v0.5.7.2 输入快照对齐、容量新鲜度、失败隔离、覆盖率、开销门和零副作用边界 |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -689,7 +707,7 @@ costweave/
 python -B tests/run_isolated.py
 ```
 
-当前基线为 595 项自动化测试。v0.5.7.1 新增 23 项冻结版本、多基线回放、近似 Oracle、Routing Regret、未知反事实、偏差诊断、30 例门槛、不可变存储与公开 API 测试；此前测试继续作为策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
+当前基线为 621 项自动化测试。v0.5.7.2 新增 26 项输入对齐、容量新鲜度、五策略旁路建议、缺失原因、失败隔离、建议/基线比较、开销门、30 例方向性门、不可变存储与公开 API 测试；此前测试继续作为离线回放、策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全、API 与页面回归门。
 
 测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
@@ -723,6 +741,7 @@ python -B tests/run_isolated.py
 - 小图精确最优/不可行证明、Beam 差分 Regret、超界失败关闭和离散参数敏感性
 - 策略候选版本绑定、IPS/SNIPS/DR 已知值、共同支持、有效样本、探索禁区、冻结门、策略卡和带墓碑删除
 - 历史版本冻结、多基线确定性回放、近似 Oracle、观测覆盖、未知反事实、Routing Regret、选择偏差与不可变证据链
+- Shadow 输入/目录/容量快照对齐、旁路建议、容量过期、失败隔离、覆盖/缺失原因、成本与时延开销和零副作用证据链
 
 ## 当前边界
 
@@ -731,7 +750,7 @@ python -B tests/run_isolated.py
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.7.1 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.7.2 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -742,7 +761,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.7.1 的工程合同已经完成到“确定性离线回放与近似 Oracle”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，回放结果只验证工程机制，不进行 Shadow 干预、Canary、生产策略晋级或商业效果声明。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.7.2 的工程合同已经完成到“生产近似旁路建议与开销审计”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。在该证据门通过前，Shadow 只验证工程机制，不干预基线，不进行 Canary、生产策略晋级或商业效果声明。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

@@ -407,8 +407,8 @@ class PolicyCandidatePersistenceTests(unittest.TestCase):
             connection.close()
 
     def test_migration_and_empty_registry(self):
-        self.assertEqual("v5.7.1", self.health["runtime_schema"])
-        self.assertEqual(22, self.health["migrations"])
+        self.assertEqual("v5.7.2", self.health["runtime_schema"])
+        self.assertEqual(23, self.health["migrations"])
         counts = self.store.counts()
         self.assertEqual(0, counts["policy_candidates"])
         self.assertEqual(0, counts["policy_production_promotions"])

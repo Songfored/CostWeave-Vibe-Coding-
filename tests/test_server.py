@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.7.1", health["version"])
+        self.assertEqual("0.5.7.2", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.7.1", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.7.2", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -135,6 +135,10 @@ class ServerTests(unittest.TestCase):
             "v0.5.7.1", health["offline_replay"]["schema_version"]
         )
         self.assertFalse(health["offline_replay"]["routing_authority"])
+        self.assertEqual(
+            "v0.5.7.2", health["production_shadow"]["schema_version"]
+        )
+        self.assertFalse(health["production_shadow"]["routing_authority"])
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -243,6 +247,31 @@ class ServerTests(unittest.TestCase):
         )
         self.assertEqual(
             0, policy["runtime_counts"]["offline_replay_route_interventions"]
+        )
+
+    def test_production_shadow_policy_is_isolated_and_auditable(self):
+        status, policy = self.fetch_json("/api/v1/shadow/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.7.2", policy["schema_version"])
+        self.assertTrue(policy["same_task_features_required"])
+        self.assertTrue(policy["same_catalog_snapshot_required"])
+        self.assertTrue(policy["same_capacity_snapshot_required"])
+        self.assertTrue(
+            policy["failure_isolation"]["baseline_execution_continues"]
+        )
+        self.assertEqual(
+            0.10, policy["overhead"]["maximum_end_to_end_cost_ratio"]
+        )
+        self.assertEqual("unknown", policy["counterfactual_outcome_default"])
+        self.assertFalse(policy["routing_authority"])
+        self.assertFalse(policy["policy_promotion_allowed"])
+        self.assertEqual(
+            0,
+            policy["runtime_counts"]["production_shadow_execution_side_effects"],
+        )
+        self.assertEqual(
+            0,
+            policy["runtime_counts"]["production_shadow_route_interventions"],
         )
 
     def test_portfolio_policy_is_advisory_and_has_zero_interventions(self):
