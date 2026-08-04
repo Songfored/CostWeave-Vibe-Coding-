@@ -58,11 +58,14 @@ from .experimental_calls import (
 from .shadow_router import SHADOW_POLICY_REVISION, SHADOW_SCHEMA_VERSION
 from .predictor_admission import public_predictor_policy
 from .predictor_evaluation import (
-    PREDICTOR_EVALUATION_SCHEMA_VERSION,
     public_evaluation_policy,
 )
 from .portfolio_audit import public_portfolio_audit_policy
 from .portfolio_validation import public_portfolio_validation_policy
+from .policy_candidate import (
+    POLICY_CANDIDATE_SCHEMA_VERSION,
+    public_policy_candidate_policy,
+)
 
 
 MANAGER: RunManager | None = None
@@ -89,7 +92,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.4.4"
+    server_version = "CostWeave/0.5.6.5"
 
     def setup(self) -> None:
         super().setup()
@@ -164,6 +167,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "predictor_evaluation": public_evaluation_policy(),
                 "portfolio_audit": public_portfolio_audit_policy(),
                 "portfolio_validation": public_portfolio_validation_policy(),
+                "policy_candidates": public_policy_candidate_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
             })
@@ -211,9 +215,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 }
             )
             self._json({
-                "schema_version": PREDICTOR_EVALUATION_SCHEMA_VERSION,
+                "schema_version": POLICY_CANDIDATE_SCHEMA_VERSION,
                 "admission": public_predictor_policy(),
                 "offline_evaluation": public_evaluation_policy(),
+                "safe_policy_candidates": public_policy_candidate_policy(),
                 "current_state": "frozen_no_real_evidence",
                 "routing_authority": "legacy-resource-optimizer",
                 "policy_promotion_enabled": False,
@@ -1381,7 +1386,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.4.4 exact portfolio validation prototype"
+        description="Run the CostWeave v0.5.6.5 offline policy candidate prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

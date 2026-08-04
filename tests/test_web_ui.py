@@ -118,7 +118,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.6.4.4 Exact Oracle &amp; Sensitivity", self.html)
+        self.assertIn("v0.5.6.5 Offline Policy Safety", self.html)
         self.assertIn("标签治理", self.html)
         self.assertIn("端到端成本", self.js)
         self.assertIn("预期返工", self.js)

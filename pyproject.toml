@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.5.6.4.4"
+version = "0.5.6.5"
 description = "Cross-provider expected-value control plane for cost-aware multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"

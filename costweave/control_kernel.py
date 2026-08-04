@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.4.4."""
+"""Persistent command/event/projection owner for CostWeave v0.5.6.5."""
 
 from __future__ import annotations
 
@@ -52,6 +52,13 @@ from .portfolio_validation import (
     PortfolioSensitivityReport,
 )
 from .portfolio_validation_store import PortfolioValidationStore
+from .policy_candidate import (
+    OfflineBanditEvaluation,
+    PolicyCandidate,
+    PolicyCard,
+    PolicyFreezeAssessment,
+)
+from .policy_candidate_store import PolicyCandidateStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -92,6 +99,7 @@ class ControlKernel:
         self.portfolio_validation_store = PortfolioValidationStore(
             self.store.path
         )
+        self.policy_candidate_store = PolicyCandidateStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -349,6 +357,7 @@ class ControlKernel:
             **self.predictor_evaluation_store.counts(),
             **self.portfolio_audit_store.counts(),
             **self.portfolio_validation_store.counts(),
+            **self.policy_candidate_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -826,6 +835,7 @@ class ControlKernel:
         return {
             **self.predictor_admission_store.counts(),
             **self.predictor_evaluation_store.counts(),
+            **self.policy_candidate_store.counts(),
         }
 
     def record_predictor_artifact(
@@ -865,6 +875,29 @@ class ControlKernel:
         self, report: PortfolioSensitivityReport
     ) -> bool:
         return self.portfolio_validation_store.record_sensitivity(report)
+
+    def record_policy_candidate(self, candidate: PolicyCandidate) -> bool:
+        return self.policy_candidate_store.record_candidate(candidate)
+
+    def record_offline_bandit_evaluation(
+        self, report: OfflineBanditEvaluation
+    ) -> bool:
+        return self.policy_candidate_store.record_evaluation(report)
+
+    def record_policy_freeze(
+        self, report: PolicyFreezeAssessment
+    ) -> bool:
+        return self.policy_candidate_store.record_freeze(report)
+
+    def record_policy_card(self, card: PolicyCard) -> bool:
+        return self.policy_candidate_store.record_card(card)
+
+    def delete_policy_candidate(
+        self, candidate_id: str, *, reason_code: str
+    ) -> bool:
+        return self.policy_candidate_store.delete_candidate(
+            candidate_id, reason_code=reason_code
+        )
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

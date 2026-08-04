@@ -1,4 +1,46 @@
-# CostWeave v0.5.6.4.4 架构说明
+# CostWeave v0.5.6.5 架构说明
+
+v0.5.6.5 在冻结预测器和全局组合审计之后增加 Safe Policy Candidate Plane。只有通过 v0.5.6.4.2 离线验收的预测器才能形成候选；候选只允许接受离线日志评估，不获得实际路由、自动晋级或商业声明权。
+
+```text
+Passing Predictor Artifact + Evaluation
+                    |
+                    v
+          Immutable PolicyCandidate
+ data / schemas / code / objective / constraints / scope / rollback
+                    |
+                    v
+       Logged Contextual Bandit Observations
+ logging propensity + candidate propensity + reward model + outcome
+                    |
+                    v
+        Common Support & Safety Gate
+ scope / E2+ real origin / ESS >= 30 / max weight <= 20
+ high-risk + irreversible + permission-sensitive exploration = 0
+                    |
+                    v
+             IPS / SNIPS / DR
+       value + delta + interval + diagnostics
+                    |
+                    v
+            Policy Freeze Gate
+ PSI / ECE / family success / cost P95 / latency P95 / quality / privacy
+                    |
+                    v
+                Policy Card
+ strengths / failures / coverage / unsupported / rollback
+                    |
+                    v
+ advisory_only=true / route_intervention=0 / auto_promotion=0
+```
+
+完整动作分布用于证明共同支持：候选给某动作非零概率，而日志策略在同一上下文对该动作概率为零时，IPS/SNIPS/DR 结论被拒绝。有效样本量使用重要性权重计算；权重超过 20 或 ESS 低于 30 同样失败关闭。E2 最多形成离线方向信号，E3+ 才可能进入 v0.5.7 的人工 Shadow 审查。
+
+migration 021 保存策略候选、反事实报告、冻结评估和策略卡。记录不可原地修改；删除必须先写入不可变墓碑，再级联清除候选负载。所有表的权限字段固定为零，旧的 `legacy-resource-optimizer` 仍是回滚和正式路由目标。
+
+---
+
+以下为 v0.5.6.4.4 的 Exact Validation Plane，它继续负责检查小型组合搜索质量。
 
 v0.5.6.4.4 在 Global DAG Portfolio Audit 旁边加入独立的 Exact Validation Plane。生产候选仍由有界 Beam Search 生成；对于足够小的同一问题，精确 Oracle 穷举全部离散组合并复用完全相同的损失函数和硬约束，然后生成差分验收报告。
 

@@ -315,8 +315,8 @@ class PredictorEvaluationPersistenceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_creates_empty_frozen_registry(self):
-        self.assertEqual("v5.6.4.4", self.health["runtime_schema"])
-        self.assertEqual(20, self.health["migrations"])
+        self.assertEqual("v5.6.5", self.health["runtime_schema"])
+        self.assertEqual(21, self.health["migrations"])
         counts = self.store.counts()
         self.assertEqual(0, counts["predictor_candidate_artifacts"])
         self.assertEqual(0, counts["predictor_shadow_candidates"])
