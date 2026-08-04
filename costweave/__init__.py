@@ -1,3 +1,3 @@
 """CostWeave: a local-first orchestration runtime prototype."""
 
-__version__ = "0.5.6.5"
+__version__ = "0.5.7.1"

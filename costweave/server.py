@@ -66,6 +66,7 @@ from .policy_candidate import (
     POLICY_CANDIDATE_SCHEMA_VERSION,
     public_policy_candidate_policy,
 )
+from .offline_replay import public_offline_replay_policy
 
 
 MANAGER: RunManager | None = None
@@ -92,7 +93,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.6.5"
+    server_version = "CostWeave/0.5.7.1"
 
     def setup(self) -> None:
         super().setup()
@@ -168,8 +169,31 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "portfolio_audit": public_portfolio_audit_policy(),
                 "portfolio_validation": public_portfolio_validation_policy(),
                 "policy_candidates": public_policy_candidate_policy(),
+                "offline_replay": public_offline_replay_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
+            })
+            return
+        if path == "/api/v1/replay/policy":
+            counts = (
+                self.manager.control_kernel.offline_replay_store.counts()
+                if self.manager.control_kernel is not None
+                else {
+                    "replay_version_snapshots": 0,
+                    "offline_replay_cases": 0,
+                    "observed_route_outcomes": 0,
+                    "offline_replay_results": 0,
+                    "approximate_oracle_reports": 0,
+                    "replay_benchmark_reports": 0,
+                    "offline_replay_external_calls": 0,
+                    "offline_replay_route_interventions": 0,
+                    "offline_replay_global_optimality_claims": 0,
+                    "offline_replay_production_promotions": 0,
+                }
+            )
+            self._json({
+                **public_offline_replay_policy(),
+                "runtime_counts": counts,
             })
             return
         if path == "/api/v1/portfolio/policy":
@@ -1386,7 +1410,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.6.5 offline policy candidate prototype"
+        description="Run the CostWeave v0.5.7.1 offline replay prototype"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

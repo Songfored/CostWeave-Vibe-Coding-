@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.6.5", health["version"])
+        self.assertEqual("0.5.7.1", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.6.5", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.7.1", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -131,6 +131,10 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(
             health["policy_candidates"]["automatic_promotion_enabled"]
         )
+        self.assertEqual(
+            "v0.5.7.1", health["offline_replay"]["schema_version"]
+        )
+        self.assertFalse(health["offline_replay"]["routing_authority"])
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
@@ -220,6 +224,25 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             0,
             policy["runtime_counts"]["policy_candidate_route_interventions"],
+        )
+
+    def test_offline_replay_policy_marks_unknowns_and_zero_authority(self):
+        status, policy = self.fetch_json("/api/v1/replay/policy")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.7.1", policy["schema_version"])
+        self.assertTrue(policy["historical_version_snapshot_required"])
+        self.assertTrue(policy["multiple_baselines_required"])
+        self.assertEqual(
+            "unknown",
+            policy["approximate_oracle"]["unobserved_counterfactual_state"],
+        )
+        self.assertFalse(policy["routing_authority"])
+        self.assertFalse(policy["policy_promotion_allowed"])
+        self.assertEqual(
+            0, policy["runtime_counts"]["offline_replay_external_calls"]
+        )
+        self.assertEqual(
+            0, policy["runtime_counts"]["offline_replay_route_interventions"]
         )
 
     def test_portfolio_policy_is_advisory_and_has_zero_interventions(self):

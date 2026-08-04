@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.6.5."""
+"""Persistent command/event/projection owner for CostWeave v0.5.7.1."""
 
 from __future__ import annotations
 
@@ -59,6 +59,15 @@ from .policy_candidate import (
     PolicyFreezeAssessment,
 )
 from .policy_candidate_store import PolicyCandidateStore
+from .offline_replay import (
+    ApproximateOracleReport,
+    ObservedRouteOutcome,
+    OfflineReplayResult,
+    ReplayBenchmarkReport,
+    ReplayCase,
+    ReplayVersionSnapshot,
+)
+from .offline_replay_store import OfflineReplayStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -100,6 +109,7 @@ class ControlKernel:
             self.store.path
         )
         self.policy_candidate_store = PolicyCandidateStore(self.store.path)
+        self.offline_replay_store = OfflineReplayStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -358,6 +368,7 @@ class ControlKernel:
             **self.portfolio_audit_store.counts(),
             **self.portfolio_validation_store.counts(),
             **self.policy_candidate_store.counts(),
+            **self.offline_replay_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -836,6 +847,7 @@ class ControlKernel:
             **self.predictor_admission_store.counts(),
             **self.predictor_evaluation_store.counts(),
             **self.policy_candidate_store.counts(),
+            **self.offline_replay_store.counts(),
         }
 
     def record_predictor_artifact(
@@ -898,6 +910,26 @@ class ControlKernel:
         return self.policy_candidate_store.delete_candidate(
             candidate_id, reason_code=reason_code
         )
+
+    def record_replay_snapshot(self, snapshot: ReplayVersionSnapshot) -> bool:
+        return self.offline_replay_store.record_snapshot(snapshot)
+
+    def record_replay_case(self, case: ReplayCase) -> bool:
+        return self.offline_replay_store.record_case(case)
+
+    def record_route_outcome(self, outcome: ObservedRouteOutcome) -> bool:
+        return self.offline_replay_store.record_outcome(outcome)
+
+    def record_offline_replay(self, replay: OfflineReplayResult) -> bool:
+        return self.offline_replay_store.record_replay(replay)
+
+    def record_approximate_oracle(
+        self, report: ApproximateOracleReport
+    ) -> bool:
+        return self.offline_replay_store.record_oracle(report)
+
+    def record_replay_benchmark(self, report: ReplayBenchmarkReport) -> bool:
+        return self.offline_replay_store.record_benchmark(report)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

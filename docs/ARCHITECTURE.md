@@ -1,4 +1,47 @@
-# CostWeave v0.5.6.5 架构说明
+# CostWeave v0.5.7.1 架构说明
+
+v0.5.7.1 增加 Offline Replay Plane。它冻结产生历史决定所需的全部版本输入，用多个只读策略重新排序同一候选集，并把选中路线与已观测结果对照。未观测路线始终是未知；所谓近似 Oracle 只是在允许多路线比较的任务子集中，从已执行、已验收路线中选择最低实际总损失。
+
+```text
+Historical Version Snapshot
+policy / features / contracts / catalog / prompt / tools / capacity
+                    |
+                    v
+             Immutable Replay Case
+task scope / risk / candidates / constraints / recorded route
+                    |
+        +-----------+-----------+
+        |           |           |
+        v           v           v
+ expected loss   direct cost   frozen/recorded baselines
+        |           |           |
+        +-----------+-----------+
+                    v
+          Deterministic Replay Results
+                    |
+        +-----------+-----------+
+        |                       |
+        v                       v
+Observed accepted outcomes    Unknown counterfactuals
+        |                       |
+        +-----------+-----------+
+                    v
+          Approximate Oracle + Routing Regret
+                    |
+                    v
+coverage / selected-only bias / propensity / evidence diagnostics
+                    |
+                    v
+advisory_only=true / external_calls=0 / route_intervention=0
+```
+
+30 例门槛不是用例数量达到就自动解锁：每个参与比较的策略都必须有至少 30 个方向性 Regret 观测，全部结果须为 E2+ 真实来源、独立验收、完整 propensity，所有实选反事实均已观测，且不存在只记录历史实选路线的偏差。即使通过，报告仍不获得生产晋级或商业声明权。
+
+migration 022 保存快照、回放案例、路线结果、回放决定、近似 Oracle 与 Benchmark 报告。所有记录不可修改或删除；数据库约束把外部调用、路由干预、全局最优声明、生产晋级和商业声明固定为零。
+
+---
+
+以下为 v0.5.6.5 的 Safe Policy Candidate Plane，它仍是回放比较的候选来源之一。
 
 v0.5.6.5 在冻结预测器和全局组合审计之后增加 Safe Policy Candidate Plane。只有通过 v0.5.6.4.2 离线验收的预测器才能形成候选；候选只允许接受离线日志评估，不获得实际路由、自动晋级或商业声明权。
 
