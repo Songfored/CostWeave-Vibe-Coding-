@@ -1,4 +1,39 @@
-# CostWeave v0.5.7.4 架构说明
+# CostWeave v0.5.8.1 架构说明
+
+v0.5.8.1 在既有控制面之上增加只读的 Unified Evidence Console。它不改变 Planner、路由、执行、Canary 或回滚决定，而是把分散的数据转换成统一证据合同，并拒绝用预测、模拟或缺失值替代真实效果。
+
+```text
+Run/EventLog ───────┐
+Planning/Placement ─┤
+Ledger/Capacity ────┤
+Outcome/Evaluation ─┼──> Evidence Assembler
+Shadow/Registry ────┤       actual / predicted / simulated / missing
+Canary/Rollback ────┘       E0..E5 + source + version + n + freshness
+                                |
+                     +----------+----------+
+                     |                     |
+             Global / per-run view   Business claim gates
+                     |               quality / CPS / P95
+                     |                     |
+                     +----------+----------+
+                                v
+                    bounded redacted export package
+                       canonical SHA-256 receipt
+                                |
+                    append-only migration 026 store
+```
+
+证据类别是互斥语义，不是视觉标签：`actual` 只表示确实由当前控制面记录的事实，不自动代表真实模型效果；`predicted` 表示执行前估计；`simulated` 表示夹具、仿真或离线估算；`missing` 表示没有达到定义所需的数据。比如运行数和外部 Provider 尝试数可以是 E1 actual，但没有独立验收与账单对账时，真实成功率和真实 CPS 仍必须是 E0 missing。
+
+每个来源记录 API 路径、数据版本、记录数、新鲜度、范围和确定性内容哈希。单运行视图沿用同一合同，并额外汇总规划模式、Planner panel、路由策略、Placement、预测成本/时延/成功率、模拟账本和实际控制面耗时；控制面耗时明确不等于外部 Provider 端到端时延。
+
+商业结论门与指标展示分离。真实质量、成本和响应速度必须分别具有 E2+ 独立真实样本、共同口径基线、足量样本与置信区间；当前全部失败关闭，样本量为 0，任务族为空。导出最多包含 20 个运行和 1,000 个事件，默认排除密钥、Prompt 原文、用户标识和 Artifact 内容，只包含结构化合同、元数据和来源快照。
+
+导出包先规范化序列化再计算 SHA-256；migration 026 保存包哈希、范围、记录计数和生成时间，并用触发器拒绝更新或删除。同一包哈希幂等复用收据。公开 API 为 `GET /api/v1/evidence/console`、`GET /api/v1/evidence/exports` 和 `POST /api/v1/evidence/exports`。Runtime Schema 为 `v5.8.1`，Run Projection Schema 继续为 `v5.6`。
+
+---
+
+## v0.5.7.4 Bounded Canary Runtime Plane
 
 v0.5.7.4 在签名策略注册表之上增加一个独立的 Bounded Canary Runtime Plane。注册表 `active` 仍只是已审查资产；只有显式启用、候选/稳定版本血缘完整、Canary 门通过且人工批准后，运行时部署才获得受限的低风险策略选择权。
 

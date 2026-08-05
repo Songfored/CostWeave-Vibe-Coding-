@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.7.4."""
+"""Persistent command/event/projection owner for CostWeave v0.5.8.1."""
 
 from __future__ import annotations
 
@@ -94,6 +94,7 @@ from .canary_control import (
     evaluate_canary_window,
 )
 from .canary_store import CanaryStore
+from .evidence_console_store import EvidenceConsoleStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -139,6 +140,7 @@ class ControlKernel:
         self.production_shadow_store = ProductionShadowStore(self.store.path)
         self.policy_registry_store = PolicyRegistryStore(self.store.path)
         self.canary_store = CanaryStore(self.store.path)
+        self.evidence_console_store = EvidenceConsoleStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -401,6 +403,7 @@ class ControlKernel:
             **self.production_shadow_store.counts(),
             **self.policy_registry_store.counts(),
             **self.canary_store.counts(),
+            **self.evidence_console_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -1069,6 +1072,14 @@ class ControlKernel:
         decision = evaluate_canary_window(item, evaluated_at=evaluated_at)
         self.canary_store.record_window_decision(item, decision)
         return decision
+
+    def record_evidence_export(
+        self, package: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool]:
+        return self.evidence_console_store.record_export(package)
+
+    def evidence_exports(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        return self.evidence_console_store.list_exports(limit=limit)
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

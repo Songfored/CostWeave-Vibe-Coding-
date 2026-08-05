@@ -13,6 +13,9 @@ const state = {
   catalogModels: [],
   catalogMetadata: {},
   editingModelId: null,
+  evidenceConsole: null,
+  evidenceKind: "all",
+  evidenceRequestSeq: 0,
 };
 
 const statusLabels = {
@@ -135,6 +138,7 @@ async function createRun() {
     updateHistorySelection(data.id);
     revealRunContent();
     render(data);
+    loadEvidenceConsole(data.id);
     setSubmitState(true, "任务运行中…");
     startPolling();
     refreshHistory();
@@ -169,6 +173,7 @@ async function poll() {
       state.timer = null;
       setSubmitState(false);
       refreshHistory();
+      loadEvidenceConsole(data.id);
     }
   } catch (error) {
     clearInterval(state.timer);
@@ -195,6 +200,7 @@ async function loadRun(runId, shouldScroll = true) {
     updateHistorySelection(data.id);
     revealRunContent();
     render(data);
+    loadEvidenceConsole(data.id);
     if (["completed", "failed", "cancelled"].includes(data.status)) setSubmitState(false);
     else {
       setSubmitState(true, "任务运行中…");
@@ -1308,6 +1314,145 @@ async function loadCanaryPolicy() {
   }
 }
 
+const evidenceKindLabels = {
+  actual: "实际记录",
+  predicted: "预测值",
+  simulated: "模拟值",
+  missing: "缺失值",
+};
+
+function formatEvidenceValue(metric) {
+  if (metric.evidence_kind === "missing" || metric.value === null || metric.value === undefined) return "缺失";
+  if (typeof metric.value === "string") return humanize(metric.value);
+  const value = Number(metric.value);
+  if (!Number.isFinite(value)) return "不可用";
+  if (metric.unit === "probability") return `${(value * 100).toFixed(1).replace(/\.0$/, "")}%`;
+  if (metric.unit === "percent") return `${(value * 100).toFixed(1).replace(/\.0$/, "")}%`;
+  if (metric.unit === "USD") return `$${value.toFixed(value < 1 ? 4 : 2)}`;
+  if (metric.unit === "milliseconds") return formatTime(value);
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2, notation: Math.abs(value) >= 10_000 ? "compact" : "standard" }).format(value);
+}
+
+function renderEvidenceConsole() {
+  const data = state.evidenceConsole;
+  if (!data) return;
+  const summary = data.summary || {};
+  const coverage = data.coverage || {};
+  const sources = data.sources || [];
+  const sourceMap = Object.fromEntries(sources.map((item) => [item.source_id, item]));
+  const scopeRunId = data.scope?.run_id;
+  const claimable = (data.business_claims || []).filter((item) => item.status === "supported");
+  $("#evidence-scope").textContent = scopeRunId ? `任务 ${scopeRunId}` : "工作区证据";
+  $("#evidence-level").textContent = summary.evidence_level || "E0";
+  $("#evidence-real-sample").textContent = String(summary.real_effect_sample_size || 0);
+  $("#evidence-source-count").textContent = String(sources.length);
+  $("#evidence-claim-count").textContent = String(claimable.length);
+  ["actual", "predicted", "simulated", "missing"].forEach((kind) => {
+    const target = $(`#evidence-count-${kind}`);
+    if (target) target.textContent = String(coverage[kind] || 0);
+  });
+
+  const visibleMetrics = (data.metrics || []).filter((item) => state.evidenceKind === "all" || item.evidence_kind === state.evidenceKind);
+  $("#evidence-metrics").innerHTML = visibleMetrics.length
+    ? visibleMetrics.map((metric) => {
+      const source = sourceMap[metric.source_id] || {};
+      const sample = Number(metric.sample_size || 0);
+      const ci = metric.confidence_interval
+        ? `CI ${escapeHtml(metric.confidence_interval.lower)}–${escapeHtml(metric.confidence_interval.upper)}`
+        : "CI 未提供";
+      const detail = metric.evidence_kind === "missing"
+        ? metric.missing_reason || "数据尚未收集"
+        : `n=${sample} · ${ci}`;
+      return `<article class="evidence-metric" data-evidence-kind="${escapeHtml(metric.evidence_kind)}">
+        <header><span>${escapeHtml(metric.label)}</span><i class="evidence-kind-badge">${escapeHtml(evidenceKindLabels[metric.evidence_kind] || metric.evidence_kind)} · ${escapeHtml(metric.evidence_level)}</i></header>
+        <strong>${escapeHtml(formatEvidenceValue(metric))}</strong>
+        <small>${escapeHtml(detail)}</small>
+        <small class="metric-source">${escapeHtml(source.label || metric.source_id)} · ${escapeHtml(source.data_version || "未知版本")}</small>
+      </article>`;
+    }).join("")
+    : '<p class="history-empty">当前筛选下没有指标。</p>';
+
+  $("#evidence-claims").innerHTML = (data.business_claims || []).map((claim) => {
+    const families = (claim.applicable_task_families || []).join("、") || "尚未建立";
+    const interval = claim.confidence_interval
+      ? `${claim.confidence_interval.lower}–${claim.confidence_interval.upper}`
+      : "未形成";
+    return `<div class="evidence-claim"><div><b>${escapeHtml(claim.label)}</b><em>${claim.status === "supported" ? "已支持" : "证据不足"}</em></div>
+      <p>${escapeHtml(claim.evidence_level)} · n=${Number(claim.sample_size || 0)} · CI ${escapeHtml(interval)} · 任务族 ${escapeHtml(families)}</p>
+      <p>${escapeHtml(claim.reason || "")}</p></div>`;
+  }).join("");
+
+  $("#evidence-sources").innerHTML = sources.map((source) => `<div class="evidence-source">
+    <b>${escapeHtml(source.label)}</b>
+    <span>${escapeHtml(source.trace?.api_path || "无路径")}<br>${escapeHtml(source.data_version || "未知版本")}</span>
+    <small>${Number(source.record_count || 0)} 条<br>${escapeHtml(source.evidence_level)} / ${escapeHtml(evidenceKindLabels[source.evidence_kind] || source.evidence_kind)}</small>
+  </div>`).join("");
+  $("#evidence-generated-at").textContent = `快照 ${formatDate(data.generated_at)}`;
+  $("#evidence-live").textContent = `${summary.message || "证据快照已加载"} 外部 Provider 尝试 ${Number(summary.external_provider_attempts || 0)} 次；快照 ${String(data.snapshot_hash || "").slice(0, 12)}。`;
+}
+
+async function loadEvidenceConsole(runId = state.runId) {
+  const live = $("#evidence-live");
+  if (!live) return;
+  const requestSeq = ++state.evidenceRequestSeq;
+  live.textContent = "正在刷新证据来源与口径…";
+  try {
+    const query = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    const response = await fetch(`/api/v1/evidence/console${query}`);
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取统一证据快照");
+    if (requestSeq !== state.evidenceRequestSeq) return;
+    state.evidenceConsole = data;
+    renderEvidenceConsole();
+  } catch (error) {
+    if (requestSeq !== state.evidenceRequestSeq) return;
+    live.textContent = error instanceof Error ? error.message : "统一证据控制台暂不可用";
+  }
+}
+
+function setEvidenceFilter(kind) {
+  state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
+  $$(".evidence-filter").forEach((button) => {
+    const selected = button.dataset.evidenceKind === state.evidenceKind;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  renderEvidenceConsole();
+}
+
+async function exportEvidencePackage() {
+  const button = $("#export-evidence");
+  const live = $("#evidence-live");
+  if (!button || !live) return;
+  const previous = button.textContent;
+  button.disabled = true;
+  button.textContent = "正在冻结证据…";
+  try {
+    const response = await fetch("/api/v1/evidence/exports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: state.runId || null }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法生成实验包");
+    const blob = new Blob([JSON.stringify(data.package, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = String(data.filename || "costweave-evidence.json").replace(/[^\w.\-]+/g, "_");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    live.textContent = `实验包已导出；SHA-256 ${String(data.receipt?.package_hash || "").slice(0, 16)}…，收据已写入不可变记录。`;
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "实验包导出失败";
+  } finally {
+    button.disabled = false;
+    button.textContent = previous;
+  }
+}
+
 $("#catalog-search").addEventListener("input", renderCatalog);
 $("#catalog-provider-filter").addEventListener("change", renderCatalog);
 $("#catalog-status-filter").addEventListener("change", renderCatalog);
@@ -1325,9 +1470,13 @@ $("#close-model-editor").addEventListener("click", () => $("#model-editor").clos
 $("#cancel-model").addEventListener("click", () => $("#model-editor").close());
 $("#import-form").addEventListener("submit", importCatalog);
 $("#cancel-import").addEventListener("click", () => $("#import-dialog").close());
+$$(".evidence-filter").forEach((button) => button.addEventListener("click", () => setEvidenceFilter(button.dataset.evidenceKind || "all")));
+$("#refresh-evidence").addEventListener("click", () => loadEvidenceConsole(state.runId));
+$("#export-evidence").addEventListener("click", exportEvidencePackage);
 
 updateGoalCount();
 loadCatalog();
 loadPolicyRegistry();
 loadCanaryPolicy();
+loadEvidenceConsole();
 refreshHistory({ restore: true });

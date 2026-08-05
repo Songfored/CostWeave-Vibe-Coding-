@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.7.4", health["version"])
+        self.assertEqual("0.5.8.1", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.7.4", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.8.1", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -152,12 +152,59 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             0.0, health["bounded_canary"]["high_risk_exploration_rate"]
         )
+        self.assertEqual(
+            "v0.5.8.1",
+            health["unified_evidence_console"]["schema_version"],
+        )
+        self.assertTrue(
+            health["unified_evidence_console"]["source_trace_required"]
+        )
+        self.assertFalse(
+            health["unified_evidence_console"][
+                "commercial_claims_allowed_without_e2"
+            ]
+        )
         self.assertTrue(health["control_kernel"]["artifact_dag"])
         self.assertEqual("wal", health["control_kernel"]["journal_mode"])
         _, catalog = self.fetch_json("/api/catalog")
         self.assertGreaterEqual(len(catalog["models"]), 12)
         self.assertIn("snapshot_date", catalog["metadata"])
         self.assertTrue(catalog["metadata"]["editable"])
+
+    def test_unified_evidence_console_and_export_receipt(self):
+        status, console = self.fetch_json("/api/v1/evidence/console")
+        self.assertEqual(200, status)
+        self.assertEqual("v0.5.8.1", console["schema_version"])
+        self.assertEqual(
+            {"actual", "predicted", "simulated", "missing"},
+            set(console["coverage"]),
+        )
+        self.assertFalse(console["summary"]["commercial_claims_allowed"])
+        self.assertEqual(0, console["summary"]["real_effect_sample_size"])
+        source_ids = {item["source_id"] for item in console["sources"]}
+        self.assertTrue(source_ids)
+        self.assertTrue(
+            all(item["source_id"] in source_ids for item in console["metrics"])
+        )
+
+        status, exported = self.request_json(
+            "/api/v1/evidence/exports", {"run_id": None}, method="POST"
+        )
+        self.assertEqual(201, status)
+        self.assertEqual("v0.5.8.1-export", exported["package"]["schema_version"])
+        self.assertEqual(
+            exported["receipt"]["package_hash"],
+            exported["package"]["integrity"]["package_hash"],
+        )
+        self.assertFalse(
+            exported["receipt"]["commercial_claims_allowed"]
+        )
+        status, receipts = self.fetch_json("/api/v1/evidence/exports?limit=10")
+        self.assertEqual(200, status)
+        self.assertIn(
+            exported["receipt"]["export_id"],
+            {item["export_id"] for item in receipts["exports"]},
+        )
 
     def test_evaluation_protocol_is_explicitly_simulated(self):
         status, protocol = self.fetch_json(

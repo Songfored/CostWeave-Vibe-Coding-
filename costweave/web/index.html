@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.7.4 提供有界 Canary、运行时策略快照与自动回滚">
+  <meta name="description" content="CostWeave v0.5.8.1 统一呈现规划、路由、成本、Outcome、Shadow、策略与 Canary 证据">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.7.4">
+  <link rel="stylesheet" href="/styles.css?v=0.5.8.1">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,10 +18,11 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.7.4 Bounded Canary</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.1 Evidence Console</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
+      <a href="#evidence-console-section">证据控制台</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
@@ -29,7 +30,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">BOUNDED CANARY &amp; AUTOMATIC ROLLBACK · V0.5.7.4</p>
+        <p class="eyebrow">UNIFIED EVIDENCE CONSOLE · V0.5.8.1</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -349,6 +350,46 @@
       <p id="canary-live" class="catalog-live" role="status" aria-live="polite"></p>
     </section>
 
+    <section id="evidence-console-section" class="evidence-console-section" aria-labelledby="evidence-console-title">
+      <div class="evidence-heading">
+        <div>
+          <span class="section-kicker">PROVENANCE-FIRST OBSERVABILITY</span>
+          <h2 id="evidence-console-title">统一证据控制台</h2>
+          <p>一眼区分实际记录、预测、模拟和缺失值；每项指标都能追溯到数据版本与原始 API。</p>
+        </div>
+        <div class="evidence-actions">
+          <span id="evidence-scope" class="registry-boundary">工作区证据</span>
+          <button id="refresh-evidence" class="secondary-button subtle" type="button">刷新证据</button>
+          <button id="export-evidence" class="secondary-button" type="button">导出实验包</button>
+        </div>
+      </div>
+      <div class="evidence-readiness" role="status" aria-live="polite">
+        <div><span>当前证据等级</span><strong id="evidence-level">E0</strong><small>不支持商业效果结论</small></div>
+        <div><span>真实效果样本</span><strong id="evidence-real-sample">0</strong><small>需独立验收与账单对账</small></div>
+        <div><span>可追溯来源</span><strong id="evidence-source-count">0</strong><small>数据版本与原始路径</small></div>
+        <div><span>可声明结论</span><strong id="evidence-claim-count">0</strong><small>质量 / 成本 / 时延</small></div>
+      </div>
+      <div class="evidence-toolbar" aria-label="按证据类型筛选">
+        <button type="button" class="evidence-filter active" data-evidence-kind="all" aria-pressed="true">全部</button>
+        <button type="button" class="evidence-filter" data-evidence-kind="actual" aria-pressed="false"><i class="evidence-dot actual"></i>实际记录 <b id="evidence-count-actual">0</b></button>
+        <button type="button" class="evidence-filter" data-evidence-kind="predicted" aria-pressed="false"><i class="evidence-dot predicted"></i>预测值 <b id="evidence-count-predicted">0</b></button>
+        <button type="button" class="evidence-filter" data-evidence-kind="simulated" aria-pressed="false"><i class="evidence-dot simulated"></i>模拟值 <b id="evidence-count-simulated">0</b></button>
+        <button type="button" class="evidence-filter" data-evidence-kind="missing" aria-pressed="false"><i class="evidence-dot missing"></i>缺失值 <b id="evidence-count-missing">0</b></button>
+      </div>
+      <div id="evidence-metrics" class="evidence-metrics" aria-label="证据指标"></div>
+      <div class="evidence-lower-grid">
+        <article class="evidence-subpanel">
+          <div class="evidence-subheading"><div><span class="section-kicker">CLAIM GATE</span><h3>商业结论门</h3></div><span class="evidence-warning">未通过</span></div>
+          <div id="evidence-claims" class="evidence-claims"></div>
+        </article>
+        <article class="evidence-subpanel">
+          <div class="evidence-subheading"><div><span class="section-kicker">SOURCE INVENTORY</span><h3>来源与数据版本</h3></div><span id="evidence-generated-at" class="evidence-freshness">尚未加载</span></div>
+          <div id="evidence-sources" class="evidence-sources"></div>
+        </article>
+      </div>
+      <p id="evidence-live" class="catalog-live" role="status" aria-live="polite">正在建立证据快照…</p>
+    </section>
+
     <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
       <div class="catalog-heading">
         <div><span class="section-kicker">LIVE MODEL KNOWLEDGE BASE</span><h2 id="model-catalog-title">模型管理中心</h2></div>
@@ -445,7 +486,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.7.4 / Bounded Canary &amp; Automatic Rollback</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.7.4" defer></script>
+  <footer><span>CostWeave v0.5.8.1 / Unified Evidence Console</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.8.1" defer></script>
 </body>
 </html>

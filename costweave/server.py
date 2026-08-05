@@ -70,6 +70,13 @@ from .offline_replay import public_offline_replay_policy
 from .production_shadow import public_production_shadow_policy
 from .policy_registry import public_policy_registry_policy
 from .canary_control import public_canary_policy
+from .evidence_console import (
+    EvidenceConsoleError,
+    build_evidence_console,
+    build_evidence_export,
+    public_evidence_console_policy,
+)
+from .evidence_console_store import EvidenceConsoleStoreError
 
 
 MANAGER: RunManager | None = None
@@ -96,7 +103,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.7.4"
+    server_version = "CostWeave/0.5.8.1"
 
     def setup(self) -> None:
         super().setup()
@@ -176,9 +183,37 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "production_shadow": public_production_shadow_policy(),
                 "policy_registry": public_policy_registry_policy(),
                 "bounded_canary": public_canary_policy(),
+                "unified_evidence_console": public_evidence_console_policy(),
                 **contracts,
                 "control_kernel": runtime_health,
             })
+            return
+        if path == "/api/v1/evidence/console":
+            run_id = parse_qs(parsed.query).get("run_id", [None])[0]
+            try:
+                self._json(
+                    build_evidence_console(self.manager, run_id=run_id)
+                )
+            except KeyError:
+                self._json(
+                    {"error": "run_not_found", "run_id": run_id},
+                    HTTPStatus.NOT_FOUND,
+                )
+            except EvidenceConsoleError as exc:
+                self._json(
+                    {"error": "evidence_console_failed", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        if path == "/api/v1/evidence/exports":
+            try:
+                limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
+                self._json({"exports": self.manager.evidence_exports(limit=limit)})
+            except (TypeError, ValueError, EvidenceConsoleStoreError) as exc:
+                self._json(
+                    {"error": "invalid_export_query", "message": str(exc)},
+                    HTTPStatus.BAD_REQUEST,
+                )
             return
         if path == "/api/v1/canary/policy":
             if self.manager.control_kernel is not None:
@@ -848,6 +883,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = self._normalise_api_path(urlparse(self.path).path)
+        if path == "/api/v1/evidence/exports":
+            self._create_evidence_export()
+            return
         if path == "/api/v1/system/backups":
             self._create_runtime_backup()
             return
@@ -1439,6 +1477,51 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
 
+    def _create_evidence_export(self) -> None:
+        run_id: str | None = None
+        try:
+            payload = self._read_write_json(max_bytes=8_000)
+            raw_run_id = payload.get("run_id")
+            run_id = None if raw_run_id in {None, ""} else str(raw_run_id)
+            if run_id is not None and (len(run_id) > 160 or not run_id.strip()):
+                raise ValueError("run_id is invalid")
+            package = build_evidence_export(
+                self.manager,
+                run_id=run_id,
+                catalog_snapshot=self.catalog_store.payload(),
+            )
+            receipt, replayed = self.manager.record_evidence_export(package)
+            stamp = str(package["generated_at"]).replace(":", "-")
+            scope = run_id or "workspace"
+            self._json(
+                {
+                    "filename": f"costweave-evidence-{scope}-{stamp}.json",
+                    "receipt": receipt,
+                    "replayed": replayed,
+                    "package": package,
+                },
+                HTTPStatus.CREATED,
+            )
+        except KeyError:
+            self._json(
+                {"error": "run_not_found", "run_id": run_id},
+                HTTPStatus.NOT_FOUND,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (
+            EvidenceConsoleError,
+            EvidenceConsoleStoreError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            self._json(
+                {"error": "evidence_export_failed", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
     def _static(self, request_path: str) -> None:
         if "\\" in request_path or ".." in request_path.split("/"):
             self._json({"error": "invalid_path"}, HTTPStatus.BAD_REQUEST)
@@ -1496,7 +1579,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.7.4 bounded canary prototype"
+        description="Run the CostWeave v0.5.8.1 unified evidence console"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

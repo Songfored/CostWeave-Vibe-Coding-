@@ -1,5 +1,22 @@
 # CostWeave
 
+## v0.5.8.1：Unified Evidence Console
+
+本版不再把规划、路由、成本、容量、Outcome、Shadow、策略和 Canary 数据分散在不同页面与接口，而是建立统一、可导出、可追溯的证据视图：
+
+- 所有指标强制标注为 `actual`（实际控制面记录）、`predicted`（执行前预测）、`simulated`（仿真/夹具）或 `missing`（尚无可信值），缺失值不再自动补零；
+- 每项指标绑定证据等级 E0～E5、来源名称、数据版本、原始 API、记录数、新鲜度和来源快照哈希；
+- 工作区视图汇总真实运行数、外部 Provider 尝试、冻结评测案例、资源池，以及真实成功率、CPS 和端到端 P95 的缺失状态；
+- 单运行视图进一步展示规划模式、Planner panel、路由策略、Placement、预测成本/时延/成功率、模拟成本账本、实际控制面耗时和验收状态；
+- 商业结论门分别检查真实质量、真实成本和真实响应速度，当前样本量为 0、置信区间未形成，全部明确返回“不支持”；
+- 实验包导出包含有界的运行、事件、规划、Placement、账本、验收、失败、制品元数据、预测、健康状态和目录快照，不含密钥、Prompt 原文或 Artifact 内容；
+- 导出包使用规范化 SHA-256 校验，migration 026 保存不可修改、不可删除的导出收据；
+- 新增 `GET /api/v1/evidence/console`、`GET /api/v1/evidence/exports` 和 `POST /api/v1/evidence/exports`；页面新增桌面、平板和手机响应式证据控制台。
+
+升级说明见 [`docs/V0.5.8.1_MIGRATION.md`](docs/V0.5.8.1_MIGRATION.md)，发布内容见 [`docs/CHANGELOG-v0.5.8.1.md`](docs/CHANGELOG-v0.5.8.1.md)。
+
+> 证据边界：统一显示和可追溯导出提高了数据诚实性，但不会凭空产生真实效果证据。当前真实验收成功率、真实 CPS 和真实端到端 P95 都是 `missing`；真实效果样本、置信区间和可声明商业结论均为 0。默认安装仍不会调用付费模型。
+
 ## v0.5.7.4：Bounded Canary & Automatic Rollback
 
 本版把 v0.5.7.3 的“已审查策略资产”接到一个默认关闭、显式授权、可立即失败关闭的运行时发布控制层：
@@ -722,6 +739,9 @@ costweave/
 | `GET` | `/api/v1/shadow/policy` | 读取 v0.5.7.2 输入快照对齐、容量新鲜度、失败隔离、覆盖率、开销门和零副作用边界 |
 | `GET` | `/api/v1/policies/registry` | 读取 v0.5.7.3 签名策略生命周期、分级晋级门、注册表指针、冻结/回滚和零运行时干预边界 |
 | `GET` | `/api/v1/canary/policy` | 读取 v0.5.7.4 阶段、硬回滚门、任务策略快照、当前运行时指针和零高风险探索边界 |
+| `GET` | `/api/v1/evidence/console?run_id={id}` | 读取全局或单运行统一证据视图、来源血缘、证据等级和商业结论门 |
+| `GET` | `/api/v1/evidence/exports?limit={n}` | 读取不可变实验包导出收据 |
+| `POST` | `/api/v1/evidence/exports` | 导出脱敏实验包并保存 SHA-256 收据；可选 `run_id` |
 | `GET` | `/api/v1/media/projects/{run_id}` | 读取媒体意图、圣经、镜头、渲染和单位成本 |
 | `GET` | `/api/v1/media/projects/{run_id}/shots` | 读取结构化镜头合同、Prompt 与渲染尝试 |
 | `POST` | `/api/v1/media/projects/{run_id}/approve` | 批准预览并按 DAG 生成全部仿真终稿 |
@@ -744,7 +764,7 @@ costweave/
 python -B tests/run_isolated.py
 ```
 
-当前基线为 657 项自动化测试。v0.5.7.4 新增 13 项验收：12 项部署准入、确定性分桶、风险/范围隔离、严格指标边界、阶段保持/前进、自动回滚、不可变存储、重启快照和新旧任务隔离专项测试，以及 1 项公开 API 测试；此前 644 项继续作为策略注册表、Production-like Shadow、离线回放、策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全和页面回归门。
+当前基线为 671 项自动化测试。v0.5.8.1 新增 14 项验收：13 项证据分类、缺失语义、来源血缘、单运行聚合、脱敏导出、哈希完整性、不可变收据和重启恢复专项测试，以及 1 项公开 API 测试；此前 657 项继续作为 Canary、策略注册表、Production-like Shadow、离线回放、策略候选、精确 Oracle、全局组合、治理、评测、交接、跨 Provider、MultiPlanner、媒体、成本、恢复、预测、安全和页面回归门。
 
 测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
@@ -789,7 +809,7 @@ python -B tests/run_isolated.py
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.7.4 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
+- v0.5.8.1 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线或多进程调度。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -800,7 +820,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.7.4 的工程合同已经完成到“有界运行时策略选择、启动快照与自动回滚”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。未取得真实证据和真实 Provider 路由负载前，Canary 默认关闭，现有测试只证明控制机制，不证明生产质量、成本或时延收益。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.8.1 的工程合同已经完成到“统一证据分类、来源追溯与实验包导出”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。未取得真实证据和真实 Provider 路由负载前，Canary 默认关闭，证据控制台会把真实收益保持为缺失，现有测试只证明控制机制，不证明生产质量、成本或时延收益。下一工程版本为 v0.5.8.2 Adapter、Secret 与 Data Security。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

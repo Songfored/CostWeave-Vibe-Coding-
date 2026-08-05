@@ -1937,6 +1937,18 @@ class RunManager:
             return []
         return self.control_kernel.evaluations()
 
+    def record_evidence_export(
+        self, package: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool]:
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        return self.control_kernel.record_evidence_export(package)
+
+    def evidence_exports(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        if self.control_kernel is None:
+            return []
+        return self.control_kernel.evidence_exports(limit=limit)
+
     def media_project(self, run_id: str) -> dict[str, Any] | None:
         if self.get(run_id) is None or self.control_kernel is None:
             return None

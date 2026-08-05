@@ -288,8 +288,8 @@ class OutcomeDatasetStoreTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_15_and_runtime_schema(self):
-        self.assertEqual("v5.7.4", self.health["runtime_schema"])
-        self.assertEqual(25, self.health["migrations"])
+        self.assertEqual("v5.8.1", self.health["runtime_schema"])
+        self.assertEqual(26, self.health["migrations"])
         with closing(sqlite3.connect(self.path)) as connection:
             tables = {
                 row[0]

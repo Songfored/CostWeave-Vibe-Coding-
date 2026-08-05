@@ -91,6 +91,19 @@ class WebUiRegressionTests(unittest.TestCase):
             "canary-route-change-count",
             "canary-live",
             "runtime-policy-summary",
+            "evidence-console-section",
+            "evidence-console-title",
+            "evidence-scope",
+            "evidence-level",
+            "evidence-real-sample",
+            "evidence-source-count",
+            "evidence-claim-count",
+            "evidence-metrics",
+            "evidence-claims",
+            "evidence-sources",
+            "refresh-evidence",
+            "export-evidence",
+            "evidence-live",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -131,13 +144,19 @@ class WebUiRegressionTests(unittest.TestCase):
             "resetCatalog",
             "loadPolicyRegistry",
             "loadCanaryPolicy",
+            "loadEvidenceConsole",
+            "renderEvidenceConsole",
+            "exportEvidencePackage",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.7.4 Bounded Canary", self.html)
+        self.assertIn("v0.5.8.1 Evidence Console", self.html)
+        self.assertIn("data-evidence-kind", self.html)
+        self.assertIn("source_id", self.js)
+        self.assertIn("confidence_interval", self.js)
         self.assertIn("registry_active_is_runtime_active", self.js)
         self.assertIn("policy_snapshot", self.js)
         self.assertIn("canary_runtime_policy_changes", self.js)
