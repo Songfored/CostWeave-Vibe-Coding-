@@ -106,6 +106,8 @@ class RunRecord:
                 "id": self.id,
                 "request": {
                     "goal": self.request.goal,
+                    "project_id": self.request.project_id,
+                    "data_residency": self.request.data_residency,
                     "mode": self.request.mode.value,
                     "budget": self.request.budget,
                     "quality_floor": self.request.quality_floor,
@@ -1770,13 +1772,43 @@ class RunManager:
             retry_of=run_id,
         )
 
-    def get(self, run_id: str) -> RunRecord | None:
+    def get(
+        self, run_id: str, *, project_id: str | None = None
+    ) -> RunRecord | None:
         with self.lock:
-            return self.records.get(run_id)
+            record = self.records.get(run_id)
+        if record is None or project_id is None:
+            return record
+        from .security_boundary import normalize_project_id
 
-    def list(self) -> list[dict[str, Any]]:
+        project = normalize_project_id(project_id)
+        if record.request.project_id != project:
+            return None
+        if self.control_kernel is not None:
+            status = self.control_kernel.project_status(project)
+            if status["logical_access_revoked"]:
+                return None
+        return record
+
+    def list(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
         with self.lock:
             records = list(self.records.values())
+        if project_id is not None:
+            from .security_boundary import normalize_project_id
+
+            project = normalize_project_id(project_id)
+            if (
+                self.control_kernel is not None
+                and self.control_kernel.project_status(project)[
+                    "logical_access_revoked"
+                ]
+            ):
+                return []
+            records = [
+                record
+                for record in records
+                if record.request.project_id == project
+            ]
         return [record.snapshot() for record in reversed(records[-20:])]
 
     def events(
@@ -1899,11 +1931,24 @@ class RunManager:
         return self.control_kernel.placements(run_id)
 
     def ledger(
-        self, *, run_id: str | None = None
+        self,
+        *,
+        run_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
-        return self.control_kernel.ledger(run_id=run_id)
+        entries = self.control_kernel.ledger(run_id=run_id)
+        if project_id is None:
+            return entries
+        visible_run_ids = {
+            item["id"] for item in self.list(project_id=project_id)
+        }
+        return [
+            item
+            for item in entries
+            if str(item.get("run_id") or "") in visible_run_ids
+        ]
 
     def validations(self, run_id: str) -> list[dict[str, Any]]:
         if self.get(run_id) is None or self.control_kernel is None:
@@ -1938,16 +1983,22 @@ class RunManager:
         return self.control_kernel.evaluations()
 
     def record_evidence_export(
-        self, package: dict[str, Any]
+        self, package: dict[str, Any], *, project_id: str | None = None
     ) -> tuple[dict[str, Any], bool]:
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
-        return self.control_kernel.record_evidence_export(package)
+        return self.control_kernel.record_evidence_export(
+            package, project_id=project_id
+        )
 
-    def evidence_exports(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def evidence_exports(
+        self, *, limit: int = 100, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
-        return self.control_kernel.evidence_exports(limit=limit)
+        return self.control_kernel.evidence_exports(
+            limit=limit, project_id=project_id
+        )
 
     def media_project(self, run_id: str) -> dict[str, Any] | None:
         if self.get(run_id) is None or self.control_kernel is None:
@@ -1980,11 +2031,22 @@ class RunManager:
         )
 
     def approvals(
-        self, *, status: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
-        return self.control_kernel.approvals(status=status)
+        items = self.control_kernel.approvals(status=status)
+        if project_id is None:
+            return items
+        return [
+            item
+            for item in items
+            if self.get(str(item.get("run_id") or ""), project_id=project_id)
+            is not None
+        ]
 
     def resolve_approval(
         self,

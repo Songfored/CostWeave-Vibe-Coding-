@@ -4,6 +4,13 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
+    DEFAULT_PROJECT_ID,
+    normalize_data_residency,
+    normalize_project_id,
+)
+
 
 class RunMode(StrEnum):
     ECONOMY = "economy"
@@ -53,6 +60,8 @@ class RunRequest:
     max_recoveries: int = 2
     max_task_attempts: int = 2
     recovery_time_limit_seconds: float = 30.0
+    project_id: str = DEFAULT_PROJECT_ID
+    data_residency: str = DEFAULT_DATA_RESIDENCY
 
     def normalized(self) -> "RunRequest":
         return RunRequest(
@@ -89,6 +98,8 @@ class RunRequest:
                     86_400.0,
                 ),
             ),
+            project_id=normalize_project_id(self.project_id),
+            data_residency=normalize_data_residency(self.data_residency),
         )
 
 

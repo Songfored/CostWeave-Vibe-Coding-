@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.8.1."""
+"""Persistent command/event/projection owner for CostWeave v0.5.8.2."""
 
 from __future__ import annotations
 
@@ -95,6 +95,7 @@ from .canary_control import (
 )
 from .canary_store import CanaryStore
 from .evidence_console_store import EvidenceConsoleStore
+from .security_store import SecurityStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -141,6 +142,7 @@ class ControlKernel:
         self.policy_registry_store = PolicyRegistryStore(self.store.path)
         self.canary_store = CanaryStore(self.store.path)
         self.evidence_console_store = EvidenceConsoleStore(self.store.path)
+        self.security_store = SecurityStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -166,12 +168,25 @@ class ControlKernel:
         idempotency_key: str,
         retry_of: str | None = None,
     ) -> tuple[Any, bool]:
-        run_id = canonical_identifier("run", f"create:{idempotency_key}")
+        self.security_store.ensure_project_active(request.project_id)
+        create_identity = (
+            f"create:{idempotency_key}"
+            if request.project_id == "local-default"
+            else f"create:{request.project_id}:{idempotency_key}"
+        )
+        storage_idempotency_key = (
+            idempotency_key
+            if request.project_id == "local-default"
+            else f"project:{request.project_id}:{idempotency_key}"
+        )
+        run_id = canonical_identifier("run", create_identity)
         command = CommandEnvelope.create(
             run_id,
             CommandKind.CREATE_RUN,
             {
                 "goal": request.goal,
+                "project_id": request.project_id,
+                "data_residency": request.data_residency,
                 "mode": request.mode.value,
                 "budget": request.budget,
                 "quality_floor": request.quality_floor,
@@ -192,7 +207,9 @@ class ControlKernel:
                 "retry_of": retry_of,
             },
         )
-        replay = self.store.replay_command(command, idempotency_key=idempotency_key)
+        replay = self.store.replay_command(
+            command, idempotency_key=storage_idempotency_key
+        )
         if replay is not None:
             snapshot = self.store.get_projection(run_id)
             if snapshot is None:
@@ -213,7 +230,7 @@ class ControlKernel:
         result = self.store.commit(
             command,
             [event],
-            idempotency_key=idempotency_key,
+            idempotency_key=storage_idempotency_key,
             expected_revision=0,
             projection_updates=[ProjectionUpdate("run", run_id, projection)],
             result={"run_id": run_id},
@@ -404,6 +421,7 @@ class ControlKernel:
             **self.policy_registry_store.counts(),
             **self.canary_store.counts(),
             **self.evidence_console_store.counts(),
+            **self.security_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -413,6 +431,7 @@ class ControlKernel:
             "media_workflow": media_workflow_enabled(),
             "handoff_intelligence": handoff_intelligence_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
+            "security": self.security_store.counts(),
             "persistent": True,
         }
 
@@ -1074,12 +1093,34 @@ class ControlKernel:
         return decision
 
     def record_evidence_export(
-        self, package: dict[str, Any]
+        self, package: dict[str, Any], *, project_id: str | None = None
     ) -> tuple[dict[str, Any], bool]:
-        return self.evidence_console_store.record_export(package)
+        return self.evidence_console_store.record_export(
+            package, project_id=project_id
+        )
 
-    def evidence_exports(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        return self.evidence_console_store.list_exports(limit=limit)
+    def evidence_exports(
+        self, *, limit: int = 100, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.evidence_console_store.list_exports(
+            limit=limit, project_id=project_id
+        )
+
+    def project_status(self, project_id: str) -> dict[str, Any]:
+        return self.security_store.project_status(project_id)
+
+    def revoke_project(
+        self,
+        project_id: str,
+        *,
+        idempotency_key: str,
+        reason: str = "user_requested",
+    ) -> tuple[dict[str, Any], bool]:
+        return self.security_store.revoke_project(
+            project_id,
+            idempotency_key=idempotency_key,
+            reason=reason,
+        )
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
         return self.media_runtime.ensure_project(

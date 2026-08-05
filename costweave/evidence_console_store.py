@@ -1,4 +1,4 @@
-"""Append-only export receipts for the v0.5.8.1 evidence console."""
+"""Append-only, project-scoped export receipts for v0.5.8.2."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from .evidence_console import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
     validate_evidence_export,
 )
+from .security_boundary import DEFAULT_PROJECT_ID, normalize_project_id
 
 
 class EvidenceConsoleStoreError(ValueError):
@@ -67,6 +68,7 @@ class EvidenceConsoleStore:
         package: Mapping[str, Any],
         *,
         created_at: str | None = None,
+        project_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         validate_evidence_export(package)
         if package.get("schema_version") != EVIDENCE_EXPORT_SCHEMA_VERSION:
@@ -85,6 +87,9 @@ class EvidenceConsoleStore:
         if not isinstance(console, Mapping):
             raise EvidenceConsoleStoreError("console snapshot is missing")
         scope_kind = str(scope.get("kind") or "")
+        project = normalize_project_id(
+            project_id or scope.get("project_id") or DEFAULT_PROJECT_ID
+        )
         if scope_kind not in {"workspace", "run"}:
             raise EvidenceConsoleStoreError("export scope is invalid")
         run_id = scope.get("run_id")
@@ -102,6 +107,7 @@ class EvidenceConsoleStore:
         receipt = {
             "export_id": export_id,
             "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
+            "project_id": project,
             "scope": scope_kind,
             "run_id": str(run_id) if run_id is not None else None,
             "package_hash": package_hash,
@@ -136,16 +142,17 @@ class EvidenceConsoleStore:
                     return receipt, True
                 connection.execute(
                     "INSERT INTO evidence_export_receipts("
-                    "export_id,run_id,scope,schema_version,package_hash,"
+                    "export_id,run_id,scope,schema_version,package_hash,project_id,"
                     "source_count,record_count,evidence_counts_json,"
                     "commercial_claims_allowed,receipt_json,receipt_hash,created_at"
-                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         export_id,
                         receipt["run_id"],
                         scope_kind,
                         EVIDENCE_EXPORT_SCHEMA_VERSION,
                         package_hash,
+                        project,
                         source_count,
                         record_count,
                         _canonical_json(receipt["evidence_counts"]),
@@ -162,14 +169,20 @@ class EvidenceConsoleStore:
                 raise
         return receipt, False
 
-    def list_exports(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_exports(
+        self,
+        *,
+        limit: int = 100,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not 1 <= int(limit) <= 1_000:
             raise EvidenceConsoleStoreError("export receipt limit is invalid")
+        project = normalize_project_id(project_id or DEFAULT_PROJECT_ID)
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT receipt_json,receipt_hash FROM evidence_export_receipts "
-                "ORDER BY created_at DESC,export_id DESC LIMIT ?",
-                (int(limit),),
+                "WHERE project_id=? ORDER BY created_at DESC,export_id DESC LIMIT ?",
+                (project, int(limit)),
             ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:

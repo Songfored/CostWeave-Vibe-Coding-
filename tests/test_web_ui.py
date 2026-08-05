@@ -144,6 +144,7 @@ class WebUiRegressionTests(unittest.TestCase):
             "resetCatalog",
             "loadPolicyRegistry",
             "loadCanaryPolicy",
+            "loadSecurityBoundary",
             "loadEvidenceConsole",
             "renderEvidenceConsole",
             "exportEvidencePackage",
@@ -153,7 +154,9 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.8.1 Evidence Console", self.html)
+        self.assertIn("v0.5.8.2 Secure Control Plane", self.html)
+        self.assertIn('id="security-boundary-section"', self.html)
+        self.assertIn("external_network_default_enabled", self.js)
         self.assertIn("data-evidence-kind", self.html)
         self.assertIn("source_id", self.js)
         self.assertIn("confidence_interval", self.js)

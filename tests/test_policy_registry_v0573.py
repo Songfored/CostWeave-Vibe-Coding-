@@ -399,7 +399,7 @@ class PolicyRegistryStoreTests(unittest.TestCase):
             state, revision = target, revision + 1
 
     def test_migration_24_and_empty_registry(self):
-        self.assertEqual(26, self.health["migrations"])
+        self.assertEqual(27, self.health["migrations"])
         counts = self.store.counts()
         self.assertEqual(0, counts["policy_registry_policies"])
         self.assertEqual(0, counts["policy_registry_runtime_activations"])

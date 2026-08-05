@@ -1,4 +1,4 @@
-"""Default-off HTTP adapters for bounded v0.5.6.3 experiments."""
+"""Default-off, capability-scoped HTTP Adapter plugins for v0.5.8.2."""
 
 from __future__ import annotations
 
@@ -25,9 +25,28 @@ from ..experimental_calls import (
     ExternalCallsDisabledError,
 )
 from ..planning_contracts import ResultEnvelope, WorkOrder
+from ..security_boundary import (
+    DEFAULT_ADAPTER_REGISTRY,
+    DEFAULT_DATA_RESIDENCY,
+    DEFAULT_PROJECT_ID,
+    MAX_RESPONSE_BYTES,
+    AdapterPluginManifest,
+    SecretBroker,
+    SecretLease,
+    SecretLeaseError,
+    SecretReference,
+    assess_prompt_security,
+    normalize_data_residency,
+    normalize_project_id,
+    require_prompt_admission,
+    redact_text,
+    validate_endpoint,
+    validate_remote_resolution,
+)
+from ..security_store import SecurityStore
 
 
-HTTP_ADAPTER_SCHEMA_VERSION = "v0.5.6.3"
+HTTP_ADAPTER_SCHEMA_VERSION = "v0.5.8.2"
 OPENAI_COMPATIBLE_ADAPTER_REVISION = "openai-compatible-http-v1"
 LOCAL_HTTP_ADAPTER_REVISION = "local-http-v1"
 
@@ -98,16 +117,12 @@ class ExperimentalAdapterConfig:
             raise ExperimentalCallError("adapter pricing or timeout is invalid")
         if self.timeout_seconds <= 0 or not 0 <= self.max_retries <= 3:
             raise ExperimentalCallError("bounded adapter retry policy is required")
-        parsed = urlparse(self.endpoint)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ExperimentalCallError("HTTP adapter endpoint is invalid")
-        local_hosts = {"127.0.0.1", "localhost", "::1"}
-        if self.deployment == "local" and parsed.hostname not in local_hosts:
-            raise ExperimentalCallError(
-                "local adapter must use an explicit loopback endpoint"
-            )
-        if self.deployment == "remote" and parsed.scheme != "https":
-            raise ExperimentalCallError("remote adapter requires HTTPS")
+        try:
+            validate_endpoint(self.endpoint, deployment=self.deployment)
+            if self.secret_env:
+                SecretReference(self.secret_env)
+        except ValueError as error:
+            raise ExperimentalCallError(str(error)) from error
 
     @property
     def paid(self) -> bool:
@@ -159,6 +174,9 @@ class ExternalExecutionRequest:
     max_output_tokens: int
     idempotency_key: str
     batch: bool = False
+    project_id: str = DEFAULT_PROJECT_ID
+    data_residency: str = DEFAULT_DATA_RESIDENCY
+    security_approval_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.experiment_id.startswith("experiment_"):
@@ -170,7 +188,12 @@ class ExternalExecutionRequest:
         if not 1 <= self.max_output_tokens <= 65536:
             raise ExperimentalCallError("bounded output token limit is required")
         if self.batch:
-            raise ExperimentalCallError("batch execution is disabled in v0.5.6.3")
+            raise ExperimentalCallError("batch execution is disabled in v0.5.8.2")
+        try:
+            normalize_project_id(self.project_id)
+            normalize_data_residency(self.data_residency)
+        except ValueError as error:
+            raise ExperimentalCallError(str(error)) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +223,10 @@ class UrllibHTTPTransport:
 
     evidence_level = REAL_UNVALIDATED_EVIDENCE
 
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
     def post(
         self,
         *,
@@ -208,6 +235,11 @@ class UrllibHTTPTransport:
         body: bytes,
         timeout_seconds: float,
     ) -> HTTPResponse:
+        hostname = (urlparse(url).hostname or "").rstrip(".").lower()
+        if hostname in {"127.0.0.1", "localhost", "::1"}:
+            validate_endpoint(url, deployment="local")
+        else:
+            validate_remote_resolution(url)
         request = urllib.request.Request(
             url,
             data=body,
@@ -215,11 +247,12 @@ class UrllibHTTPTransport:
             method="POST",
         )
         started = time.monotonic()
+        opener = urllib.request.build_opener(self._NoRedirect())
         try:
-            with urllib.request.urlopen(
-                request, timeout=timeout_seconds
-            ) as response:
-                payload = response.read()
+            with opener.open(request, timeout=timeout_seconds) as response:
+                payload = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(payload) > MAX_RESPONSE_BYTES:
+                    raise AdapterTransportError("response_too_large")
                 return HTTPResponse(
                     status_code=int(response.status),
                     body=payload,
@@ -230,7 +263,9 @@ class UrllibHTTPTransport:
                 )
         except urllib.error.HTTPError as error:
             try:
-                payload = error.read()
+                payload = error.read(MAX_RESPONSE_BYTES + 1)
+                if len(payload) > MAX_RESPONSE_BYTES:
+                    raise AdapterTransportError("response_too_large")
                 return HTTPResponse(
                     status_code=int(error.code),
                     body=payload,
@@ -326,7 +361,15 @@ def _safe_error_code(error: BaseException) -> str:
     return "adapter_internal_error"
 
 
+def _provider_idempotency_key(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9._:-]{8,192}", value):
+        return value
+    return "provider_" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 class BaseExperimentalHTTPAdapter(ABC):
+    PLUGIN_ID = ""
+
     def __init__(
         self,
         config: ExperimentalAdapterConfig,
@@ -334,11 +377,14 @@ class BaseExperimentalHTTPAdapter(ABC):
         store: ExperimentalCallStore,
         policy: AdapterRuntimePolicy | None = None,
         transport: HTTPTransport | None = None,
+        secret_broker: SecretBroker | None = None,
     ) -> None:
         self.config = config
         self.store = store
         self.policy = policy or AdapterRuntimePolicy.from_environment()
         self.transport = transport or UrllibHTTPTransport()
+        self.secret_broker = secret_broker or SecretBroker()
+        self.security_store = SecurityStore(store.path)
 
     @abstractmethod
     def build_payload(
@@ -352,7 +398,9 @@ class BaseExperimentalHTTPAdapter(ABC):
     ) -> ParsedModelResponse:
         raise NotImplementedError
 
-    def _admit(self, request: ExternalExecutionRequest) -> str | None:
+    def _admit(
+        self, request: ExternalExecutionRequest
+    ) -> tuple[SecretLease | None, Mapping[str, Any], AdapterPluginManifest]:
         if not self.policy.experimental_calls_enabled:
             raise ExternalCallsDisabledError(
                 "experimental adapters are disabled"
@@ -361,26 +409,53 @@ class BaseExperimentalHTTPAdapter(ABC):
             raise ExternalCallsDisabledError("paid calls are disabled")
         if request.work_order.allowed_tools:
             raise ExperimentalCallError(
-                "v0.5.6.3 HTTP adapters are text-only and tool-free"
+                "v0.5.8.2 HTTP adapters are text-only and tool-free"
             )
         if request.work_order.cost_limit < 0:
             raise ExperimentalCallError("WorkOrder cost limit is invalid")
-        secret = None
+        project = self.security_store.ensure_project_active(request.project_id)
+        normalize_data_residency(request.data_residency)
+        manifest = DEFAULT_ADAPTER_REGISTRY.require(
+            self.PLUGIN_ID,
+            adapter_revision=self.config.adapter_revision,
+            deployment=self.config.deployment,
+            secret_required=bool(self.config.secret_env),
+        )
+        validate_endpoint(self.config.endpoint, deployment=self.config.deployment)
+        assessment = assess_prompt_security(
+            request.work_order.objective,
+            *request.work_order.assumptions,
+        )
+        require_prompt_admission(
+            assessment,
+            approval_id=request.security_approval_id,
+        )
+        secret_lease = None
         if self.config.secret_env:
-            secret = os.environ.get(self.config.secret_env)
-            if not secret:
+            try:
+                secret_lease = self.secret_broker.lease(
+                    adapter_id=self.config.adapter_id,
+                    reference=SecretReference(self.config.secret_env),
+                )
+            except SecretLeaseError as error:
                 raise ExternalCallsDisabledError(
                     "adapter secret is unavailable"
-                )
-        return secret
+                ) from error
+        return secret_lease, assessment.to_dict(), manifest
 
-    def _headers(self, secret: str | None) -> dict[str, str]:
+    def _headers(
+        self,
+        secret_lease: SecretLease | None,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "CostWeave/0.5.6.3-experimental",
+            "User-Agent": "CostWeave/0.5.8.2-experimental",
+            "Idempotency-Key": idempotency_key,
         }
-        if secret:
-            headers["Authorization"] = f"Bearer {secret}"
+        if secret_lease is not None:
+            headers["Authorization"] = f"Bearer {secret_lease.bearer_value()}"
         return headers
 
     def _worst_case_cost(
@@ -435,8 +510,30 @@ class BaseExperimentalHTTPAdapter(ABC):
     def execute(
         self, request: ExternalExecutionRequest
     ) -> ExternalCallReceipt:
-        secret = self._admit(request)
+        secret_lease, prompt_assessment, manifest = self._admit(request)
+        try:
+            return self._execute_admitted(
+                request,
+                secret_lease=secret_lease,
+                prompt_assessment=prompt_assessment,
+                manifest=manifest,
+            )
+        finally:
+            if secret_lease is not None:
+                secret_lease.close()
+
+    def _execute_admitted(
+        self,
+        request: ExternalExecutionRequest,
+        *,
+        secret_lease: SecretLease | None,
+        prompt_assessment: Mapping[str, Any],
+        manifest: AdapterPluginManifest,
+    ) -> ExternalCallReceipt:
         payload = dict(self.build_payload(request))
+        provider_idempotency_key = _provider_idempotency_key(
+            request.idempotency_key
+        )
         payload_raw = canonical_json(payload).encode("utf-8")
         # A UTF-8 byte count is a conservative upper bound for BPE tokens.
         input_upper = len(payload_raw)
@@ -454,6 +551,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             "experiment_id": request.experiment_id,
             "run_id": request.run_id,
             "task_id": request.task_id,
+            "project_id": normalize_project_id(request.project_id),
+            "data_residency": normalize_data_residency(request.data_residency),
             "work_order_id": request.work_order.work_order_id,
             "work_order_hash": hashlib.sha256(
                 canonical_json(request.work_order.to_dict()).encode("utf-8")
@@ -492,6 +591,17 @@ class BaseExperimentalHTTPAdapter(ABC):
                 f"logical external call already ended: {reservation.error_code}"
             )
 
+        side_effect, _ = self.security_store.reserve_side_effect(
+            project_id=request.project_id,
+            adapter_id=self.config.adapter_id,
+            operation="model_inference",
+            idempotency_key=provider_idempotency_key,
+            request_hash=hashlib.sha256(payload_raw).hexdigest(),
+            provider_idempotency_key=provider_idempotency_key,
+            compensation_strategy="not_required_idempotent",
+        )
+        side_effect_id = str(side_effect["side_effect_id"])
+
         attempts: list[ExternalAttempt] = []
         billing_sources: list[str] = []
         evidence_level = str(
@@ -507,7 +617,10 @@ class BaseExperimentalHTTPAdapter(ABC):
             try:
                 response = self.transport.post(
                     url=self.config.endpoint,
-                    headers=self._headers(secret),
+                    headers=self._headers(
+                        secret_lease,
+                        idempotency_key=provider_idempotency_key,
+                    ),
                     body=payload_raw,
                     timeout_seconds=self.config.timeout_seconds,
                 )
@@ -588,7 +701,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                     work_order_id=request.work_order.work_order_id,
                     status="completed",
                     output={
-                        "content": parsed.content,
+                        "content": redact_text(parsed.content),
                         "validation_status": "pending_independent_validation",
                     },
                     evidence=(
@@ -632,10 +745,16 @@ class BaseExperimentalHTTPAdapter(ABC):
                     reservation.external_call_id, attempt
                 )
                 attempts.append(attempt)
-                if isinstance(error, AdapterTransportError) and (
-                    ordinal <= self.config.max_retries
-                ):
-                    continue
+                if isinstance(error, AdapterTransportError):
+                    self.security_store.record_side_effect_event(
+                        side_effect_id,
+                        status="ambiguous",
+                        detail={
+                            "transport_called": True,
+                            "error_code": last_error,
+                            "automatic_replay": False,
+                        },
+                    )
                 break
 
         telemetry = {
@@ -646,6 +765,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             "experiment_id": request.experiment_id,
             "run_id": request.run_id,
             "task_id": request.task_id,
+            "project_id": normalize_project_id(request.project_id),
+            "data_residency": normalize_data_residency(request.data_residency),
             "deployment_id": self.config.deployment_id,
             "provider": self.config.provider,
             "model_id": self.config.model_id,
@@ -676,8 +797,26 @@ class BaseExperimentalHTTPAdapter(ABC):
             "batch": False,
             "billing_sources": sorted(set(billing_sources)),
             "commercial_claims_allowed": False,
+            "adapter_plugin_id": manifest.plugin_id,
+            "prompt_security": dict(prompt_assessment),
+            "side_effect_id": side_effect_id,
+            "provider_idempotency_forwarded": True,
+            "secret_lease_version": (
+                secret_lease.version if secret_lease is not None else None
+            ),
+            "secret_value_persisted": False,
         }
         if result is None:
+            current = self.security_store.side_effect(side_effect_id) or {}
+            if not any(
+                item.get("status") == "ambiguous"
+                for item in current.get("events", [])
+            ):
+                self.security_store.record_side_effect_event(
+                    side_effect_id,
+                    status="failed",
+                    detail={"error_code": last_error},
+                )
             self.store.finalize(
                 reservation.external_call_id,
                 status="failed",
@@ -699,23 +838,36 @@ class BaseExperimentalHTTPAdapter(ABC):
             result=receipt.to_dict(),
             telemetry=telemetry,
         )
+        self.security_store.record_side_effect_event(
+            side_effect_id,
+            status="completed",
+            detail={
+                "external_call_id": reservation.external_call_id,
+                "transport_called": True,
+            },
+        )
         return receipt
 
 
 def _prompt_contract(work_order: WorkOrder) -> dict[str, Any]:
     return {
-        "objective": work_order.objective,
-        "assumptions": list(work_order.assumptions),
-        "forbidden_actions": list(work_order.forbidden_actions),
-        "output_schema": dict(work_order.output_schema),
-        "acceptance_tests": list(work_order.acceptance_tests),
-        "escalation_conditions": list(
-            work_order.escalation_conditions
-        ),
+        "trusted_contract": {
+            "forbidden_actions": list(work_order.forbidden_actions),
+            "output_schema": dict(work_order.output_schema),
+            "acceptance_tests": list(work_order.acceptance_tests),
+            "escalation_conditions": list(work_order.escalation_conditions),
+            "allowed_tools": [],
+            "authority": "text_generation_only",
+        },
+        "untrusted_input": {
+            "objective": work_order.objective,
+            "assumptions": list(work_order.assumptions),
+        },
     }
 
 
 class OpenAICompatibleHTTPAdapter(BaseExperimentalHTTPAdapter):
+    PLUGIN_ID = "openai-compatible-http"
     def build_payload(
         self, request: ExternalExecutionRequest
     ) -> Mapping[str, Any]:
@@ -771,6 +923,7 @@ class OpenAICompatibleHTTPAdapter(BaseExperimentalHTTPAdapter):
 
 
 class LocalHTTPAdapter(BaseExperimentalHTTPAdapter):
+    PLUGIN_ID = "local-http"
     def build_payload(
         self, request: ExternalExecutionRequest
     ) -> Mapping[str, Any]:

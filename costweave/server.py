@@ -77,6 +77,16 @@ from .evidence_console import (
     public_evidence_console_policy,
 )
 from .evidence_console_store import EvidenceConsoleStoreError
+from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
+    DEFAULT_PROJECT_ID,
+    normalize_data_residency,
+    normalize_project_id,
+    public_security_policy,
+    redact_structure,
+    redact_text,
+)
+from .security_store import ProjectRevokedError, SecurityStoreError
 
 
 MANAGER: RunManager | None = None
@@ -103,7 +113,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.8.1"
+    server_version = "CostWeave/0.5.8.2"
 
     def setup(self) -> None:
         super().setup()
@@ -121,7 +131,40 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     def catalog_store(self) -> CatalogStore:
         return getattr(self.server, "catalog_store", CATALOG_STORE)
 
+    def _project_id(self) -> str:
+        return normalize_project_id(
+            self.headers.get("X-CostWeave-Project", DEFAULT_PROJECT_ID)
+        )
+
+    def _data_residency(self) -> str:
+        return normalize_data_residency(
+            self.headers.get(
+                "X-CostWeave-Data-Residency", DEFAULT_DATA_RESIDENCY
+            )
+        )
+
+    def _get_run(self, run_id: str):
+        return self.manager.get(run_id, project_id=self._project_id())
+
+    def _shot_visible(self, shot_id: str) -> bool:
+        for run in self.manager.list(project_id=self._project_id()):
+            if any(
+                str(item.get("shot_id")) == shot_id
+                for item in self.manager.media_shots(str(run.get("id")))
+            ):
+                return True
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
+        try:
+            self._project_id()
+            self._data_residency()
+        except ValueError as exc:
+            self._json(
+                {"error": "invalid_project_scope", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         parsed = urlparse(self.path)
         path = self._normalise_api_path(parsed.path)
         if path == "/api/health":
@@ -184,6 +227,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "policy_registry": public_policy_registry_policy(),
                 "bounded_canary": public_canary_policy(),
                 "unified_evidence_console": public_evidence_console_policy(),
+                "security_boundary": public_security_policy(
+                    runtime_counts=dict(runtime_health.get("security") or {})
+                ),
                 **contracts,
                 "control_kernel": runtime_health,
             })
@@ -192,7 +238,11 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             run_id = parse_qs(parsed.query).get("run_id", [None])[0]
             try:
                 self._json(
-                    build_evidence_console(self.manager, run_id=run_id)
+                    build_evidence_console(
+                        self.manager,
+                        run_id=run_id,
+                        project_id=self._project_id(),
+                    )
                 )
             except KeyError:
                 self._json(
@@ -208,12 +258,32 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/evidence/exports":
             try:
                 limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
-                self._json({"exports": self.manager.evidence_exports(limit=limit)})
+                self._json({
+                    "exports": self.manager.evidence_exports(
+                        limit=limit,
+                        project_id=self._project_id(),
+                    )
+                })
             except (TypeError, ValueError, EvidenceConsoleStoreError) as exc:
                 self._json(
                     {"error": "invalid_export_query", "message": str(exc)},
                     HTTPStatus.BAD_REQUEST,
                 )
+            return
+        if path == "/api/v1/security/policy":
+            kernel = self.manager.control_kernel
+            counts = kernel.security_store.counts() if kernel is not None else {}
+            self._json({
+                **public_security_policy(runtime_counts=counts),
+                "project": (
+                    kernel.project_status(self._project_id())
+                    if kernel is not None
+                    else {
+                        "project_id": self._project_id(),
+                        "status": "active",
+                    }
+                ),
+            })
             return
         if path == "/api/v1/canary/policy":
             if self.manager.control_kernel is not None:
@@ -535,16 +605,18 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             })
             return
         if path in {"/api/runs", "/api/v1/runs"}:
-            self._json({"runs": self.manager.list()})
+            self._json({"runs": self.manager.list(project_id=self._project_id())})
             return
         if path == "/api/v1/resources/ledger":
             run_id = parse_qs(parsed.query).get("run_id", [None])[0]
-            if run_id is not None and self.manager.get(run_id) is None:
+            if run_id is not None and self._get_run(run_id) is None:
                 self._json(
                     {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
                 )
                 return
-            entries = self.manager.ledger(run_id=run_id)
+            entries = self.manager.ledger(
+                run_id=run_id, project_id=self._project_id()
+            )
             self._json({
                 "run_id": run_id,
                 "entries": entries,
@@ -565,11 +637,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._json(
-                {"approvals": self.manager.approvals(status=status)}
+                {
+                    "approvals": self.manager.approvals(
+                        status=status,
+                        project_id=self._project_id(),
+                    )
+                }
             )
             return
         if path == "/api/v1/evaluations":
-            self._json({"evaluations": self.manager.evaluations()})
+            evaluations = [
+                item for item in self.manager.evaluations()
+                if not item.get("run_id")
+                or self._get_run(str(item.get("run_id"))) is not None
+            ]
+            self._json({"evaluations": evaluations})
             return
         if path.startswith("/api/v1/media/projects/"):
             suffix = path.removeprefix(
@@ -577,7 +659,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             ).strip("/")
             if suffix.endswith("/shots"):
                 run_id = suffix.removesuffix("/shots").strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"},
                         HTTPStatus.NOT_FOUND,
@@ -597,7 +679,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 })
                 return
             run_id = suffix
-            if self.manager.get(run_id) is None:
+            if self._get_run(run_id) is None:
                 self._json(
                     {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
                 )
@@ -615,6 +697,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             task_id = unquote(path.removeprefix("/api/v1/tasks/").strip("/"))
             task = self.manager.task(task_id)
             if task is None:
+                self._json({"error": "task_not_found"}, HTTPStatus.NOT_FOUND)
+                return
+            if self._get_run(str(task.get("run_id") or "")) is None:
                 self._json({"error": "task_not_found"}, HTTPStatus.NOT_FOUND)
                 return
             self._json(task)
@@ -639,15 +724,24 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     {"error": "artifact_not_found"}, HTTPStatus.NOT_FOUND
                 )
                 return
+            if self._get_run(str(artifact.get("run_id") or "")) is None:
+                self._json(
+                    {"error": "artifact_not_found"}, HTTPStatus.NOT_FOUND
+                )
+                return
             self._json(artifact)
             return
         if path.startswith("/api/v1/runs/"):
             suffix = path.removeprefix("/api/v1/runs/").strip("/")
+            scoped_run_id = suffix.split("/", 1)[0]
+            if self._get_run(scoped_run_id) is None:
+                self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                return
             if suffix.endswith("/handoffs"):
                 run_id = suffix.removesuffix(
                     "/handoffs"
                 ).strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"},
                         HTTPStatus.NOT_FOUND,
@@ -696,7 +790,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 run_id = suffix.removesuffix(
                     "/economics"
                 ).strip("/")
-                record = self.manager.get(run_id)
+                record = self._get_run(run_id)
                 if record is None:
                     self._json(
                         {"error": "run_not_found"},
@@ -735,7 +829,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 run_id = suffix.removesuffix(
                     "/forecast"
                 ).strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"},
                         HTTPStatus.NOT_FOUND,
@@ -757,7 +851,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 run_id = suffix.removesuffix(
                     "/validations"
                 ).strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"},
                         HTTPStatus.NOT_FOUND,
@@ -779,7 +873,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 run_id = suffix.removesuffix(
                     "/failures"
                 ).strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"},
                         HTTPStatus.NOT_FOUND,
@@ -792,7 +886,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 return
             if suffix.endswith("/placements"):
                 run_id = suffix.removesuffix("/placements").strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
                     )
@@ -823,7 +917,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 return
             if suffix.endswith("/artifacts"):
                 run_id = suffix.removesuffix("/artifacts").strip("/")
-                if self.manager.get(run_id) is None:
+                if self._get_run(run_id) is None:
                     self._json(
                         {"error": "run_not_found"}, HTTPStatus.NOT_FOUND
                     )
@@ -837,7 +931,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 return
             if suffix.endswith("/events"):
                 run_id = suffix.removesuffix("/events").strip("/")
-                record = self.manager.get(run_id)
+                record = self._get_run(run_id)
                 if not record:
                     self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
                     return
@@ -862,7 +956,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "next_revision": events[-1].get("revision", after) if events else after,
                 })
                 return
-            record = self.manager.get(suffix)
+            record = self._get_run(suffix)
             if not record:
                 self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
                 return
@@ -870,7 +964,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/runs/"):
             run_id = path.removeprefix("/api/runs/").strip("/")
-            record = self.manager.get(run_id)
+            record = self._get_run(run_id)
             if not record:
                 self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
                 return
@@ -882,7 +976,25 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._project_id()
+            self._data_residency()
+        except ValueError as exc:
+            self._json(
+                {"error": "invalid_project_scope", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         path = self._normalise_api_path(urlparse(self.path).path)
+        if path.startswith("/api/v1/projects/") and path.endswith("/revoke"):
+            self._revoke_project(
+                unquote(
+                    path.removeprefix("/api/v1/projects/")
+                    .removesuffix("/revoke")
+                    .strip("/")
+                )
+            )
+            return
         if path == "/api/v1/evidence/exports":
             self._create_evidence_export()
             return
@@ -995,6 +1107,58 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._catalog_error(exc)
 
+    def _revoke_project(self, project_id: str) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=8_000)
+            project = normalize_project_id(project_id)
+            if project != self._project_id():
+                raise RequestError(
+                    "project header and revocation target disagree",
+                    HTTPStatus.FORBIDDEN,
+                    "project_scope_forbidden",
+                )
+            if payload.get("confirm") != f"REVOKE {project}":
+                raise ValueError(
+                    f"confirm must equal REVOKE {project}"
+                )
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "project revocation requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            tombstone, replayed = kernel.revoke_project(
+                project,
+                idempotency_key=key,
+                reason=str(payload.get("reason") or "user_requested"),
+            )
+            self._json(
+                {
+                    "project": tombstone,
+                    "replayed": replayed,
+                    "warning": (
+                        "Access is revoked immediately; physical row erasure "
+                        "is not implemented in v0.5.8.2."
+                    ),
+                },
+                HTTPStatus.ACCEPTED,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (SecurityStoreError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "project_revocation_failed", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
     def _create_run(self, *, v1: bool = False) -> None:
         try:
             payload = self._read_write_json()
@@ -1041,6 +1205,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                         "recovery_time_limit_seconds", 30.0
                     )
                 ),
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
             )
             key = self.headers.get("Idempotency-Key")
             if v1 and not key:
@@ -1055,7 +1221,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._runtime_conflict(exc)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        except (ProjectRevokedError, ValueError, TypeError, json.JSONDecodeError) as exc:
             self._json(
                 {"error": "invalid_request", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
@@ -1063,6 +1229,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _cancel_run(self, run_id: str) -> None:
         try:
+            if self._get_run(run_id) is None:
+                raise KeyError(run_id)
             payload = self._read_write_json()
             key = self.headers.get("Idempotency-Key")
             if not key:
@@ -1094,6 +1262,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _retry_run(self, run_id: str) -> None:
         try:
+            if self._get_run(run_id) is None:
+                raise KeyError(run_id)
             self._read_write_json()
             key = self.headers.get("Idempotency-Key")
             if not key:
@@ -1129,6 +1299,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _approve_media_project(self, run_id: str) -> None:
         try:
+            if self._get_run(run_id) is None:
+                raise KeyError(run_id)
             self._read_write_json()
             if not self.headers.get("Idempotency-Key"):
                 raise RequestError(
@@ -1160,6 +1332,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _approve_media_shot(self, shot_id: str) -> None:
         try:
+            if not self._shot_visible(shot_id):
+                raise KeyError(shot_id)
             self._read_write_json()
             if not self.headers.get("Idempotency-Key"):
                 raise RequestError(
@@ -1191,6 +1365,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _resolve_approval(self, approval_id: str) -> None:
         try:
+            if not any(
+                str(item.get("approval_id")) == approval_id
+                for item in self.manager.approvals(
+                    project_id=self._project_id()
+                )
+            ):
+                raise KeyError(approval_id)
             payload = self._read_write_json()
             key = self.headers.get("Idempotency-Key")
             if not key:
@@ -1426,7 +1607,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         payload: object,
         status: HTTPStatus = HTTPStatus.OK,
     ) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(
+            redact_structure(payload), ensure_ascii=False
+        ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -1436,7 +1619,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _text(self, text: str, content_type: str, filename: str) -> None:
-        body = text.encode("utf-8")
+        body = redact_text(text).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header(
@@ -1488,9 +1671,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             package = build_evidence_export(
                 self.manager,
                 run_id=run_id,
+                project_id=self._project_id(),
                 catalog_snapshot=self.catalog_store.payload(),
             )
-            receipt, replayed = self.manager.record_evidence_export(package)
+            receipt, replayed = self.manager.record_evidence_export(
+                package, project_id=self._project_id()
+            )
             stamp = str(package["generated_at"]).replace(":", "-")
             scope = run_id or "workspace"
             self._json(
@@ -1550,7 +1736,11 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"[{self.log_date_time_string()}] {fmt % args}")
+        print(
+            redact_text(
+                f"[{self.log_date_time_string()}] {fmt % args}"
+            )
+        )
 
 
 def build_server(
@@ -1579,7 +1769,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.8.1 unified evidence console"
+        description="Run the CostWeave v0.5.8.2 secure control plane"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

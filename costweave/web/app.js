@@ -1314,6 +1314,30 @@ async function loadCanaryPolicy() {
   }
 }
 
+async function loadSecurityBoundary() {
+  const live = $("#security-live");
+  if (!live) return;
+  try {
+    const response = await fetch("/api/v1/security/policy");
+    const policy = await readJson(response);
+    if (!response.ok) throw new Error("无法读取安全边界状态");
+    const project = policy.project || {};
+    const counts = policy.runtime_counts || {};
+    const active = project.status !== "revoked";
+    $("#security-network-state").textContent = policy.external_network_default_enabled ? "ON" : "OFF";
+    $("#security-project-state").textContent = active ? "已隔离" : "已撤销";
+    $("#security-project-id").textContent = project.project_id || policy.default_project_id || "local-default";
+    $("#security-secret-state").textContent = policy.secret_values_persisted ? "警告" : "0";
+    $("#security-ambiguous-count").textContent = String(counts.ambiguous_external_side_effects || 0);
+    $("#security-boundary-status").textContent = active
+      ? "默认拒绝 · 当前项目可用"
+      : "访问已撤销 · 历史行尚未物理擦除";
+    live.textContent = `已登记 ${Array.isArray(policy.adapter_registry) ? policy.adapter_registry.length : 0} 个适配器合同；外部副作用合同 ${counts.external_side_effect_contracts || 0} 个，歧义 ${counts.ambiguous_external_side_effects || 0} 个。`;
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "安全边界状态暂不可用";
+  }
+}
+
 const evidenceKindLabels = {
   actual: "实际记录",
   predicted: "预测值",
@@ -1478,5 +1502,6 @@ updateGoalCount();
 loadCatalog();
 loadPolicyRegistry();
 loadCanaryPolicy();
+loadSecurityBoundary();
 loadEvidenceConsole();
 refreshHistory({ restore: true });

@@ -1,4 +1,52 @@
-# CostWeave v0.5.8.1 架构说明
+# CostWeave v0.5.8.2 架构说明
+
+v0.5.8.2 在运行、Adapter 和所有公开数据出口之间增加中央安全边界。它不把项目头误当成公网认证，而是在回环单机部署内提供一致的能力准入、密钥租约、项目范围、共享脱敏和外部副作用合同。
+
+```text
+Project + Residency + WorkOrder
+              |
+              v
+      Central Security Boundary
+      | plugin/revision allowlist
+      | endpoint + DNS admission
+      | prompt/tool permission gate
+      | project tombstone check
+      +--------------+---------------+
+                     |
+          short-lived SecretLease
+                     |
+                     v
+        default-off HTTP Adapter
+                     |
+        Provider Idempotency-Key
+                     |
+                     v
+      immutable side-effect receipt
+       reserved/completed/failed/
+       ambiguous/reconciled
+
+Run / Task / Artifact / Ledger / Approval / Evidence
+                     |
+              project filter
+                     |
+            shared redaction layer
+                     |
+              HTTP / log / export
+```
+
+Adapter 插件清单固定插件 ID、修订、允许部署、密钥能力、工具能力、响应上限和副作用模式。远程连接只有在两个运行开关都显式启用后才可能执行；URL 凭据、查询参数、非 HTTPS、回环/私网/保留地址、DNS 解析到非公网地址、重定向和超限响应都会失败关闭。用户目标与假设作为不可信输入传给模型，禁止动作、输出 Schema、验收条件与 `allowed_tools=[]` 留在可信合同中。
+
+密钥只由 `SecretBroker` 从环境读取并放入有 TTL 的可清零字节缓冲区。数据库、公开配置和遥测只看见引用名、非可逆的轮换版本和“值未持久化”标记。所有 JSON 响应、错误、日志和证据导出复用同一套结构化/文本脱敏规则。
+
+`project_id` 和 `data_residency` 进入 Run 请求与权威投影；旧数据迁移为 `local-default/local`。运行、账本、审批、任务、Artifact、媒体和证据出口先验证运行所属项目，跨项目统一返回不存在。migration 027 为导出收据增加项目列，并新增不可变项目墓碑、副作用合同和副作用事件。项目撤销是立即生效的逻辑访问撤销；历史行物理擦除与加密密钥销毁明确留待 v0.6。
+
+外部网络调用前必须建立副作用合同，并且 Provider 幂等键或显式补偿策略至少存在一个。相同项目、相同键、相同请求会复用合同；同键不同请求拒绝。收到确定响应后可按既有有限重试策略处理 429/503；连接级不确定错误标为 `ambiguous`，不自动重放。
+
+Runtime Schema 为 `v5.8.2`，migration 数为 27；Run Projection Schema 继续为 `v5.6`。完整威胁背景、方案比较、实施步骤和验收标准位于 `docs/security/v0.5.8.2-hardening/`。
+
+---
+
+## v0.5.8.1 Unified Evidence Console
 
 v0.5.8.1 在既有控制面之上增加只读的 Unified Evidence Console。它不改变 Planner、路由、执行、Canary 或回滚决定，而是把分散的数据转换成统一证据合同，并拒绝用预测、模拟或缺失值替代真实效果。
 

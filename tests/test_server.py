@@ -60,12 +60,12 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.5.8.1", health["version"])
+        self.assertEqual("0.5.8.2", health["version"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v5.8.1", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v5.8.2", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
@@ -153,7 +153,7 @@ class ServerTests(unittest.TestCase):
             0.0, health["bounded_canary"]["high_risk_exploration_rate"]
         )
         self.assertEqual(
-            "v0.5.8.1",
+            "v0.5.8.2",
             health["unified_evidence_console"]["schema_version"],
         )
         self.assertTrue(
@@ -174,7 +174,7 @@ class ServerTests(unittest.TestCase):
     def test_unified_evidence_console_and_export_receipt(self):
         status, console = self.fetch_json("/api/v1/evidence/console")
         self.assertEqual(200, status)
-        self.assertEqual("v0.5.8.1", console["schema_version"])
+        self.assertEqual("v0.5.8.2", console["schema_version"])
         self.assertEqual(
             {"actual", "predicted", "simulated", "missing"},
             set(console["coverage"]),

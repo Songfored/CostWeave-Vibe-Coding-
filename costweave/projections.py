@@ -48,6 +48,8 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
             "id": str(record.id),
             "request": {
                 "goal": record.request.goal,
+                "project_id": record.request.project_id,
+                "data_residency": record.request.data_residency,
                 "mode": record.request.mode.value,
                 "budget": record.request.budget,
                 "quality_floor": record.request.quality_floor,
@@ -148,6 +150,8 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     request_data = dict(snapshot.get("request") or {})
     request = RunRequest(
         goal=str(request_data.get("goal", "")),
+        project_id=str(request_data.get("project_id", "local-default")),
+        data_residency=str(request_data.get("data_residency", "local")),
         mode=RunMode(request_data.get("mode", RunMode.BALANCED)),
         budget=float(request_data.get("budget", 1.0)),
         quality_floor=float(request_data.get("quality_floor", 0.78)),

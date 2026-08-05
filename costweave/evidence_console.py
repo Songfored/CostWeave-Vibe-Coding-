@@ -1,4 +1,4 @@
-"""Unified, provenance-first evidence views for CostWeave v0.5.8.1."""
+"""Unified, provenance-first, project-scoped evidence views for v0.5.8.2."""
 
 from __future__ import annotations
 
@@ -19,9 +19,15 @@ from .outcome_dataset import OUTCOME_DATASET_SCHEMA_VERSION
 from .planning_contracts import PLANNING_POLICY_VERSION, PLANNING_SCHEMA_VERSION
 from .policy_registry import public_policy_registry_policy
 from .production_shadow import public_production_shadow_policy
+from .security_boundary import (
+    DEFAULT_PROJECT_ID,
+    normalize_project_id,
+    public_security_policy,
+    redact_structure,
+)
 
 
-EVIDENCE_CONSOLE_SCHEMA_VERSION = "v0.5.8.1"
+EVIDENCE_CONSOLE_SCHEMA_VERSION = "v0.5.8.2"
 EVIDENCE_EXPORT_SCHEMA_VERSION = "v0.5.8.1-export"
 EVIDENCE_TAXONOMY_VERSION = "evidence-kinds-v1"
 EVIDENCE_KINDS = ("actual", "predicted", "simulated", "missing")
@@ -174,16 +180,68 @@ def _runtime_counts(manager: Any) -> tuple[dict[str, Any], dict[str, int]]:
     return health, store_counts
 
 
+def _record_project(record: Any) -> str:
+    request = getattr(record, "request", None)
+    return normalize_project_id(
+        getattr(request, "project_id", DEFAULT_PROJECT_ID)
+    )
+
+
+def _scoped_get(manager: Any, run_id: str, project_id: str) -> Any:
+    try:
+        return manager.get(run_id, project_id=project_id)
+    except TypeError:
+        record = manager.get(run_id)
+        if record is not None and _record_project(record) != project_id:
+            return None
+        return record
+
+
+def _scoped_list(manager: Any, project_id: str) -> list[dict[str, Any]]:
+    try:
+        return list(manager.list(project_id=project_id))
+    except TypeError:
+        result = []
+        for item in manager.list():
+            request = item.get("request") or {}
+            item_project = normalize_project_id(
+                request.get("project_id", DEFAULT_PROJECT_ID)
+            )
+            if item_project == project_id:
+                result.append(item)
+        return result
+
+
+def _scoped_ledger(
+    manager: Any,
+    project_id: str,
+    *,
+    run_id: str | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        return list(manager.ledger(run_id=run_id, project_id=project_id))
+    except TypeError:
+        if run_id:
+            return list(manager.ledger(run_id=run_id))
+        allowed = {str(item.get("id")) for item in _scoped_list(manager, project_id)}
+        return [
+            item for item in manager.ledger()
+            if str(item.get("run_id")) in allowed
+        ]
+
+
 def build_evidence_console(
     manager: Any,
     *,
     run_id: str | None = None,
+    project_id: str = DEFAULT_PROJECT_ID,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Build a compact evidence snapshot without creating a second fact store."""
 
     captured_at = generated_at or utc_now()
-    record = manager.get(run_id) if run_id else None
+    project = normalize_project_id(project_id)
+    record = _scoped_get(manager, run_id, project) if run_id else None
     if run_id and record is None:
         raise KeyError(run_id)
     run = record.snapshot() if record is not None else None
@@ -194,7 +252,8 @@ def build_evidence_console(
     )
     health, store_counts = _runtime_counts(manager)
     kernel = getattr(manager, "control_kernel", None)
-    run_count = _safe_int(store_counts.get("runs", len(manager.list())))
+    scoped_runs = _scoped_list(manager, project)
+    run_count = len(scoped_runs)
     event_count = _safe_int(store_counts.get("events", len(events)))
     external_attempts = _safe_int(health.get("external_call_attempts"))
     task_families = _task_families(run)
@@ -213,9 +272,7 @@ def build_evidence_console(
     shadow_counts = (
         kernel.production_shadow_store.counts() if kernel is not None else {}
     )
-    ledger_entries = (
-        manager.ledger(run_id=run_id) if run_id else manager.ledger()
-    )
+    ledger_entries = _scoped_ledger(manager, project, run_id=run_id)
     placements = manager.placements(run_id) if run_id else []
     resources = manager.resources()
     actual_cost = round(
@@ -360,6 +417,19 @@ def build_evidence_console(
             record_count=_safe_int(canary_counts.get("canary_assignments")),
             captured_at=captured_at,
             definition="运行时策略快照和回滚的控制记录；候选选择不等于 Provider 调用。",
+        ),
+        _source(
+            "security_boundary",
+            "安全边界与项目隔离",
+            evidence_kind="actual",
+            evidence_level="E1",
+            version=public_security_policy()["schema_version"],
+            api_path="/api/v1/security/policy",
+            record_count=_safe_int(
+                (health.get("security") or {}).get("external_side_effect_events")
+            ),
+            captured_at=captured_at,
+            definition="项目隔离、密钥租约、网络许可和外部副作用合同的控制面记录。",
         ),
     ]
 
@@ -619,7 +689,12 @@ def build_evidence_console(
         "schema_version": EVIDENCE_CONSOLE_SCHEMA_VERSION,
         "taxonomy_version": EVIDENCE_TAXONOMY_VERSION,
         "generated_at": captured_at,
-        "scope": {"kind": "run" if run_id else "workspace", "run_id": run_id},
+        "scope": {
+            "kind": "run" if run_id else "workspace",
+            "run_id": run_id,
+            "project_id": project,
+            "data_residency": "local",
+        },
         "summary": {
             "evidence_level": "E0",
             "commercial_claims_allowed": False,
@@ -649,45 +724,18 @@ def build_evidence_console(
                 **public_canary_policy(),
                 "runtime_counts": canary_counts,
             },
+            "security_boundary": {
+                **public_security_policy(),
+                "runtime_counts": dict(health.get("security") or {}),
+            },
         },
     }
     result["snapshot_hash"] = _digest(result)
     return result
 
 
-_SENSITIVE_KEYS = {
-    "api_key",
-    "apikey",
-    "authorization",
-    "bearer",
-    "credential",
-    "credentials",
-    "password",
-    "secret",
-    "signing_key",
-}
-
-
 def _redact_secrets(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        cleaned: dict[str, Any] = {}
-        for key, item in value.items():
-            normalised = str(key).strip().lower().replace("-", "_")
-            if (
-                normalised in _SENSITIVE_KEYS
-                or normalised.endswith("_api_key")
-                or normalised.endswith("_password")
-                or normalised.endswith("_secret")
-            ):
-                cleaned[str(key)] = "[REDACTED]"
-            else:
-                cleaned[str(key)] = _redact_secrets(item)
-        return cleaned
-    if isinstance(value, (list, tuple)):
-        return [_redact_secrets(item) for item in value]
-    if isinstance(value, str) and value.lower().startswith("bearer "):
-        return "[REDACTED]"
-    return value
+    return redact_structure(value)
 
 
 def _record_count(records: Mapping[str, Any]) -> int:
@@ -706,16 +754,21 @@ def build_evidence_export(
     manager: Any,
     *,
     run_id: str | None = None,
+    project_id: str = DEFAULT_PROJECT_ID,
     catalog_snapshot: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Freeze console provenance and bounded raw records into one JSON package."""
 
     captured_at = generated_at or utc_now()
+    project = normalize_project_id(project_id)
     console = build_evidence_console(
-        manager, run_id=run_id, generated_at=captured_at
+        manager,
+        run_id=run_id,
+        project_id=project,
+        generated_at=captured_at,
     )
-    record = manager.get(run_id) if run_id else None
+    record = _scoped_get(manager, run_id, project) if run_id else None
     if run_id and record is None:
         raise KeyError(run_id)
     events = (
@@ -725,13 +778,11 @@ def build_evidence_export(
     )
     records: dict[str, Any] = {
         "run": record.snapshot() if record is not None else None,
-        "run_summaries": manager.list()[:MAX_EXPORTED_RUNS],
+        "run_summaries": _scoped_list(manager, project)[:MAX_EXPORTED_RUNS],
         "events": events,
         "planning": manager.planning(run_id) if run_id else None,
         "placements": manager.placements(run_id) if run_id else [],
-        "cost_ledger": (
-            manager.ledger(run_id=run_id) if run_id else manager.ledger()
-        ),
+        "cost_ledger": _scoped_ledger(manager, project, run_id=run_id),
         "validations": manager.validations(run_id) if run_id else [],
         "failures": manager.failures(run_id) if run_id else [],
         "artifacts": manager.artifacts(run_id) if run_id else [],
@@ -758,6 +809,9 @@ def build_evidence_export(
             "commercial_claims_allowed": False,
             "secrets_redacted": True,
             "raw_artifact_content_included": False,
+            "project_isolated": True,
+            "logical_project_erasure": True,
+            "physical_project_erasure": False,
         },
         "console": console,
         "records": safe_records,
@@ -817,6 +871,9 @@ def public_evidence_console_policy() -> dict[str, Any]:
         "commercial_claims_allowed_without_e2": False,
         "export_secrets_redacted": True,
         "export_artifact_content_included": False,
+        "project_isolation_required": True,
+        "logical_project_erasure_supported": True,
+        "physical_project_erasure_supported": False,
     }
 
 
