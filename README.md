@@ -1,5 +1,21 @@
 # CostWeave
 
+## Version line (important)
+
+`v0.5.8.4` is the frozen stable engineering baseline. The active branch is `v0.6.0 Decision Intelligence Lab`; it adds offline, result-blind tournament contracts and does not rewrite the v0.5.8.4 history. The packaged v0.6.0 seed is E0 simulation only, so it cannot support a real cost-reduction or competitor-superiority claim.
+
+Quick offline reproduction:
+
+```text
+python -B -m costweave.tournament_cli --pretty
+```
+
+The current v0.6.0 regression run covers 842 isolated tests. The older v0.5 section below intentionally preserves its original 706-test release snapshot.
+
+The new API is loopback-only and offline by default: `GET /api/v1/tournaments/status`, `POST /api/v1/tournaments/offline`, and `GET /api/v1/tournaments/{tournament_id}`. See [`docs/CHANGELOG-v0.6.0.md`](docs/CHANGELOG-v0.6.0.md) and [`docs/V0.6.0_MIGRATION.md`](docs/V0.6.0_MIGRATION.md).
+
+> 下一阶段已经按 GitHub 竞品调研进行第二次重构：不再采用“先规划、再路由”的简单顺序，而是联合选择管理拓扑、任务分解、模型、并发、验证和恢复，并以信息价值决定是否值得继续思考。下一版为 **v0.6.0 Decision Intelligence Lab**；产品方向见 [`竞争计划`](docs/V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`决策智能架构`](docs/V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)，逐步开发必须从 [`低能力模型施工总手册`](docs/V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md) 开始，并按 [`v0.6.0 精确实施规格`](docs/V0.6.0_IMPLEMENTATION_SPEC.md) 一项一项执行。
+
 ## v0.5.8.4：v0.5 Stable Engineering Release
 
 v0.5.8.4 不再增加新的路由启发式，而是把整个 v0.5 控制平面收束为可安装、可重放、可验证、可诚实发布的工程稳定版：

@@ -7,9 +7,9 @@ import json
 from typing import Any, Mapping
 
 
-RELEASE_SCHEMA_VERSION = "v0.5.8.4"
-EXPECTED_RUNTIME_SCHEMA = "v5.8.4"
-EXPECTED_MIGRATIONS = 29
+RELEASE_SCHEMA_VERSION = "v0.6.0"
+EXPECTED_RUNTIME_SCHEMA = "v6.0.0"
+EXPECTED_MIGRATIONS = 30
 
 
 def _canonical_json(value: Any) -> str:
@@ -54,7 +54,7 @@ def audit_event_replay(store: Any) -> dict[str, Any]:
 def public_release_policy() -> dict[str, Any]:
     return {
         "schema_version": RELEASE_SCHEMA_VERSION,
-        "release_series": "v0.5-stable",
+        "release_series": "v0.6-lab",
         "engineering_stable_scope": "offline single-process control plane",
         "real_provider_calls_default_enabled": False,
         "paid_calls_default_enabled": False,

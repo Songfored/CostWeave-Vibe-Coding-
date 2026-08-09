@@ -1,63 +1,40 @@
-# CostWeave v0.5.8.4 Stable 验收报告
+# CostWeave v0.6.0 acceptance snapshot
 
-验收日期：2026-08-09
+This file is a release-workspace snapshot. It records the acceptance boundary for the active `v0.6.0` line while preserving `v0.5.8.4` as the frozen stable baseline.
 
-## 结论
+## Scope accepted
 
-v0.5.8.4 通过 v0.5 Stable Engineering Release 的离线工程退出门，可以发布为单进程控制平面稳定版。真实效果门仍未通过，因此不是生产就绪或商业领先证明。
+- Deterministic contracts and round trips.
+- Migration 030 and immutable decision/tournament persistence.
+- Safe result-blind benchmark records and importers.
+- Offline policy evaluation, paired bootstrap, claim gates, CLI, API, and UI wiring.
 
-## 自动化回归
+## Scope explicitly not accepted as a claim
 
-| 项目 | 结果 |
-|---|---:|
-| 完整自动化回归 | 706 / 706 通过 |
-| 失败 | 0 |
-| 完整回归耗时 | 299.35 秒 |
-| v0.5.8.4 新增专项 | 12 / 12 通过 |
-| Runtime Schema | `v5.8.4` |
-| migration | 29 |
+- No real provider quality result.
+- No real cost-reduction percentage.
+- No production routing authority.
+- No claim of superiority over Claude, OpenAI, or any other competitor.
 
-新增专项覆盖 migration 029、稳定版硬门、全部运行重放、事件篡改、外部/付费调用关闭、不可变发布证明、幂等冲突、项目隔离、公开证据边界、全新环境复现和 Release API。
+## Required commands
 
-## 全新 Wheel 安装复现
+```text
+python -B tests/run_isolated.py
+python -B -m costweave.tournament_cli --pretty
+python -B -m costweave.release_cli --pretty
+```
 
-发布 wheel 安装到与源码目录隔离的全新目标目录后，执行 `python -B -m costweave.release_cli --pretty`：
+## Observed verification (2026-08-09)
 
-- 离线运行完成，最终 revision 50；
-- 50 个事件哈希完整；
-- EventLog 重建投影与当前投影一致；
-- 7 / 7 个运行时稳定门通过；
-- 逻辑备份健康、文件清单匹配、逻辑快照匹配；
-- 外部 Provider 调用尝试 0；
-- 命令退出码 0。
+- Full isolated suite: **842 passed, 0 failed**.
+- v0.6.0 targeted suite: **54 passed, 0 failed**.
+- Release gates: **engineering_ready=true**, runtime `v6.0.0`, 30 migrations, SQLite WAL, replay parity healthy.
+- Offline tournament: completed with zero provider calls and zero network calls; bundled seed remains `E0-simulated` and claim gates remain insufficient-sample.
+- Wheel: `costweave-0.6.0-py3-none-any.whl`, SHA-256 `da5140b45b6f6c20973e21d4d58d4a49d714845e328199748853aef3b9de4ad9`.
+- Archives contain no `__pycache__`, `.pyc`, or `.pyo` entries.
 
-## 浏览器验收
+## Release artifacts
 
-| 视口 | 布局 | 横向溢出 | 导航溢出 | 页面日志 |
-|---|---|---|---|---|
-| 1280×720 | 稳定版卡片四列 | 无 | 无 | 0 条 warning/error |
-| 390×844 | 稳定版卡片单列 | 无 | 无 | 0 条 warning/error |
-
-手机导航保留“韧性验收、稳定版、证据控制台、模型管理”四个关键入口。页面同时显示“工程稳定”和“商业效果未验证”，没有把 Stable 解释成生产领先。
-
-## 发布资产门
-
-- Wheel；
-- 运行包与源码包；
-- SHA-256 校验文件；
-- Benchmark 报告；
-- 模型卡、策略卡、数据卡；
-- 安装、迁移、回滚与复现指南；
-- 安全报告、Changelog、验收报告。
-
-最终压缩包与校验和在打包后进行独立内容核验。
-
-## 未通过的真实效果门
-
-- 满足 E2+ 的真实效果样本：0；
-- 30～50 个方向性真实任务：未执行；
-- 真实 Provider 质量/账单/P95 对照：未执行；
-- 生产高并发、分布式恢复和长期运行：未执行；
-- 固定降本比例、真实提速、生产可用性和世界领先结论：不支持。
-
-因此，本版可声明“v0.5 离线工程稳定、可复现”，不可声明“生产就绪”或任何未经真实基准验证的商业比例。
+- `costweave-v0.6.0.zip` — runtime archive.
+- `costweave-v0.6.0-source.zip` — source archive.
+- `costweave-0.6.0-SHA256SUMS.txt` — archive, wheel, and acceptance-report checksums.

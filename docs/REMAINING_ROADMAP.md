@@ -1,8 +1,8 @@
 # CostWeave 后续未执行路线图
 
-> 文档日期：2026-08-05  
+> 文档日期：2026-08-09  
 > 当前工程基线：v0.5.8.4 v0.5 Stable Engineering Release  
-> 本文剩余范围：v0.5.6.3 真实证据门、v0.5.8，以及暂定 v0.6 Production Optimization  
+> 本文剩余范围：v0.5.6.3 真实证据门，以及已重排的 v0.6 Competitive Workflow Routing  
 > 状态：v0.5.6.1～v0.5.8.4 工程合同已完成；v0.5.6.3 的 30～50 个真实任务门尚未通过  
 
 > 2026-08-04 增量：v0.5.6.4.1～v0.5.6.5 已完成准入、离线指标、全局组合、精确验收和安全策略候选；v0.5.7.1 已完成离线回放；v0.5.7.2 已完成生产近似旁路建议；v0.5.7.3 已完成签名策略注册表；v0.5.7.4 已完成默认关闭的有界运行时选择、任务启动快照、阶段门和自动回滚工程合同。所有结果都没有越过未完成的 E2 真实证据门，也没有训练、真实 Provider Canary 或可对外使用的生产路由收益。
@@ -10,6 +10,7 @@
 > 2026-08-05 增量：v0.5.8.2 已完成 Adapter 插件白名单、默认关闭的网络准入、短时密钥租约、共享脱敏、项目范围与逻辑撤销、Prompt/工具边界，以及 Provider 幂等副作用合同。当前没有真实 Provider 兼容性数据，物理项目擦除仍未实现，下一工程版本为 v0.5.8.3。
 > 2026-08-09 增量：v0.5.8.3 已完成确定性故障注入、30 秒故障转移合同、deadline miss 评估、安全恢复、不可变恢复收据、事件完整性与逻辑备份恢复。694 项测试与桌面/手机浏览器验收通过；指标仍是 E0 夹具，下一工程版本为 v0.5.8.4。
 > 2026-08-09 增量：v0.5.8.4 已完成全量 EventLog 重放、稳定版就绪清单、migration 029 不可变发布证明、全新安装验证命令、发布文档与资产。v0.5 工程路线结束；v0.6 旧规划保留为候选，启动前重新评审。
+> 2026-08-09 决策智能 Revision 2：新增任务/系统信念、能力证据图、信息价值元控制器、完整策略联合搜索、执行中信念更新与分层信用分配。v0.6 改为“决策智能实验室 → 理性元控制 → 能力图与校准路由 → 联合策略搜索 → 动态恢复 → 安全学习 → 真实 Shadow → 竞争证明”。下一版固定为 v0.6.0 Decision Intelligence Lab。产品路线见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)；交给低能力模型施工时，必须先读 [`V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md`](V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)，再严格执行 [`V0.6.0_IMPLEMENTATION_SPEC.md`](V0.6.0_IMPLEMENTATION_SPEC.md)。
 > 核心原则：先取得真实证据，再训练预测器；先离线和 Shadow，再允许 Canary；未经真实基准验证，不宣传固定降本比例。
 
 ## 1. 为什么调整后续排期
@@ -53,7 +54,10 @@ v0.5.7.1～v0.5.7.4 回放、Shadow、Canary、回滚
 v0.5.8.1～v0.5.8.4 集成、压力、安全、v0.5 Stable
         │
         ▼
-v0.6.1～v0.6.7 暂定生产优化路线
+v0.6.0 决策智能实验室（下一版）
+        │
+        ▼
+v0.6.1～v0.6.7 网关、学习路由、任务级优化与生产证明
 ```
 
 任何版本未通过退出门槛时，后续依赖版本不得把该能力视为已经成立。
@@ -720,7 +724,13 @@ v0.5 Stable 退出门槛：
 - Wheel、运行包、源码包、SHA-256、发布说明与完整验收报告；
 - 真实效果门仍未通过，因此 Stable 仅表示离线单进程工程稳定。
 
-## 13. v0.6：Production Optimization（暂定）
+## 13. v0.6：Competitive Workflow Routing（已重新规划）
+
+2026-08-09 重新审视 RouteLLM、LLMRouter、LLMRouterBench、RouterBench、LiteLLM、TensorZero、LangGraph、Microsoft Agent Framework、DSPy 与 CrewAI 后，原先的 v0.6 排期不再作为执行顺序。新的原则是“先建立公平基准并证明决策优势，再接真实网关和扩展生产能力”。详细、可证伪的路线与晋级门见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)。
+
+下一版确定为 **v0.6.0 Decision Intelligence Lab**：统一 Task/System Belief、Capability Posterior、Whole Strategy、Decision Trace 与公平 Tournament，让 CostWeave、固定基线、学习型 Router 及外部 Agent 项目在同一状态和评分器下对打，默认外部调用和付费均为 0。核心算法见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)。
+
+以下旧 Production Optimization 内容保留为长期候选能力，但其开发顺序已被新计划取代。
 
 v0.5.8 Stable 已完成，但 v0.6 不自动启动。以下内容保留为候选规划；正式开发前应结合真实测试意愿、Token/资金预算和 Provider 接入优先级重新排期。v0.6 的目标不应是再次增加路由规则，而应把经过验证的控制平面扩展为可运行的生产系统。
 
@@ -933,3 +943,6 @@ CostWeave 只有在以下事实同时成立后，才可以被称为经过验证�
 8. 所有策略可以解释、重放、冻结和回滚；
 9. 失败数据与成功数据同等进入报告；
 10. 任何“世界顶尖”或固定降本比例都来自可重复比较，而不是设计推断。
+# v0.6.0 implementation status
+
+The frozen baseline is `v0.5.8.4`; the current development line is `v0.6.0`. The initial Decision Intelligence contracts, migration 030, benchmark seed, importers, blind policies, metrics, statistics, claim gates, tournament runner, CLI, API, and UI slice are implemented. Real-provider integration and commercial claims remain deliberately out of scope.

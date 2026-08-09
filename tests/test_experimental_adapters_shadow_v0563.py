@@ -378,8 +378,8 @@ class ExperimentalAdapterTests(unittest.TestCase):
         self.assertEqual(1, len(transport.calls))
 
     def test_migration_and_runtime_schema_are_v0563(self):
-        self.assertEqual("v5.8.4", RUNTIME_SCHEMA_VERSION)
-        self.assertEqual(29, EventStore(self.path).health()["migrations"])
+        self.assertEqual("v6.0.0", RUNTIME_SCHEMA_VERSION)
+        self.assertEqual(30, EventStore(self.path).health()["migrations"])
         self.assertIn("external_calls", self.store.counts())
 
 

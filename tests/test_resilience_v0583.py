@@ -45,8 +45,8 @@ class ResilienceContractTests(unittest.TestCase):
 
     def test_migration_028_and_integrity_audit(self) -> None:
         health = self.kernel.health()
-        self.assertEqual("v5.8.4", RUNTIME_SCHEMA_VERSION)
-        self.assertEqual(29, health["migrations"])
+        self.assertEqual("v6.0.0", RUNTIME_SCHEMA_VERSION)
+        self.assertEqual(30, health["migrations"])
         self.assertTrue(health["resilience"]["integrity"]["healthy"])
         self.assertEqual(1.0, health["resilience"]["integrity"]["event_integrity_coverage"])
 
@@ -329,7 +329,7 @@ class ResilienceApiTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual("v0.5.8.3", resilience["schema_version"])
         self.assertTrue(resilience["integrity"]["healthy"])
-        self.assertEqual(29, resilience["runtime"]["migrations"])
+        self.assertEqual(30, resilience["runtime"]["migrations"])
         headers = {
             "Content-Type": "application/json",
             "Idempotency-Key": "api-resilience-campaign-001",

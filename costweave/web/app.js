@@ -1486,6 +1486,59 @@ async function loadEvidenceConsole(runId = state.runId) {
   }
 }
 
+async function loadDecisionIntelligenceStatus() {
+  const statusNode = $("#decision-intelligence-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/tournaments/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取离线竞赛状态");
+    $("#decision-intelligence-cases").textContent = String(data.case_count ?? "—");
+    $("#decision-intelligence-policies").textContent = "4";
+    $("#decision-intelligence-claims").textContent = data.evidence_level === "E0-simulated" ? "未通过" : "待验收";
+    $("#decision-intelligence-live").textContent = String(data.provider_calls ?? 0);
+    statusNode.textContent = `${data.evidence_level || "E0"} · 离线就绪`;
+  } catch (error) {
+    statusNode.textContent = "离线竞赛暂不可用";
+    $("#decision-intelligence-feedback").textContent = error instanceof Error ? error.message : "无法读取状态";
+  }
+}
+
+async function runOfflineTournament() {
+  const button = $("#run-offline-tournament");
+  const feedback = $("#decision-intelligence-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  feedback.textContent = "正在运行本地竞赛…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function")
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/tournaments/offline", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `ui-tournament-${suffix}`,
+      },
+      body: JSON.stringify({ confirm: "RUN_OFFLINE_TOURNAMENT", seed: 600, bootstrap_samples: 200 }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "离线竞赛未完成");
+    const report = data.report || {};
+    const claims = Object.values(report.claim_gates || {});
+    $("#decision-intelligence-cases").textContent = String(report.policy_metrics?.["strong-only"]?.total_cases ?? "—");
+    $("#decision-intelligence-policies").textContent = String(Object.keys(report.policy_metrics || {}).length);
+    $("#decision-intelligence-claims").textContent = claims.some((item) => item.passed) ? "部分通过" : "未通过";
+    $("#decision-intelligence-live").textContent = String(report.provider_calls ?? 0);
+    $("#decision-intelligence-status").textContent = data.replayed ? "已复用相同结果" : "竞赛完成 · E0 模拟";
+    feedback.textContent = `报告 ${String(report.report_hash || "").slice(0, 12)}…；不构成商业结论`;
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "离线竞赛未完成";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1549,6 +1602,7 @@ $("#cancel-import").addEventListener("click", () => $("#import-dialog").close())
 $$(".evidence-filter").forEach((button) => button.addEventListener("click", () => setEvidenceFilter(button.dataset.evidenceKind || "all")));
 $("#refresh-evidence").addEventListener("click", () => loadEvidenceConsole(state.runId));
 $("#export-evidence").addEventListener("click", exportEvidencePackage);
+$("#run-offline-tournament").addEventListener("click", runOfflineTournament);
 
 updateGoalCount();
 loadCatalog();
@@ -1558,4 +1612,5 @@ loadSecurityBoundary();
 loadResilienceStatus();
 loadStableReleaseStatus();
 loadEvidenceConsole();
+loadDecisionIntelligenceStatus();
 refreshHistory({ restore: true });

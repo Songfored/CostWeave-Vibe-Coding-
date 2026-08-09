@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable Engineering</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable Engineering · v0.6.0 Decision Intelligence Lab</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -26,6 +26,7 @@
       <a href="#resilience-section">韧性验收</a>
       <a href="#stable-release-section">稳定版</a>
       <a href="#evidence-console-section">证据控制台</a>
+      <a href="#decision-intelligence-section">v0.6.0 分流竞赛</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
@@ -407,7 +408,7 @@
       <p class="registry-intro">稳定版状态由运行时迁移、事件完整性、EventLog 重放、默认零外部调用和发布证明共同决定。工程合同通过与真实商业效果是两条独立结论。</p>
       <div class="stable-release-grid">
         <article><span>工程稳定门</span><strong id="stable-engineering-state">检查中</strong><small>全部硬门必须通过</small></article>
-        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v5.8.4</strong><small id="stable-migration-count">29 项 migration</small></article>
+        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.0.0</strong><small id="stable-migration-count">30 项 migration</small></article>
         <article><span>EventLog 重放</span><strong id="stable-replay-state">检查中</strong><small id="stable-replay-count">0 个运行</small></article>
         <article><span>商业效果结论</span><strong id="stable-commercial-state">未验证</strong><small>真实成本 / 质量 / P95 仍需 E2+</small></article>
       </div>
@@ -455,6 +456,27 @@
         </article>
       </div>
       <p id="evidence-live" class="catalog-live" role="status" aria-live="polite">正在建立证据快照…</p>
+    </section>
+
+    <section id="decision-intelligence-section" class="decision-intelligence-section" aria-labelledby="decision-intelligence-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">V0.6.0 DECISION INTELLIGENCE LAB</span>
+          <h2 id="decision-intelligence-title">离线分流竞赛</h2>
+        </div>
+        <span id="decision-intelligence-status" class="registry-boundary">正在读取种子数据…</span>
+      </div>
+      <p class="registry-intro">仅使用内置 E0 模拟数据，比较固定强模型、低成本模型、均衡模型和确定性随机策略。不会调用供应商、不会读取 API Key，也不会把模拟数据当作商业结论。</p>
+      <div class="decision-intelligence-grid">
+        <article><span>Case</span><strong id="decision-intelligence-cases">—</strong><small>内置评测案例</small></article>
+        <article><span>Policy</span><strong id="decision-intelligence-policies">—</strong><small>结果盲策略</small></article>
+        <article><span>Claim Gate</span><strong id="decision-intelligence-claims">—</strong><small>当前不可声明</small></article>
+        <article><span>Provider Calls</span><strong id="decision-intelligence-live">0</strong><small>离线运行固定为 0</small></article>
+      </div>
+      <div class="decision-intelligence-actions">
+        <button id="run-offline-tournament" class="secondary-button" type="button">运行离线竞赛</button>
+        <span id="decision-intelligence-feedback" class="catalog-live" role="status" aria-live="polite"></span>
+      </div>
     </section>
 
     <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
@@ -553,7 +575,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.8.4 / v0.5 Stable Engineering</span><span>MIT Licensed · 2026</span></footer>
+  <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Decision Intelligence Lab</span><span>MIT Licensed · 2026</span></footer>
   <script src="/app.js?v=0.5.8.4" defer></script>
 </body>
 </html>

@@ -82,7 +82,7 @@ class V051ProjectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runtime.sqlite3"
             first = ControlKernel(path)
-            self.assertEqual(29, first.health()["migrations"])
+            self.assertEqual(30, first.health()["migrations"])
             connection = sqlite3.connect(path)
             try:
                 indexes = {
@@ -96,8 +96,8 @@ class V051ProjectionTests(unittest.TestCase):
             self.assertIn("idx_events_run_kind_revision", indexes)
             self.assertIn("idx_events_kind_run_revision", indexes)
             second = ControlKernel(path)
-            self.assertEqual(29, second.health()["migrations"])
-            self.assertEqual("v5.8.4", second.health()["runtime_schema"])
+            self.assertEqual(30, second.health()["migrations"])
+            self.assertEqual("v6.0.0", second.health()["runtime_schema"])
 
 
 if __name__ == "__main__":

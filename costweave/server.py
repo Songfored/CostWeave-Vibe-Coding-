@@ -91,6 +91,8 @@ from .resilience import public_resilience_policy
 from .resilience_store import ResilienceStoreError
 from .release_readiness import build_release_status, public_release_policy
 from .release_store import ReleaseStoreError
+from .tournament_service import OfflineTournamentService, TournamentServiceError
+from .decision_intelligence_store import DecisionIntelligenceStoreError
 
 
 MANAGER: RunManager | None = None
@@ -182,7 +184,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
-                "version": __version__,
+                # Keep the released v0.5.8.4 compatibility label while
+                # exposing the active v0.6.0 development line explicitly.
+                "version": "0.5.8.4",
+                "development_version": __version__,
+                "version_line": {
+                    "stable_baseline": "v0.5.8.4",
+                    "active_development": "v0.6.0",
+                },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
                     "schema_version": PLANNING_SCHEMA_VERSION,
@@ -239,6 +248,47 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 **contracts,
                 "control_kernel": runtime_health,
             })
+            return
+        if path == "/api/v1/tournaments/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                self._json(OfflineTournamentService(kernel.decision_intelligence_store).status())
+            except (TournamentServiceError, ValueError, RuntimeError) as exc:
+                self._json(
+                    {"error": "tournament_status_unavailable", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        if path.startswith("/api/v1/tournaments/"):
+            tournament_id = unquote(path.removeprefix("/api/v1/tournaments/").strip("/"))
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                if not tournament_id or "/" in tournament_id:
+                    raise ValueError("invalid tournament id")
+                result = OfflineTournamentService(kernel.decision_intelligence_store).get(
+                    project_id=self._project_id(), tournament_id=tournament_id
+                )
+                if result is None:
+                    self._json({"error": "tournament_not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except (TournamentServiceError, ValueError, RuntimeError) as exc:
+                self._json(
+                    {"error": "tournament_lookup_failed", "message": str(exc)},
+                    HTTPStatus.BAD_REQUEST,
+                )
             return
         if path == "/api/v1/evidence/console":
             run_id = parse_qs(parsed.query).get("run_id", [None])[0]
@@ -1061,6 +1111,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/evidence/exports":
             self._create_evidence_export()
             return
+        if path == "/api/v1/tournaments/offline":
+            self._run_offline_tournament()
+            return
         if path == "/api/v1/system/backups":
             self._create_runtime_backup()
             return
@@ -1494,6 +1547,50 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             }, HTTPStatus.CREATED)
         except Exception as exc:
             self._catalog_error(exc)
+
+    def _run_offline_tournament(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=16_000)
+            allowed = {"confirm", "seed", "bootstrap_samples"}
+            unknown = set(payload) - allowed
+            if unknown:
+                raise TournamentServiceError(f"unknown tournament fields: {sorted(unknown)!r}")
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "offline tournament requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            result, replayed = OfflineTournamentService(
+                kernel.decision_intelligence_store
+            ).run(
+                project_id=self._project_id(),
+                idempotency_key=key,
+                confirm=payload.get("confirm"),
+                bootstrap_samples=payload.get("bootstrap_samples", 2000),
+                seed=payload.get("seed", 600),
+            )
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except DecisionIntelligenceStoreError as exc:
+            self._json(
+                {"error": "tournament_conflict", "message": str(exc)},
+                HTTPStatus.CONFLICT,
+            )
+        except (TournamentServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "tournament_request_invalid", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def _catalog_import(self) -> None:
         try:
