@@ -1,4 +1,36 @@
-# CostWeave v0.5.8.2 架构说明
+# CostWeave v0.5.8.3 架构说明
+
+v0.5.8.3 在中央安全边界之外增加可验证的韧性控制层。它把故障、恢复与备份都变成可审计合同，而不是通过无边界重试隐藏失败。
+
+```text
+Run / Provider / Deadline / Local Capacity
+                    |
+        deterministic fault boundary
+        (disabled unless explicitly enabled)
+                    |
+      admission + circuit + failover
+       ambiguous side effect -> stop
+                    |
+          Recovery Planner
+  preserve validated + unpolluted artifacts
+  terminal run -> never automatically restart
+                    |
+      immutable checkpoint + receipt
+                    |
+      Event / Projection / Stream roots
+                    |
+       verified logical backup/restore
+```
+
+`FaultInjector` 只接受显式指令，并用固定种子产生可复现的 E0 故障；默认路径没有注入和外部调用。`ProviderFailoverController` 复用熔断状态并限制故障转移窗口；如果请求可能已经产生外部副作用但结果未知，则不换路线重放。`DeadlineRiskPredictor` 输出可解释风险分数，评估器独立计算 recall 和 AUROC，不把夹具结果升级成真实性能证据。
+
+恢复前，`RecoveryPlanner` 根据任务状态、验收、污染和副作用语义生成决定；`ResilienceStore` 追加写入 campaign、observation、checkpoint 和 receipt，并用触发器拒绝修改或删除。启动恢复只处理非终态运行，复用已验收且未污染的 Artifact。备份清单绑定数据库 SHA-256 以及 migration、事件、投影和 stream revision 的规范化逻辑根；清单缺失、篡改或恢复后根不一致都会失败关闭。
+
+Runtime Schema 为 `v5.8.3`，migration 数为 28；Run Projection Schema 继续为 `v5.6`。公开状态 API 按项目隔离，离线实验 API 只允许 E0/E1 与 replay/offline 范围。当前仍是单进程 SQLite 控制平面；没有真实 Provider 故障、分布式负载或生产长期运行证据。
+
+---
+
+## v0.5.8.2 Central Security Boundary
 
 v0.5.8.2 在运行、Adapter 和所有公开数据出口之间增加中央安全边界。它不把项目头误当成公网认证，而是在回环单机部署内提供一致的能力准入、密钥租约、项目范围、共享脱敏和外部副作用合同。
 

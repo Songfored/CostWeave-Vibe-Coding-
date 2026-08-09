@@ -87,6 +87,8 @@ from .security_boundary import (
     redact_text,
 )
 from .security_store import ProjectRevokedError, SecurityStoreError
+from .resilience import public_resilience_policy
+from .resilience_store import ResilienceStoreError
 
 
 MANAGER: RunManager | None = None
@@ -113,7 +115,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.8.2"
+    server_version = "CostWeave/0.5.8.3"
 
     def setup(self) -> None:
         super().setup()
@@ -226,6 +228,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "production_shadow": public_production_shadow_policy(),
                 "policy_registry": public_policy_registry_policy(),
                 "bounded_canary": public_canary_policy(),
+                "resilience": public_resilience_policy(),
                 "unified_evidence_console": public_evidence_console_policy(),
                 "security_boundary": public_security_policy(
                     runtime_counts=dict(runtime_health.get("security") or {})
@@ -284,6 +287,34 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     }
                 ),
             })
+            return
+        if path == "/api/v1/resilience/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                project_id = self._project_id()
+                kernel.security_store.ensure_project_active(project_id)
+                maintenance = RuntimeMaintenance(kernel.store.path)
+                self._json({
+                    **public_resilience_policy(),
+                    "project_id": project_id,
+                    "counts": kernel.resilience_store.counts(),
+                    "integrity": kernel.resilience_store.integrity_audit(),
+                    "runtime": maintenance.diagnostics(),
+                    "campaigns": kernel.resilience_store.list_campaigns(
+                        project_id=project_id, limit=25
+                    ),
+                })
+            except (ProjectRevokedError, ResilienceStoreError, RuntimeError) as exc:
+                self._json(
+                    {"error": "resilience_status_unavailable", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
             return
         if path == "/api/v1/canary/policy":
             if self.manager.control_kernel is not None:
@@ -1001,6 +1032,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/system/backups":
             self._create_runtime_backup()
             return
+        if path == "/api/v1/resilience/campaigns":
+            self._create_resilience_campaign()
+            return
         if path == "/api/v1/runs":
             self._create_run(v1=True)
             return
@@ -1146,7 +1180,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "replayed": replayed,
                     "warning": (
                         "Access is revoked immediately; physical row erasure "
-                        "is not implemented in v0.5.8.2."
+                        "is not implemented in the current release."
                     ),
                 },
                 HTTPStatus.ACCEPTED,
@@ -1660,6 +1694,63 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
 
+    def _create_resilience_campaign(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=32_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "resilience campaign requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            campaign_kind = str(payload.get("campaign_kind") or "").strip()
+            spec = payload.get("spec")
+            if not isinstance(spec, dict):
+                raise ValueError("spec must be an object")
+            forbidden = {
+                "real_provider_calls", "paid_calls", "external_side_effects"
+            }
+            if any(bool(spec.get(name)) for name in forbidden):
+                raise ValueError(
+                    "v0.5.8.3 resilience campaigns are offline/replay only"
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            project_id = self._project_id()
+            kernel.security_store.ensure_project_active(project_id)
+            campaign, replayed = kernel.resilience_store.create_campaign(
+                project_id=project_id,
+                campaign_kind=campaign_kind,
+                spec={**spec, "real_provider_calls": False},
+                evidence_level=str(
+                    payload.get("evidence_level") or "E0-simulated"
+                ),
+            )
+            self._json(
+                {"campaign": campaign, "replayed": replayed},
+                HTTPStatus.OK if replayed else HTTPStatus.CREATED,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (
+            ProjectRevokedError,
+            ResilienceStoreError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            self._json(
+                {"error": "resilience_campaign_rejected", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
     def _create_evidence_export(self) -> None:
         run_id: str | None = None
         try:
@@ -1769,7 +1860,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.8.2 secure control plane"
+        description="Run the CostWeave v0.5.8.3 resilient control plane"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

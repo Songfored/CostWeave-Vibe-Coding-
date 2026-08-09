@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.8.2."""
+"""Persistent command/event/projection owner for CostWeave v0.5.8.3."""
 
 from __future__ import annotations
 
@@ -96,6 +96,8 @@ from .canary_control import (
 from .canary_store import CanaryStore
 from .evidence_console_store import EvidenceConsoleStore
 from .security_store import SecurityStore
+from .resilience_store import ResilienceStore
+from .resilience import RecoveryPlanner
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -143,6 +145,7 @@ class ControlKernel:
         self.canary_store = CanaryStore(self.store.path)
         self.evidence_console_store = EvidenceConsoleStore(self.store.path)
         self.security_store = SecurityStore(self.store.path)
+        self.resilience_store = ResilienceStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -422,6 +425,7 @@ class ControlKernel:
             **self.canary_store.counts(),
             **self.evidence_console_store.counts(),
             **self.security_store.counts(),
+            **self.resilience_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -432,8 +436,50 @@ class ControlKernel:
             "handoff_intelligence": handoff_intelligence_enabled(),
             "recovered_orphan_leases": self.recovered_orphan_leases,
             "security": self.security_store.counts(),
+            "resilience": {
+                **self.resilience_store.counts(),
+                "integrity": self.resilience_store.integrity_audit(),
+            },
             "persistent": True,
         }
+
+    def prepare_recovery(self, record: Any) -> dict[str, Any]:
+        tasks = []
+        artifact_owner: dict[str, str] = {}
+        if record.plan is not None:
+            for task in record.plan.tasks:
+                tasks.append({"id": str(task.id), "status": task.status.value})
+                for artifact_id in task.artifact_ids:
+                    artifact_owner[str(artifact_id)] = str(task.id)
+        artifacts = self.artifact_store.list_run(str(record.id))
+        for artifact in artifacts:
+            artifact_id = str(artifact.get("artifact_id") or artifact.get("id"))
+            if artifact_id in artifact_owner:
+                artifact["producer_task_id"] = artifact_owner[artifact_id]
+            artifact["polluted"] = str(artifact.get("status")) != "validated"
+        plan = RecoveryPlanner.build(
+            run_status=record.status.value,
+            tasks=tasks,
+            artifacts=artifacts,
+        )
+        checkpoint, _ = self.resilience_store.record_checkpoint(
+            project_id=record.request.project_id,
+            run_id=str(record.id),
+            runtime_revision=record.runtime_revision,
+            plan=plan.to_dict(),
+        )
+        outcome = "refused_terminal" if plan.terminal_run else "planned"
+        receipt, _ = self.resilience_store.record_recovery_receipt(
+            checkpoint["checkpoint_id"],
+            outcome=outcome,
+            detail={
+                "restart_task_ids": list(plan.restart_task_ids),
+                "preserve_task_ids": list(plan.preserve_task_ids),
+                "preserve_artifact_ids": list(plan.preserve_artifact_ids),
+            },
+            idempotency_key=f"startup-recovery:{record.runtime_revision}",
+        )
+        return {"checkpoint": checkpoint, "receipt": receipt, "plan": plan.to_dict()}
 
     def compile_graph(self, record: Any) -> dict[str, Any]:
         if record.plan is None:

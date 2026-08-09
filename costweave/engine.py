@@ -1685,6 +1685,7 @@ class RunManager:
                         RunStatus.FAILED,
                         RunStatus.CANCELLED,
                     }:
+                        self.control_kernel.prepare_recovery(record)
                         self._start(record, resume=True)
 
     def create(

@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.8.2 在统一证据之上增加项目隔离、密钥租约与外部副作用保护">
+  <meta name="description" content="CostWeave v0.5.8.3 增加压力、故障、迁移与崩溃恢复验收控制面">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.8.2">
+  <link rel="stylesheet" href="/styles.css?v=0.5.8.3">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,11 +18,12 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.2 Secure Control Plane</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.3 Resilient Control Plane</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
       <a href="#security-boundary-section">安全边界</a>
+      <a href="#resilience-section">韧性验收</a>
       <a href="#evidence-console-section">证据控制台</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
@@ -31,7 +32,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">SECURE CONTROL PLANE · V0.5.8.2</p>
+        <p class="eyebrow">RESILIENT CONTROL PLANE · V0.5.8.3</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -369,8 +370,29 @@
       <div class="security-guardrails" aria-label="安全保护措施">
         <span>未知插件拒绝</span><span>远程仅 HTTPS</span><span>禁止重定向</span><span>私网地址拒绝</span><span>工具权限为空</span><span>Provider 幂等键</span>
       </div>
-      <p class="security-erasure-note">项目撤销会立即阻断读取和新任务；v0.5.8.2 提供逻辑撤销，尚不声称已物理擦除历史数据库行。</p>
+      <p class="security-erasure-note">项目撤销会立即阻断读取和新任务；当前提供逻辑撤销，尚不声称已物理擦除历史数据库行。</p>
       <p id="security-live" class="catalog-live" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="resilience-section" class="resilience-section" aria-labelledby="resilience-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">STRESS · FAULT · MIGRATION</span>
+          <h2 id="resilience-title">压力、故障与恢复验收</h2>
+        </div>
+        <span id="resilience-status" class="registry-boundary">正在校验事件与投影…</span>
+      </div>
+      <p class="registry-intro">故障活动默认只在离线模拟和历史回放中运行。Provider 熔断、截止期预警、备份逻辑快照与崩溃恢复都有可追溯回执，但不会冒充真实生产负载。</p>
+      <div class="resilience-grid">
+        <article><span>完整性审计</span><strong id="resilience-integrity">检查中</strong><small id="resilience-event-count">0 个事件</small></article>
+        <article><span>故障活动</span><strong id="resilience-campaign-count">0</strong><small>E0 模拟 / E1 回放</small></article>
+        <article><span>Provider 转移门</span><strong id="resilience-failover">≤30s</strong><small>歧义副作用禁止自动重放</small></article>
+        <article><span>恢复策略</span><strong id="resilience-recovery">保留成果</strong><small>已验收且未污染节点不重做</small></article>
+      </div>
+      <div class="resilience-guardrails" aria-label="韧性保护措施">
+        <span>故障注入默认关闭</span><span>终态任务不重启</span><span>事件哈希全覆盖</span><span>备份逻辑快照</span><span>资源泄漏检查</span><span>真实收益仍缺证据</span>
+      </div>
+      <p id="resilience-live" class="catalog-live" role="status" aria-live="polite"></p>
     </section>
 
     <section id="evidence-console-section" class="evidence-console-section" aria-labelledby="evidence-console-title">
@@ -509,7 +531,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.8.2 / Secure Control Plane</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.8.2" defer></script>
+  <footer><span>CostWeave v0.5.8.3 / Resilient Control Plane</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.8.3" defer></script>
 </body>
 </html>

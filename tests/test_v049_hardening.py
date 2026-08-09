@@ -41,7 +41,7 @@ class RuntimeMaintenanceTests(unittest.TestCase):
         self.assertEqual(64, len(self.maintenance.diagnostics()["sha256"]))
 
     def test_diagnostics_report_eight_migrations(self):
-        self.assertEqual(27, self.maintenance.diagnostics()["migrations"])
+        self.assertEqual(28, self.maintenance.diagnostics()["migrations"])
 
     def test_backup_is_created_and_verified(self):
         backup = self.maintenance.create_backup()
@@ -105,7 +105,7 @@ class SchemaHardeningTests(unittest.TestCase):
             }
 
     def test_runtime_schema_is_v49(self):
-        self.assertEqual("v5.8.2", RUNTIME_SCHEMA_VERSION)
+        self.assertEqual("v5.8.3", RUNTIME_SCHEMA_VERSION)
 
     def test_schema_has_event_integrity_table(self):
         self.assertIn("event_integrity", self.table_names())
@@ -115,7 +115,7 @@ class SchemaHardeningTests(unittest.TestCase):
 
     def test_schema_migration_is_idempotent(self):
         EventStore(self.path)
-        self.assertEqual(27, self.store.health()["migrations"])
+        self.assertEqual(28, self.store.health()["migrations"])
 
     def test_database_uses_wal(self):
         self.assertEqual("wal", self.store.health()["journal_mode"])

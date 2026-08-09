@@ -1,4 +1,4 @@
-"""Unified, provenance-first, project-scoped evidence views for v0.5.8.2."""
+"""Unified, provenance-first, project-scoped evidence views for v0.5.8.3."""
 
 from __future__ import annotations
 
@@ -25,9 +25,10 @@ from .security_boundary import (
     public_security_policy,
     redact_structure,
 )
+from .resilience import public_resilience_policy
 
 
-EVIDENCE_CONSOLE_SCHEMA_VERSION = "v0.5.8.2"
+EVIDENCE_CONSOLE_SCHEMA_VERSION = "v0.5.8.3"
 EVIDENCE_EXPORT_SCHEMA_VERSION = "v0.5.8.1-export"
 EVIDENCE_TAXONOMY_VERSION = "evidence-kinds-v1"
 EVIDENCE_KINDS = ("actual", "predicted", "simulated", "missing")
@@ -272,6 +273,14 @@ def build_evidence_console(
     shadow_counts = (
         kernel.production_shadow_store.counts() if kernel is not None else {}
     )
+    resilience_store = (
+        getattr(kernel, "resilience_store", None)
+        if kernel is not None
+        else None
+    )
+    resilience_counts = (
+        resilience_store.counts() if resilience_store is not None else {}
+    )
     ledger_entries = _scoped_ledger(manager, project, run_id=run_id)
     placements = manager.placements(run_id) if run_id else []
     resources = manager.resources()
@@ -431,6 +440,23 @@ def build_evidence_console(
             captured_at=captured_at,
             definition="项目隔离、密钥租约、网络许可和外部副作用合同的控制面记录。",
         ),
+        _source(
+            "resilience_campaigns",
+            "Stress、Fault 与 Migration 活动",
+            evidence_kind="simulated",
+            evidence_level="E0",
+            version=public_resilience_policy()["schema_version"],
+            api_path="/api/v1/resilience/status",
+            record_count=(
+                _safe_int(resilience_counts.get("resilience_campaigns"))
+                + _safe_int(resilience_counts.get("resilience_observations"))
+            ),
+            captured_at=captured_at,
+            definition=(
+                "离线故障注入、压力与恢复记录；默认不触发真实 Provider，"
+                "不能替代生产负载证据。"
+            ),
+        ),
     ]
 
     metrics = [
@@ -520,6 +546,23 @@ def build_evidence_console(
             task_families=[],
             definition="从真实任务进入到最终验收完成的端到端 P95。",
             missing_reason="尚无足量真实端到端任务形成可报告分位数。",
+        ),
+        _metric(
+            "resilience_campaigns",
+            "离线韧性活动",
+            _safe_int(resilience_counts.get("resilience_campaigns")),
+            unit="campaigns",
+            evidence_kind="simulated",
+            evidence_level="E0",
+            source_id="resilience_campaigns",
+            sample_size=_safe_int(
+                resilience_counts.get("resilience_observations")
+            ),
+            task_families=[],
+            definition=(
+                "持久化的离线压力、故障、迁移和恢复活动数量；"
+                "不计入真实效果样本。"
+            ),
         ),
     ]
 
@@ -727,6 +770,10 @@ def build_evidence_console(
             "security_boundary": {
                 **public_security_policy(),
                 "runtime_counts": dict(health.get("security") or {}),
+            },
+            "resilience": {
+                **public_resilience_policy(),
+                "runtime_counts": resilience_counts,
             },
         },
     }

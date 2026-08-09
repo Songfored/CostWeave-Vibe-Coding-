@@ -905,6 +905,17 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .security-guardrails { display: flex; flex-wrap: wrap; gap: 7px; }
 .security-guardrails span { padding: 6px 9px; color: var(--soft); border: 1px solid rgba(184, 139, 255, .15); border-radius: 999px; background: rgba(184, 139, 255, .045); font-size: 10px; }
 .security-erasure-note { margin: 14px 0 0; padding: 10px 12px; color: var(--muted); border-left: 2px solid rgba(244, 191, 103, .55); background: rgba(244, 191, 103, .035); font-size: 11px; line-height: 1.6; }
+.resilience-section {
+  margin: 28px 0; padding: 26px; border: 1px solid rgba(100, 210, 210, .24);
+  border-radius: 20px; background: linear-gradient(145deg, rgba(11, 37, 39, .94), rgba(8, 17, 22, .97));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .19);
+}
+.resilience-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0 13px; }
+.resilience-grid article { min-width: 0; padding: 15px; border: 1px solid rgba(100, 210, 210, .16); border-radius: 13px; background: rgba(100, 210, 210, .035); }
+.resilience-grid span, .resilience-grid small { display: block; color: var(--muted); font-size: 11px; }
+.resilience-grid strong { display: block; margin: 5px 0; color: #99eeee; font-size: 25px; overflow-wrap: anywhere; }
+.resilience-guardrails { display: flex; flex-wrap: wrap; gap: 7px; }
+.resilience-guardrails span { padding: 6px 9px; color: var(--soft); border: 1px solid rgba(100, 210, 210, .16); border-radius: 999px; background: rgba(100, 210, 210, .045); font-size: 10px; }
 .evidence-console-section {
   margin: 28px 0; padding: 28px; border: 1px solid rgba(244, 191, 103, .24);
   border-radius: 20px; background: linear-gradient(145deg, rgba(34, 27, 16, .92), rgba(11, 18, 17, .97));
@@ -1009,6 +1020,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .registry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .canary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .security-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resilience-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .evidence-readiness, .evidence-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .evidence-lower-grid { grid-template-columns: 1fr; }
 }
@@ -1080,6 +1092,7 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .brand { font-size: 17px; }
   .runtime { margin-left: auto; font-size: 0; }
   .topnav a { font-size: 11px; }
+  .topnav a:nth-child(-n+2) { display: none; }
   .hero { padding-top: 34px; }
   .hero h1 { font-size: 36px; }
   .eyebrow { font-size: 10px; }
@@ -1100,10 +1113,12 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
   .policy-registry-section { padding: 17px; }
   .bounded-canary-section { padding: 17px; }
   .security-boundary-section { padding: 17px; }
+  .resilience-section { padding: 17px; }
   .evidence-console-section { padding: 17px; }
   .registry-lifecycle, .registry-grid { grid-template-columns: 1fr; }
   .canary-stage-flow, .canary-grid { grid-template-columns: 1fr; }
   .security-grid { grid-template-columns: 1fr; }
+  .resilience-grid { grid-template-columns: 1fr; }
   .evidence-readiness, .evidence-metrics { grid-template-columns: 1fr; }
   .evidence-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .evidence-actions .registry-boundary { grid-column: 1 / -1; white-space: normal; }

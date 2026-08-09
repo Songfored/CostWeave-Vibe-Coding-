@@ -1338,6 +1338,31 @@ async function loadSecurityBoundary() {
   }
 }
 
+async function loadResilienceStatus() {
+  const live = $("#resilience-live");
+  if (!live) return;
+  try {
+    const response = await fetch("/api/v1/resilience/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取韧性验收状态");
+    const integrity = data.integrity || {};
+    const counts = data.counts || {};
+    const runtime = data.runtime || {};
+    const snapshot = runtime.logical_snapshot || {};
+    $("#resilience-integrity").textContent = integrity.healthy ? "通过" : "异常";
+    $("#resilience-event-count").textContent = `${Number(integrity.events_checked || 0)} 个事件`;
+    $("#resilience-campaign-count").textContent = String(counts.resilience_campaigns || 0);
+    $("#resilience-failover").textContent = `≤${Number(data.provider_failover_deadline_seconds || 30)}s`;
+    $("#resilience-recovery").textContent = data.validated_unpolluted_work_reexecuted ? "需复核" : "保留成果";
+    $("#resilience-status").textContent = integrity.healthy
+      ? "事件连续 · 投影可信"
+      : "完整性门未通过";
+    live.textContent = `migration ${Number(runtime.migrations || 0)} 项；事件哈希覆盖 ${(Number(snapshot.event_integrity_coverage ?? 0) * 100).toFixed(1)}%；备份 ${Number(runtime.backups || 0)} 份。故障活动仍是 E0 模拟或 E1 回放，不计入真实收益。`;
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "韧性状态暂不可用";
+  }
+}
+
 const evidenceKindLabels = {
   actual: "实际记录",
   predicted: "预测值",
@@ -1503,5 +1528,6 @@ loadCatalog();
 loadPolicyRegistry();
 loadCanaryPolicy();
 loadSecurityBoundary();
+loadResilienceStatus();
 loadEvidenceConsole();
 refreshHistory({ restore: true });
