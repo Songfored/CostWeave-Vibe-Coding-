@@ -1,5 +1,21 @@
 # CostWeave
 
+## v0.5.8.4：v0.5 Stable Engineering Release
+
+v0.5.8.4 不再增加新的路由启发式，而是把整个 v0.5 控制平面收束为可安装、可重放、可验证、可诚实发布的工程稳定版：
+
+- 新增机器可读 Release Readiness Manifest，逐项检查 Runtime Schema、migration、WAL、事件/投影完整性、全部 EventLog 重放，以及外部/付费调用默认关闭；
+- 新增全量而非抽样的 EventLog→Projection 一致性审计；任一运行缺失、篡改或重放不一致都会阻断工程稳定证明；
+- migration 029 新增项目范围、幂等且不可修改/删除的发布证明；
+- 新增 `GET /api/v1/release/status` 与 `POST /api/v1/release/attestations`；页面新增“工程稳定，不冒充生产领先”状态面板；
+- 新增 `costweave-release --pretty`，在临时全新环境执行离线任务、完整重放、逻辑备份校验和零外部调用检查；
+- 补齐 Benchmark、模型卡、策略卡、数据卡、安装/迁移/回滚/复现指南、安全报告和发布说明；
+- Stable 的范围固定为“离线、单进程工程控制平面”，真实 Provider、生产负载和商业收益仍明确标记为未验证。
+
+安装复现见 [`docs/INSTALL_REPRODUCE-v0.5.8.4.md`](docs/INSTALL_REPRODUCE-v0.5.8.4.md)，发布内容见 [`docs/CHANGELOG-v0.5.8.4.md`](docs/CHANGELOG-v0.5.8.4.md)，Benchmark 见 [`docs/BENCHMARK-v0.5.8.4.md`](docs/BENCHMARK-v0.5.8.4.md)，完整结果见 [`docs/ACCEPTANCE-v0.5.8.4.md`](docs/ACCEPTANCE-v0.5.8.4.md)。
+
+> 稳定边界：v0.5 Stable 代表工程合同在本地、离线、单进程范围内可复现，不代表生产就绪。当前仍没有足够真实样本支持固定降本比例、真实质量提升、真实 P95 改善、生产可用性或世界领先结论。
+
 ## v0.5.8.3：Stress、Fault & Migration
 
 本版把“能够正常运行”推进到“能够在受控故障中恢复，并证明恢复过程没有破坏事件、投影和已验收成果”：
@@ -778,6 +794,8 @@ costweave/
 | `GET` | `/api/v1/security/policy` | 读取 Adapter 白名单、网络/密钥/项目/幂等边界和当前项目状态 |
 | `GET` | `/api/v1/resilience/status` | 读取韧性策略、不可变实验、事件完整性、备份与恢复诊断 |
 | `POST` | `/api/v1/resilience/campaigns` | 使用幂等键记录 E0/E1 离线或回放故障实验；拒绝真实、付费和外部调用 |
+| `GET` | `/api/v1/release/status` | 全量重放并读取 v0.5 稳定版硬门、已验证范围和未验证结论 |
+| `POST` | `/api/v1/release/attestations` | 显式确认后保存项目范围、幂等且不可变的工程稳定证明 |
 | `POST` | `/api/v1/projects/{project_id}/revoke` | 使用项目头、确认文本和幂等键执行不可变逻辑撤销 |
 | `GET` | `/api/v1/evidence/console?run_id={id}` | 读取全局或单运行统一证据视图、来源血缘、证据等级和商业结论门 |
 | `GET` | `/api/v1/evidence/exports?limit={n}` | 读取不可变实验包导出收据 |
@@ -804,7 +822,7 @@ costweave/
 python -B tests/run_isolated.py
 ```
 
-当前基线为 694 项自动化测试。v0.5.8.3 新增 15 项韧性专项验收，覆盖确定性故障注入、Provider/显存故障转移、歧义副作用失败关闭、deadline 预警评估、安全恢复、终态保护、并发上限与泄漏检查、并发不可变写入、逻辑备份/恢复、清单篡改拒绝、事件篡改发现、公开离线策略与项目范围 API；此前 679 项继续作为安全边界、统一证据、Canary、策略注册表、Production-like Shadow、离线回放、治理、评测、交接、MultiPlanner、媒体、成本、恢复、预测和页面回归门。
+当前基线为 706 项自动化测试。v0.5.8.4 新增 12 项稳定版专项验收，覆盖 migration 029、全部运行重放、事件篡改发现、默认调用硬门、不可变发布证明、幂等冲突、项目隔离、公开证据边界、全新离线安装验证和 Release API；此前 694 项继续作为韧性、安全边界、统一证据、Canary、策略注册表、Production-like Shadow、离线回放、治理、评测、交接、MultiPlanner、媒体、成本、恢复、预测和页面回归门。
 
 测试模块采用独立进程运行，避免一个集成测试的后台编排线程、全局时钟或临时数据库状态污染后续模块；任一模块失败或超过 180 秒都会使总命令返回失败。
 
@@ -843,6 +861,7 @@ python -B tests/run_isolated.py
 - Canary 5/25/50/100 逐级门、确定性分桶、零高风险探索、启动策略快照、严格回滚边界、旧任务隔离和新任务立即回稳
 - Adapter 插件白名单、密钥租约、共享脱敏、Prompt/工具边界、端点防 SSRF、项目隔离/撤销和外部副作用幂等
 - 限流/宕机/显存不足故障注入、30 秒内熔断转移、deadline miss 预警、恢复检查点、并发泄漏、事件完整性和逻辑备份恢复
+- Runtime Schema/migration 稳定门、全量 EventLog 重放、全新环境离线执行、不可变发布证明和发布资产完整性
 
 ## 当前边界
 
@@ -851,7 +870,7 @@ python -B tests/run_isolated.py
 - 当前没有汇率服务或厂商阶梯价格；批处理、缓存与量化仅定义安全策略接口，尚未连接真实推理后端。
 - 当前执行器不调用真实模型，因此不能证明最终领域答案质量。
 - 运行 EventStore 默认保存在 `~/.costweave/runtime-v4.sqlite3`，可用 `COSTWEAVE_RUNTIME_DB` 指定路径。
-- v0.5.8.3 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线、多进程调度或公网身份认证。
+- v0.5.8.4 Stable 仍是单进程、单机 SQLite 控制内核，不提供分布式事件总线、多进程调度或公网身份认证。
 - 当前 Planning Governor 是确定性的规则与损失决策内核，尚未通过真实生产数据完成校准。
 - 资源池、CPU/GPU/显存和 Provider 吞吐目前是目录派生的仿真值，不是实时硬件遥测。
 - 重启恢复按单实例所有权释放遗留租约；多实例租约续期与节点所有权尚未实现。
@@ -862,7 +881,7 @@ python -B tests/run_isolated.py
 - 媒体适配器只生成元数据，不代表真实图像/视频质量；肖像、声音、音乐和素材授权仍需人工处理。
 - 当前服务只允许回环地址，不应直接暴露到公网。
 
-v0.5.1～v0.5.8.3 的工程合同已经完成到“受控故障、完整性审计与可验证恢复”；v0.5.6.3 的真实效果退出门槛仍需用户显式配置后完成 30～50 个方向性真实任务。未取得真实证据和真实 Provider 路由负载前，Canary 与真实连接默认关闭，证据控制台会把真实收益保持为缺失，现有测试只证明控制机制，不证明生产质量、成本、时延或可靠性收益。下一工程版本为 v0.5.8.4 Stable Release。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续未执行方案及退出门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
+v0.5.1～v0.5.8.4 的工程合同已经完成，并收束为可安装、可重放、可验证的 v0.5 Stable Engineering Release；v0.5.6.3 的真实效果退出门槛仍未通过，真实效果样本继续为 0。未取得真实证据和真实 Provider 路由负载前，Canary 与真实连接默认关闭，证据控制台会把真实收益保持为缺失。下一阶段不是自动照搬旧路线图，而是重新评审 v0.6 Production Optimization 的范围、成本和验证顺序。总体设计与完成状态见 [`docs/V0.5_UPGRADE_PLAN.md`](docs/V0.5_UPGRADE_PLAN.md)，后续门槛见 [`docs/REMAINING_ROADMAP.md`](docs/REMAINING_ROADMAP.md)。
 
 为避免一次性实现过大蓝图，v0.4 已拆分为 v0.4.1～v0.4.9 九个可独立验收的稳定版本；v0.4.1～v0.4.9 已全部完成。详见 [`docs/V0.4_INCREMENTAL_RELEASES.md`](docs/V0.4_INCREMENTAL_RELEASES.md)。
 

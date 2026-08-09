@@ -1,4 +1,4 @@
-"""SQLite event store and deterministic projections for CostWeave v0.5.8.3."""
+"""SQLite event store and deterministic projections for CostWeave v0.5.8.4."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .contracts_v4 import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = "v5.8.3"
+RUNTIME_SCHEMA_VERSION = "v5.8.4"
 
 
 class EventStoreError(RuntimeError):
@@ -142,6 +142,7 @@ class EventStore:
                 (26, "026_evidence_console.sql"),
                 (27, "027_security_boundary.sql"),
                 (28, "028_resilience.sql"),
+                (29, "029_release_attestations.sql"),
             ):
                 sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
                 checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
@@ -460,6 +461,16 @@ class EventStore:
                 (max(1, min(int(limit), 1000)),),
             ).fetchall()
         return [state for row in rows if (state := self.get_projection(row["entity_id"]))]
+
+    def projection_ids(self) -> list[str]:
+        """Return every durable run projection ID for complete replay audits."""
+
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT entity_id FROM projections WHERE name='run' "
+                "ORDER BY entity_id"
+            ).fetchall()
+        return [str(row["entity_id"]) for row in rows]
 
     def list_events(
         self,

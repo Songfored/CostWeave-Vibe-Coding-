@@ -188,7 +188,7 @@ class ExternalExecutionRequest:
         if not 1 <= self.max_output_tokens <= 65536:
             raise ExperimentalCallError("bounded output token limit is required")
         if self.batch:
-            raise ExperimentalCallError("batch execution is disabled in v0.5.8.2")
+            raise ExperimentalCallError("batch execution is disabled in the current release")
         try:
             normalize_project_id(self.project_id)
             normalize_data_residency(self.data_residency)

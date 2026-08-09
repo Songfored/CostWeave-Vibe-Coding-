@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner for CostWeave v0.5.8.3."""
+"""Persistent command/event/projection owner for CostWeave v0.5.8.4."""
 
 from __future__ import annotations
 
@@ -98,6 +98,7 @@ from .evidence_console_store import EvidenceConsoleStore
 from .security_store import SecurityStore
 from .resilience_store import ResilienceStore
 from .resilience import RecoveryPlanner
+from .release_store import ReleaseStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -146,6 +147,7 @@ class ControlKernel:
         self.evidence_console_store = EvidenceConsoleStore(self.store.path)
         self.security_store = SecurityStore(self.store.path)
         self.resilience_store = ResilienceStore(self.store.path)
+        self.release_store = ReleaseStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -426,6 +428,7 @@ class ControlKernel:
             **self.evidence_console_store.counts(),
             **self.security_store.counts(),
             **self.resilience_store.counts(),
+            **self.release_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),
@@ -440,6 +443,7 @@ class ControlKernel:
                 **self.resilience_store.counts(),
                 "integrity": self.resilience_store.integrity_audit(),
             },
+            "release": self.release_store.counts(),
             "persistent": True,
         }
 

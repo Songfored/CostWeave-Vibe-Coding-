@@ -330,8 +330,8 @@ class CanaryStoreTests(unittest.TestCase):
             return self.store.start_deployment(self.deployment)
 
     def test_migration_25_and_empty_canary_runtime(self):
-        self.assertEqual(28, self.health["migrations"])
-        self.assertEqual("v5.8.3", self.health["runtime_schema"])
+        self.assertEqual(29, self.health["migrations"])
+        self.assertEqual("v5.8.4", self.health["runtime_schema"])
         self.assertEqual(0, self.store.counts()["canary_deployments"])
 
     def test_explicit_opt_in_and_registry_lineage_are_required(self):

@@ -1,4 +1,33 @@
-# CostWeave v0.5.8.3 架构说明
+# CostWeave v0.5.8.4 架构说明
+
+v0.5.8.4 在既有控制平面之上增加只读 Release Readiness Evaluator 和追加式 Release Attestation Store。稳定版评估不改变任何任务路线；它只把运行时事实、全量重放和默认安全状态组合成可验证结论。
+
+```text
+Runtime Schema + migration set + WAL
+                  |
+Event / Projection / Stream integrity
+                  |
+every durable run: EventLog -> replayed projection
+                  |
+default-off external + paid adapter policy
+                  |
+          Release Readiness Manifest
+             /                  \
+ stable_engineering        production/commercial
+ (all hard gates pass)     (always unverified in v0.5)
+             |
+ explicit confirmation + idempotency key
+             |
+ immutable project-scoped release attestation
+```
+
+重放审计通过 `EventStore.projection_ids()` 枚举全部持久运行，不抽样；每个当前投影都与只读取追加式事件流重建的状态作规范化哈希比较。迁移、WAL、完整性、重放、实验 Adapter 和付费调用七个硬门必须同时通过，状态才是 `stable_engineering`。这不会把 `production_ready` 或 `commercial_claims_allowed` 改为真。
+
+`costweave-release` 在临时目录创建全新目录与 Runtime，执行一个离线任务，等待终态，运行同一稳定门，创建并验证逻辑备份，并检查外部调用尝试为 0。migration 029 保存不可变发布证明。Runtime Schema 为 `v5.8.4`，migration 数为 29；Run Projection Schema 继续为 `v5.6`。
+
+---
+
+## v0.5.8.3 Resilient Control Plane
 
 v0.5.8.3 在中央安全边界之外增加可验证的韧性控制层。它把故障、恢复与备份都变成可审计合同，而不是通过无边界重试隐藏失败。
 

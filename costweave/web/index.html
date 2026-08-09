@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.8.3 增加压力、故障、迁移与崩溃恢复验收控制面">
+  <meta name="description" content="CostWeave v0.5.8.4 提供可机器验证、可复现、诚实标注证据边界的 v0.5 工程稳定版">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.8.3">
+  <link rel="stylesheet" href="/styles.css?v=0.5.8.4">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,12 +18,13 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.3 Resilient Control Plane</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable Engineering</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
       <a href="#security-boundary-section">安全边界</a>
       <a href="#resilience-section">韧性验收</a>
+      <a href="#stable-release-section">稳定版</a>
       <a href="#evidence-console-section">证据控制台</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
@@ -32,7 +33,7 @@
   <main>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-wrap">
-        <p class="eyebrow">RESILIENT CONTROL PLANE · V0.5.8.3</p>
+        <p class="eyebrow">V0.5 STABLE · VERIFIED ENGINEERING SCOPE</p>
         <h1 id="hero-title">先判断，再并行。<em>让每一份算力都用在该用的地方。</em></h1>
         <p class="hero-copy">输入目标后，系统不再给出一个伪精确成功率，而是预测首次成功、修复成功、升级成功、人工介入和最终失败，并同时展示成本、时间、置信度与分布外风险。</p>
       </div>
@@ -395,6 +396,27 @@
       <p id="resilience-live" class="catalog-live" role="status" aria-live="polite"></p>
     </section>
 
+    <section id="stable-release-section" class="stable-release-section" aria-labelledby="stable-release-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">V0.5 STABLE RELEASE MANIFEST</span>
+          <h2 id="stable-release-title">工程稳定，不冒充生产领先</h2>
+        </div>
+        <span id="stable-release-status" class="registry-boundary">正在重放全部决策…</span>
+      </div>
+      <p class="registry-intro">稳定版状态由运行时迁移、事件完整性、EventLog 重放、默认零外部调用和发布证明共同决定。工程合同通过与真实商业效果是两条独立结论。</p>
+      <div class="stable-release-grid">
+        <article><span>工程稳定门</span><strong id="stable-engineering-state">检查中</strong><small>全部硬门必须通过</small></article>
+        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v5.8.4</strong><small id="stable-migration-count">29 项 migration</small></article>
+        <article><span>EventLog 重放</span><strong id="stable-replay-state">检查中</strong><small id="stable-replay-count">0 个运行</small></article>
+        <article><span>商业效果结论</span><strong id="stable-commercial-state">未验证</strong><small>真实成本 / 质量 / P95 仍需 E2+</small></article>
+      </div>
+      <div class="stable-release-guardrails" aria-label="稳定版发布边界">
+        <span>全新环境可复现</span><span>全部决策可重放</span><span>外部调用默认关闭</span><span>发布证明不可变</span><span>失败如实报告</span><span>无固定降本宣传</span>
+      </div>
+      <p id="stable-release-live" class="catalog-live" role="status" aria-live="polite">正在生成稳定版就绪清单…</p>
+    </section>
+
     <section id="evidence-console-section" class="evidence-console-section" aria-labelledby="evidence-console-title">
       <div class="evidence-heading">
         <div>
@@ -531,7 +553,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.8.3 / Resilient Control Plane</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.8.3" defer></script>
+  <footer><span>CostWeave v0.5.8.4 / v0.5 Stable Engineering</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.5.8.4" defer></script>
 </body>
 </html>

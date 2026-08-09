@@ -89,6 +89,8 @@ from .security_boundary import (
 from .security_store import ProjectRevokedError, SecurityStoreError
 from .resilience import public_resilience_policy
 from .resilience_store import ResilienceStoreError
+from .release_readiness import build_release_status, public_release_policy
+from .release_store import ReleaseStoreError
 
 
 MANAGER: RunManager | None = None
@@ -115,7 +117,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.5.8.3"
+    server_version = "CostWeave/0.5.8.4"
 
     def setup(self) -> None:
         super().setup()
@@ -229,6 +231,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "policy_registry": public_policy_registry_policy(),
                 "bounded_canary": public_canary_policy(),
                 "resilience": public_resilience_policy(),
+                "stable_release": public_release_policy(),
                 "unified_evidence_console": public_evidence_console_policy(),
                 "security_boundary": public_security_policy(
                     runtime_counts=dict(runtime_health.get("security") or {})
@@ -313,6 +316,35 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             except (ProjectRevokedError, ResilienceStoreError, RuntimeError) as exc:
                 self._json(
                     {"error": "resilience_status_unavailable", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        if path == "/api/v1/release/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                project_id = self._project_id()
+                kernel.security_store.ensure_project_active(project_id)
+                self._json({
+                    **build_release_status(
+                        kernel,
+                        adapter_policy=(
+                            AdapterRuntimePolicy.from_environment().public()
+                        ),
+                    ),
+                    "project_id": project_id,
+                    "attestations": kernel.release_store.list_attestations(
+                        project_id=project_id, limit=25
+                    ),
+                })
+            except (ProjectRevokedError, ReleaseStoreError, RuntimeError) as exc:
+                self._json(
+                    {"error": "release_status_unavailable", "message": str(exc)},
                     HTTPStatus.CONFLICT,
                 )
             return
@@ -1035,6 +1067,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/resilience/campaigns":
             self._create_resilience_campaign()
             return
+        if path == "/api/v1/release/attestations":
+            self._create_release_attestation()
+            return
         if path == "/api/v1/runs":
             self._create_run(v1=True)
             return
@@ -1713,7 +1748,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             }
             if any(bool(spec.get(name)) for name in forbidden):
                 raise ValueError(
-                    "v0.5.8.3 resilience campaigns are offline/replay only"
+                    "resilience campaigns are offline/replay only"
                 )
             kernel = self.manager.control_kernel
             if kernel is None:
@@ -1748,6 +1783,70 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         ) as exc:
             self._json(
                 {"error": "resilience_campaign_rejected", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _create_release_attestation(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=8_000)
+            if payload.get("confirm") != "ATTEST_STABLE_ENGINEERING":
+                raise ValueError(
+                    "confirm must equal ATTEST_STABLE_ENGINEERING"
+                )
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "release attestation requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            project_id = self._project_id()
+            kernel.security_store.ensure_project_active(project_id)
+            existing = kernel.release_store.get_by_key(
+                project_id=project_id, idempotency_key=key
+            )
+            if existing is not None:
+                self._json(
+                    {"attestation": existing, "replayed": True},
+                    HTTPStatus.OK,
+                )
+                return
+            manifest = build_release_status(
+                kernel,
+                adapter_policy=AdapterRuntimePolicy.from_environment().public(),
+            )
+            if not manifest["engineering_ready"]:
+                raise ValueError(
+                    "engineering release gates are not all satisfied"
+                )
+            attestation, replayed = kernel.release_store.create_attestation(
+                project_id=project_id,
+                manifest=manifest,
+                idempotency_key=key,
+            )
+            self._json(
+                {"attestation": attestation, "replayed": replayed},
+                HTTPStatus.OK if replayed else HTTPStatus.CREATED,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (
+            ProjectRevokedError,
+            ReleaseStoreError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            self._json(
+                {"error": "release_attestation_rejected", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
 
@@ -1860,7 +1959,7 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.8.3 resilient control plane"
+        description="Run the CostWeave v0.5.8.4 stable engineering control plane"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

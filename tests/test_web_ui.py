@@ -113,6 +113,16 @@ class WebUiRegressionTests(unittest.TestCase):
             "resilience-failover",
             "resilience-recovery",
             "resilience-live",
+            "stable-release-section",
+            "stable-release-title",
+            "stable-release-status",
+            "stable-engineering-state",
+            "stable-runtime-schema",
+            "stable-migration-count",
+            "stable-replay-state",
+            "stable-replay-count",
+            "stable-commercial-state",
+            "stable-release-live",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -155,6 +165,7 @@ class WebUiRegressionTests(unittest.TestCase):
             "loadCanaryPolicy",
             "loadSecurityBoundary",
             "loadResilienceStatus",
+            "loadStableReleaseStatus",
             "loadEvidenceConsole",
             "renderEvidenceConsole",
             "exportEvidencePackage",
@@ -164,9 +175,10 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.8.3 Resilient Control Plane", self.html)
+        self.assertIn("v0.5.8.4 Stable Engineering", self.html)
         self.assertIn('id="security-boundary-section"', self.html)
         self.assertIn('id="resilience-section"', self.html)
+        self.assertIn('id="stable-release-section"', self.html)
         self.assertIn("provider_failover_deadline_seconds", self.js)
         self.assertIn("external_network_default_enabled", self.js)
         self.assertIn("data-evidence-kind", self.html)

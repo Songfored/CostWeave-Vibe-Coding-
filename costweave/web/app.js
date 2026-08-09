@@ -1363,6 +1363,33 @@ async function loadResilienceStatus() {
   }
 }
 
+async function loadStableReleaseStatus() {
+  const live = $("#stable-release-live");
+  if (!live) return;
+  try {
+    const response = await fetch("/api/v1/release/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取稳定版状态");
+    const runtime = data.runtime || {};
+    const replay = data.replay_audit || {};
+    const gates = Array.isArray(data.gates) ? data.gates : [];
+    const passed = gates.filter((gate) => gate.passed).length;
+    const ready = Boolean(data.engineering_ready);
+    $("#stable-engineering-state").textContent = ready ? "通过" : "阻断";
+    $("#stable-runtime-schema").textContent = runtime.schema_version || "未知";
+    $("#stable-migration-count").textContent = `${Number(runtime.migrations || 0)} 项 migration`;
+    $("#stable-replay-state").textContent = replay.healthy ? "一致" : "异常";
+    $("#stable-replay-count").textContent = `${Number(replay.runs_checked || 0)} 个运行`;
+    $("#stable-commercial-state").textContent = data.commercial_claims_allowed ? "已支持" : "未验证";
+    $("#stable-release-status").textContent = ready
+      ? "v0.5 工程稳定 · 生产证据待补"
+      : "稳定版硬门未通过";
+    live.textContent = `${passed}/${gates.length} 个运行时硬门通过；不可变发布证明 ${Array.isArray(data.attestations) ? data.attestations.length : 0} 份。当前范围是离线单进程控制面，不代表真实 Provider 或世界领先性能。`;
+  } catch (error) {
+    live.textContent = error instanceof Error ? error.message : "稳定版状态暂不可用";
+  }
+}
+
 const evidenceKindLabels = {
   actual: "实际记录",
   predicted: "预测值",
@@ -1529,5 +1556,6 @@ loadPolicyRegistry();
 loadCanaryPolicy();
 loadSecurityBoundary();
 loadResilienceStatus();
+loadStableReleaseStatus();
 loadEvidenceConsole();
 refreshHistory({ restore: true });
