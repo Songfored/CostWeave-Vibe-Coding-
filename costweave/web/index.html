@@ -6,7 +6,7 @@
   <meta name="description" content="CostWeave v0.5.8.4 提供可机器验证、可复现、诚实标注证据边界的 v0.5 工程稳定版">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.5.8.4">
+  <link rel="stylesheet" href="/styles.css?v=0.6.1">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable Engineering · v0.6.0 Decision Intelligence Lab</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 Rational MetaController</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -27,6 +27,7 @@
       <a href="#stable-release-section">稳定版</a>
       <a href="#evidence-console-section">证据控制台</a>
       <a href="#decision-intelligence-section">v0.6.0 分流竞赛</a>
+      <a href="#meta-controller-section">v0.6.1 元控制</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
@@ -408,7 +409,7 @@
       <p class="registry-intro">稳定版状态由运行时迁移、事件完整性、EventLog 重放、默认零外部调用和发布证明共同决定。工程合同通过与真实商业效果是两条独立结论。</p>
       <div class="stable-release-grid">
         <article><span>工程稳定门</span><strong id="stable-engineering-state">检查中</strong><small>全部硬门必须通过</small></article>
-        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.0.0</strong><small id="stable-migration-count">30 项 migration</small></article>
+        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.1.0</strong><small id="stable-migration-count">31 项 migration</small></article>
         <article><span>EventLog 重放</span><strong id="stable-replay-state">检查中</strong><small id="stable-replay-count">0 个运行</small></article>
         <article><span>商业效果结论</span><strong id="stable-commercial-state">未验证</strong><small>真实成本 / 质量 / P95 仍需 E2+</small></article>
       </div>
@@ -476,6 +477,27 @@
       <div class="decision-intelligence-actions">
         <button id="run-offline-tournament" class="secondary-button" type="button">运行离线竞赛</button>
         <span id="decision-intelligence-feedback" class="catalog-live" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="meta-controller-section" class="meta-controller-section" aria-labelledby="meta-controller-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">V0.6.1 RATIONAL METACONTROLLER</span>
+          <h2 id="meta-controller-title">决定是否值得继续思考</h2>
+        </div>
+        <span id="meta-controller-status" class="registry-boundary">正在读取元控制状态…</span>
+      </div>
+      <p class="registry-intro">这一层只做离线、可审计的 Fast / Deliberate / Probe / Expert 判断，不直接调用模型或工具。它把规划成本、延迟、协调成本和不确定性放进同一条 EVC 账本。</p>
+      <div class="meta-controller-grid">
+        <article><span>Current Action</span><strong id="meta-controller-action">—</strong><small>当前演示决策</small></article>
+        <article><span>EVC</span><strong id="meta-controller-evc">—</strong><small>继续计算的预期价值</small></article>
+        <article><span>Committee</span><strong id="meta-controller-committee">0</strong><small>自适应 Planner 成员</small></article>
+        <article><span>External Calls</span><strong id="meta-controller-calls">0</strong><small>固定为 0</small></article>
+      </div>
+      <div class="decision-intelligence-actions">
+        <button id="run-meta-controller-demo" class="secondary-button" type="button">运行元控制演示</button>
+        <span id="meta-controller-feedback" class="catalog-live" role="status" aria-live="polite"></span>
       </div>
     </section>
 
@@ -575,7 +597,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Decision Intelligence Lab</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.5.8.4" defer></script>
+  <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 Rational MetaController</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.6.1" defer></script>
 </body>
 </html>

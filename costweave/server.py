@@ -93,6 +93,11 @@ from .release_readiness import build_release_status, public_release_policy
 from .release_store import ReleaseStoreError
 from .tournament_service import OfflineTournamentService, TournamentServiceError
 from .decision_intelligence_store import DecisionIntelligenceStoreError
+from .meta_controller_service import (
+    MetaControllerServiceError,
+    RationalMetaControllerService,
+)
+from .meta_controller_store import MetaControllerStoreError
 
 
 MANAGER: RunManager | None = None
@@ -185,12 +190,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # exposing the active v0.6.0 development line explicitly.
+                # exposing the active v0.6.1 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
-                    "active_development": "v0.6.0",
+                    "previous_lab": "v0.6.0",
+                    "active_development": "v0.6.1",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -247,7 +253,41 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 ),
                 **contracts,
                 "control_kernel": runtime_health,
+                "meta_controller": {
+                    "schema_version": "v0.6.1",
+                    "policy_version": "rational-meta-controller-v1",
+                    "advisory_only": True,
+                    "provider_calls": 0,
+                    "network_calls": 0,
+                },
             })
+            return
+        if path == "/api/v1/meta-controller/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                self._json(RationalMetaControllerService(kernel.meta_controller_store).status(project_id=self._project_id()))
+            except (MetaControllerServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "meta_controller_status_unavailable", "message": str(exc)}, HTTPStatus.CONFLICT)
+            return
+        if path.startswith("/api/v1/meta-controller/"):
+            decision_id = unquote(path.removeprefix("/api/v1/meta-controller/").strip("/"))
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if not decision_id or "/" in decision_id:
+                    raise ValueError("invalid meta decision id")
+                result = RationalMetaControllerService(kernel.meta_controller_store).get(project_id=self._project_id(), decision_id=decision_id)
+                if result is None:
+                    self._json({"error": "meta_decision_not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except (MetaControllerServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "meta_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path == "/api/v1/tournaments/status":
             kernel = self.manager.control_kernel
@@ -1114,6 +1154,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/tournaments/offline":
             self._run_offline_tournament()
             return
+        if path == "/api/v1/meta-controller/decide":
+            self._run_meta_controller()
+            return
         if path == "/api/v1/system/backups":
             self._create_runtime_backup()
             return
@@ -1591,6 +1634,36 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 {"error": "tournament_request_invalid", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
+
+    def _run_meta_controller(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=256_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "MetaController requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError(
+                    "persistent runtime is disabled",
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "persistent_runtime_disabled",
+                )
+            result, replayed = RationalMetaControllerService(kernel.meta_controller_store).decide(
+                project_id=self._project_id(),
+                idempotency_key=key,
+                payload=payload,
+            )
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except MetaControllerStoreError as exc:
+            self._json({"error": "meta_controller_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (MetaControllerServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "meta_controller_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def _catalog_import(self) -> None:
         try:

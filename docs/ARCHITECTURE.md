@@ -1,6 +1,6 @@
-# CostWeave v0.5.8.4 / v0.6.0 架构说明
+# CostWeave v0.5.8.4 / v0.6.0 / v0.6.1 架构说明
 
-`v0.5.8.4` remains the frozen stable control-plane baseline. `v0.6.0` is the active Decision Intelligence Lab line: its benchmark and tournament layer is deliberately offline, result-blind, append-only, and non-authoritative. The v0.6.0 decision layer sits beside the stable runtime rather than silently changing the stable routing contract.
+`v0.5.8.4` remains the frozen stable control-plane baseline. `v0.6.0` is the historical Decision Intelligence Lab line: its benchmark and tournament layer is deliberately offline, result-blind, append-only, and non-authoritative. `v0.6.1` adds the Rational MetaController beside both layers; it is a provider-free, advisory gate for deciding whether more planning is worth its cost, and it never silently changes the stable routing contract.
 
 v0.5.8.4 在既有控制平面之上增加只读 Release Readiness Evaluator 和追加式 Release Attestation Store。稳定版评估不改变任何任务路线；它只把运行时事实、全量重放和默认安全状态组合成可验证结论。
 

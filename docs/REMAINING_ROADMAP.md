@@ -10,7 +10,7 @@
 > 2026-08-05 增量：v0.5.8.2 已完成 Adapter 插件白名单、默认关闭的网络准入、短时密钥租约、共享脱敏、项目范围与逻辑撤销、Prompt/工具边界，以及 Provider 幂等副作用合同。当前没有真实 Provider 兼容性数据，物理项目擦除仍未实现，下一工程版本为 v0.5.8.3。
 > 2026-08-09 增量：v0.5.8.3 已完成确定性故障注入、30 秒故障转移合同、deadline miss 评估、安全恢复、不可变恢复收据、事件完整性与逻辑备份恢复。694 项测试与桌面/手机浏览器验收通过；指标仍是 E0 夹具，下一工程版本为 v0.5.8.4。
 > 2026-08-09 增量：v0.5.8.4 已完成全量 EventLog 重放、稳定版就绪清单、migration 029 不可变发布证明、全新安装验证命令、发布文档与资产。v0.5 工程路线结束；v0.6 旧规划保留为候选，启动前重新评审。
-> 2026-08-09 决策智能 Revision 2：新增任务/系统信念、能力证据图、信息价值元控制器、完整策略联合搜索、执行中信念更新与分层信用分配。v0.6 改为“决策智能实验室 → 理性元控制 → 能力图与校准路由 → 联合策略搜索 → 动态恢复 → 安全学习 → 真实 Shadow → 竞争证明”。下一版固定为 v0.6.0 Decision Intelligence Lab。产品路线见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)；交给低能力模型施工时，必须先读 [`V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md`](V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)，再严格执行 [`V0.6.0_IMPLEMENTATION_SPEC.md`](V0.6.0_IMPLEMENTATION_SPEC.md)。
+> 2026-08-09 决策智能 Revision 2：新增任务/系统信念、能力证据图、信息价值元控制器、完整策略联合搜索、执行中信念更新与分层信用分配。v0.6 改为“决策智能实验室 → 理性元控制 → 能力图与校准路由 → 联合策略搜索 → 动态恢复 → 安全学习 → 真实 Shadow → 竞争证明”。v0.6.0 已完成实验室合同，v0.6.1 Rational MetaController 已完成离线、可审计的元控制层。下一步应先通过 v0.6.1 验收，再进入能力图与校准路由。产品路线见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)；交给低能力模型施工时，必须先读 [`V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md`](V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)。
 > 核心原则：先取得真实证据，再训练预测器；先离线和 Shadow，再允许 Canary；未经真实基准验证，不宣传固定降本比例。
 
 ## 1. 为什么调整后续排期

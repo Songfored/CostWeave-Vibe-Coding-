@@ -1,4 +1,4 @@
-"""Machine-verifiable v0.5 stable release readiness contracts."""
+"""Machine-verifiable v0.6.1 lab release readiness contracts."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import json
 from typing import Any, Mapping
 
 
-RELEASE_SCHEMA_VERSION = "v0.6.0"
-EXPECTED_RUNTIME_SCHEMA = "v6.0.0"
-EXPECTED_MIGRATIONS = 30
+RELEASE_SCHEMA_VERSION = "v0.6.1"
+EXPECTED_RUNTIME_SCHEMA = "v6.1.0"
+EXPECTED_MIGRATIONS = 31
 
 
 def _canonical_json(value: Any) -> str:

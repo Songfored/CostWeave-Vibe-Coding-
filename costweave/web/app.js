@@ -1539,6 +1539,130 @@ async function runOfflineTournament() {
   }
 }
 
+function metaControllerDemoPayload() {
+  const objectiveHash = "78279133458d95a3c05a5dd54c2aa0cb6bccca96a4e1b0c5ea18aae06df5b01b";
+  return {
+    confirm: "RUN_META_CONTROLLER",
+    now: "2026-08-09T00:00:00Z",
+    task_belief: {
+      case_id: "v061-demo",
+      objective_hash: objectiveHash,
+      task_family_probabilities: { code: 1 },
+      required_modalities: [],
+      required_tools: [],
+      risk_level: "low",
+      reversible: true,
+      external_side_effects: false,
+      decomposability: { mean: 0.1, lower: 0, upper: 0.2 },
+      parallelizability: { mean: 0.1, lower: 0, upper: 0.2 },
+      verification_difficulty: { mean: 0.1, lower: 0, upper: 0.2 },
+      epistemic_uncertainty: 0.05,
+      aleatoric_uncertainty: 0.05,
+      ood_score: 0.02,
+      hard_constraints: { side_effects: false },
+      evidence_ids: ["demo-task-evidence"],
+      observed_at: "2026-08-09T00:00:00Z",
+      schema_version: "v0.6.0",
+    },
+    system_belief: {
+      case_id: "v061-demo",
+      local_queue_depth: 0,
+      local_available_slots: 2,
+      local_gpu_memory_available_mb: null,
+      budget_remaining_usd: 1,
+      deadline_remaining_ms: 10000,
+      provider_beliefs: [],
+      telemetry_age_ms: 0,
+      evidence_ids: ["demo-system-evidence"],
+      observed_at: "2026-08-09T00:00:00Z",
+      schema_version: "v0.6.0",
+    },
+    candidates: [{
+      case_id: "v061-demo",
+      management_mode: "no_delegation",
+      nodes: [{
+        node_id: "demo-node",
+        objective_hash: objectiveHash,
+        dependencies: [],
+        executor_id: "local-demo",
+        reasoning_tier: "low",
+        tool_ids: [],
+        parallel_group: "",
+        validator_id: "demo-validator",
+        predicted_success: { mean: 0.95, lower: 0.9, upper: 0.98 },
+        predicted_cost_usd: { mean: 0.001, p95: 0.002 },
+        predicted_latency_ms: { mean: 20, p95: 40 },
+      }],
+      planning_cost_usd: { mean: 0, p95: 0 },
+      planning_latency_ms: { mean: 0, p95: 0 },
+      predicted_success: { mean: 0.95, lower: 0.9, upper: 0.98 },
+      predicted_total_cost_usd: { mean: 0.001, p95: 0.002 },
+      predicted_total_latency_ms: { mean: 20, p95: 40 },
+      hard_constraint_checks: { demo: true },
+      recovery_policy: "none",
+      evidence_ids: ["demo-strategy-evidence"],
+      policy_revision: "v061-demo-policy",
+      schema_version: "v0.6.0",
+    }],
+    planner_members: [],
+    available_budget: {
+      money_usd: 1,
+      input_tokens: 0,
+      output_tokens: 0,
+      wall_clock_ms: 10000,
+      planner_calls: 4,
+      judge_calls: 0,
+      probe_calls: 1,
+    },
+  };
+}
+
+async function loadMetaControllerStatus() {
+  const statusNode = $("#meta-controller-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/meta-controller/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取元控制状态");
+    statusNode.textContent = `${data.runtime_authority || "advisory-only"} · ${data.policy_version || "v0.6.1"}`;
+    $("#meta-controller-calls").textContent = String(data.provider_calls ?? 0);
+  } catch (error) {
+    statusNode.textContent = "元控制状态暂不可用";
+    $("#meta-controller-feedback").textContent = error instanceof Error ? error.message : "无法读取状态";
+  }
+}
+
+async function runMetaControllerDemo() {
+  const button = $("#run-meta-controller-demo");
+  const feedback = $("#meta-controller-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  feedback.textContent = "正在执行离线元控制演示…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function")
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/meta-controller/decide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `ui-meta-${suffix}` },
+      body: JSON.stringify(metaControllerDemoPayload()),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "元控制演示未完成");
+    const decision = data.decision || {};
+    $("#meta-controller-action").textContent = String(decision.action || "—").toUpperCase();
+    $("#meta-controller-evc").textContent = Number(decision.expected_value_of_computation || 0).toFixed(4);
+    $("#meta-controller-committee").textContent = String((decision.committee_member_ids || []).length);
+    $("#meta-controller-calls").textContent = String(data.provider_calls ?? 0);
+    $("#meta-controller-status").textContent = data.replayed ? "已复用确定性决策" : "决策完成 · 离线可审计";
+    feedback.textContent = `decision ${String(decision.decision_id || "").slice(0, 12)}… · ${String((decision.reason_codes || []).join(", "))}`;
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "元控制演示未完成";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1603,6 +1727,7 @@ $$(".evidence-filter").forEach((button) => button.addEventListener("click", () =
 $("#refresh-evidence").addEventListener("click", () => loadEvidenceConsole(state.runId));
 $("#export-evidence").addEventListener("click", exportEvidencePackage);
 $("#run-offline-tournament").addEventListener("click", runOfflineTournament);
+$("#run-meta-controller-demo").addEventListener("click", runMetaControllerDemo);
 
 updateGoalCount();
 loadCatalog();
@@ -1613,4 +1738,5 @@ loadResilienceStatus();
 loadStableReleaseStatus();
 loadEvidenceConsole();
 loadDecisionIntelligenceStatus();
+loadMetaControllerStatus();
 refreshHistory({ restore: true });

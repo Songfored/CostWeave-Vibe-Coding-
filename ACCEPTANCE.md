@@ -1,40 +1,39 @@
-# CostWeave v0.6.0 acceptance snapshot
+# CostWeave v0.6.1 acceptance record
 
-This file is a release-workspace snapshot. It records the acceptance boundary for the active `v0.6.0` line while preserving `v0.5.8.4` as the frozen stable baseline.
+## Release identity
 
-## Scope accepted
+- Version: `0.6.1`
+- Runtime schema: `v6.1.0`
+- Migrations: `31`
+- Active policy: `rational-meta-controller-v1`
+- Authority: advisory-only
 
-- Deterministic contracts and round trips.
-- Migration 030 and immutable decision/tournament persistence.
-- Safe result-blind benchmark records and importers.
-- Offline policy evaluation, paired bootstrap, claim gates, CLI, API, and UI wiring.
+## Acceptance criteria
 
-## Scope explicitly not accepted as a claim
+- [x] Fast path is conservative and deterministic.
+- [x] High risk, OOD, stale evidence, capacity, side effects, infeasible strategies, and budget conditions have explicit reason codes.
+- [x] Planner committee is adaptive, bounded, correlation-aware, and budget-aware.
+- [x] EVC is explicit and uses a common utility unit.
+- [x] Probe has no side-effect authority; expert escalation does not expand permissions.
+- [x] Budget ledger is multi-dimensional, atomic, immutable, and hash-verified.
+- [x] API and CLI reject unknown/unauthorized input and persist idempotently.
+- [x] Existing v0.6.0 tournament contracts remain available.
+- [x] Default provider and network calls are zero.
 
-- No real provider quality result.
-- No real cost-reduction percentage.
-- No production routing authority.
-- No claim of superiority over Claude, OpenAI, or any other competitor.
+## Evidence boundary
 
-## Required commands
+The acceptance suite is deterministic E0 engineering evidence. It validates code paths and contracts but does not prove real model quality, production throughput, commercial savings, or superiority over a competitor. Those remain explicit v0.6.2+ exit gates.
 
-```text
-python -B tests/run_isolated.py
-python -B -m costweave.tournament_cli --pretty
-python -B -m costweave.release_cli --pretty
-```
+## Execution record
 
-## Observed verification (2026-08-09)
+- Full isolated regression: **857 tests passed, 0 failed**, elapsed approximately 316 seconds.
+- Focused v0.6.1 suite: **15 tests passed, 0 failed**.
+- Release readiness: **success**; runtime schema `v6.1.0`, 31 migrations, WAL, event integrity, replay parity, backup verification, and default-off external/paid-call gates all passed.
+- Wheel smoke test: `costweave-0.6.1-py3-none-any.whl` imports as `costweave 0.6.1` and runs the offline MetaController demo with provider/network calls equal to zero.
 
-- Full isolated suite: **842 passed, 0 failed**.
-- v0.6.0 targeted suite: **54 passed, 0 failed**.
-- Release gates: **engineering_ready=true**, runtime `v6.0.0`, 30 migrations, SQLite WAL, replay parity healthy.
-- Offline tournament: completed with zero provider calls and zero network calls; bundled seed remains `E0-simulated` and claim gates remain insufficient-sample.
-- Wheel: `costweave-0.6.0-py3-none-any.whl`, SHA-256 `da5140b45b6f6c20973e21d4d58d4a49d714845e328199748853aef3b9de4ad9`.
-- Archives contain no `__pycache__`, `.pyc`, or `.pyo` entries.
+## Published local artifacts
 
-## Release artifacts
-
-- `costweave-v0.6.0.zip` — runtime archive.
-- `costweave-v0.6.0-source.zip` — source archive.
-- `costweave-0.6.0-SHA256SUMS.txt` — archive, wheel, and acceptance-report checksums.
+- `outputs/costweave-v0.6.1.zip`
+- `outputs/costweave-v0.6.1-source.zip`
+- `outputs/v061-dist/costweave-0.6.1-py3-none-any.whl`
+- `outputs/costweave-v0.6.1-SHA256SUMS.txt`

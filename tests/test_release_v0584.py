@@ -39,9 +39,9 @@ class StableReleaseContractTests(unittest.TestCase):
         status = build_release_status(
             self.kernel, adapter_policy=AdapterRuntimePolicy().public()
         )
-        self.assertEqual("v6.0.0", RUNTIME_SCHEMA_VERSION)
-        self.assertEqual(30, EXPECTED_MIGRATIONS)
-        self.assertEqual(30, self.kernel.health()["migrations"])
+        self.assertEqual("v6.1.0", RUNTIME_SCHEMA_VERSION)
+        self.assertEqual(31, EXPECTED_MIGRATIONS)
+        self.assertEqual(31, self.kernel.health()["migrations"])
         self.assertTrue(status["engineering_ready"])
         self.assertEqual("stable_engineering", status["release_status"])
         self.assertFalse(status["production_ready"])
@@ -147,7 +147,7 @@ class StableReleaseContractTests(unittest.TestCase):
 
     def test_public_policy_separates_verified_and_unverified_scope(self) -> None:
         policy = public_release_policy()
-        self.assertEqual("v0.6.0", policy["schema_version"])
+        self.assertEqual("v0.6.1", policy["schema_version"])
         self.assertIn("EventLog-only projection replay", policy["verified_scope"])
         self.assertIn(
             "real cost reduction percentage", policy["unverified_claims"]
@@ -203,7 +203,7 @@ class StableReleaseApiTests(unittest.TestCase):
         status, release = self.request("/api/v1/release/status")
         self.assertEqual(200, status)
         self.assertTrue(release["engineering_ready"])
-        self.assertEqual(30, release["runtime"]["migrations"])
+        self.assertEqual(31, release["runtime"]["migrations"])
         headers = {
             "Content-Type": "application/json",
             "Idempotency-Key": "stable-api-attestation-001",

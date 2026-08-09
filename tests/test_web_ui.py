@@ -175,7 +175,7 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("metadata.load_warning", self.js)
         self.assertIn("run.scheduling", self.js)
         self.assertIn('data-queue-state=', self.js)
-        self.assertIn("v0.5.8.4 Stable Engineering", self.html)
+        self.assertIn("v0.5.8.4 Stable", self.html)
         self.assertIn('id="security-boundary-section"', self.html)
         self.assertIn('id="resilience-section"', self.html)
         self.assertIn('id="stable-release-section"', self.html)
