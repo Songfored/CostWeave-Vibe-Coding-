@@ -23,3 +23,17 @@
 ## Evidence boundary
 
 The acceptance suite is deterministic E0 engineering evidence. It validates code paths and contracts but does not prove real model quality, production throughput, commercial savings, or superiority over a competitor. Those remain explicit v0.6.2+ exit gates.
+
+## Execution record
+
+- Full isolated regression: **857 tests passed, 0 failed**, elapsed approximately 316 seconds.
+- Focused v0.6.1 suite: **15 tests passed, 0 failed**.
+- Release readiness: **success**; runtime schema `v6.1.0`, 31 migrations, WAL, event integrity, replay parity, backup verification, and default-off external/paid-call gates all passed.
+- Wheel smoke test: `costweave-0.6.1-py3-none-any.whl` imports as `costweave 0.6.1` and runs the offline MetaController demo with provider/network calls equal to zero.
+
+## Published local artifacts
+
+- `outputs/costweave-v0.6.1.zip`
+- `outputs/costweave-v0.6.1-source.zip`
+- `outputs/v061-dist/costweave-0.6.1-py3-none-any.whl`
+- `outputs/costweave-v0.6.1-SHA256SUMS.txt`

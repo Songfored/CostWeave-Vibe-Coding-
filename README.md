@@ -2,18 +2,25 @@
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab` remains the historical benchmark line. The active development release is `v0.6.1 Rational MetaController`: it adds a deterministic, provider-free metareasoning gate that decides whether to take a fast path, deliberate, probe, or escalate to an expert, while preserving the v0.6.0 contracts.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab` and `v0.6.1 Rational MetaController` remain historical provider-free lines. The active development release is `v0.6.2 Capability Evidence Graph & Calibrated Router`: it records condition-specific evidence, preserves uncertainty, detects stale/OOD coverage and returns an advisory route or explicit abstention/escalation.
 
 Quick offline reproduction:
 
 ```text
 python -B -m costweave.tournament_cli --pretty
 python -B -m costweave.meta_controller_cli --pretty
+python -B -m costweave.capability_router_cli --pretty
 ```
 
-The v0.6.1 regression suite includes the prior v0.6.0 contracts plus MetaController, budget-ledger, idempotency, API, and release-gate tests. All built-in demonstrations are E0 simulated and make zero provider or network calls; they do not support a commercial cost-reduction claim.
+The v0.6.2 regression suite includes the prior v0.6.0/v0.6.1 contracts plus capability graph, decayed calibration, drift, conservative route, idempotency, API, and release-gate tests. All built-in demonstrations are E0 simulated and make zero provider or network calls; they do not support a commercial cost-reduction claim.
 
-The loopback API is offline by default: `GET /api/v1/meta-controller/status`, `POST /api/v1/meta-controller/decide`, and `GET /api/v1/meta-controller/{decision_id}` expose the advisory decision contract. See [`docs/CHANGELOG-v0.6.1.md`](docs/CHANGELOG-v0.6.1.md), [`docs/V0.6.1_MIGRATION.md`](docs/V0.6.1_MIGRATION.md), and the historical [`docs/CHANGELOG-v0.6.0.md`](docs/CHANGELOG-v0.6.0.md).
+The loopback API is offline by default: `GET /api/v1/capability-router/status`, `POST /api/v1/capability-router/evidence`, `POST /api/v1/capability-router/decide`, and `GET /api/v1/capability-router/{decision_id}` expose the v0.6.2 advisory contract. See [`docs/CHANGELOG-v0.6.2.md`](docs/CHANGELOG-v0.6.2.md), [`docs/V0.6.2_MIGRATION.md`](docs/V0.6.2_MIGRATION.md), and the historical [`docs/CHANGELOG-v0.6.1.md`](docs/CHANGELOG-v0.6.1.md).
+
+## v0.6.2 Capability Evidence Graph & Calibrated Router
+
+The router does not treat a model name as a universal skill score. It joins task family, model revision, reasoning tier, provider deployment, tools, modalities, and Validator conditions into an immutable evidence graph. Evidence keeps source provenance, evidence level, sample counts, recency, cost, latency, retry/escalation/rework and correlated-failure fields. A decayed, deliberately wide calibration interval is used for cold start; stale, OOD, high-risk or low-coverage conditions can return `ABSTAIN` or `ESCALATE`.
+
+`costweave-capability-router --pretty` runs the same deterministic, offline fixture as the UI and API. The fixture is E0 simulated, and the active route remains advisory-only until a preregistered real-data tournament passes the release gates.
 
 ## v0.6.1 Rational MetaController
 

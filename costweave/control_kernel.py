@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.1."""
+"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.2."""
 
 from __future__ import annotations
 
@@ -101,6 +101,7 @@ from .resilience import RecoveryPlanner
 from .release_store import ReleaseStore
 from .decision_intelligence_store import DecisionIntelligenceStore
 from .meta_controller_store import MetaControllerStore
+from .capability_graph_store import CapabilityGraphStore
 from .calibration import HierarchicalCalibrator
 from .media_runtime import MediaRuntime
 from .projections import canonical_task_id, record_from_snapshot, record_to_projection
@@ -152,6 +153,7 @@ class ControlKernel:
         self.release_store = ReleaseStore(self.store.path)
         self.decision_intelligence_store = DecisionIntelligenceStore(self.store.path)
         self.meta_controller_store = MetaControllerStore(self.store.path)
+        self.capability_graph_store = CapabilityGraphStore(self.store.path)
         self.calibrator = HierarchicalCalibrator()
         self.media_runtime = MediaRuntime(self.store.path)
         self.recovered_orphan_leases = self.reservations.release_orphans()
@@ -435,6 +437,7 @@ class ControlKernel:
             **self.release_store.counts(),
             **self.decision_intelligence_store.counts(),
             **self.meta_controller_store.counts(),
+            **self.capability_graph_store.counts(),
             **self.media_runtime.counts(),
             "artifact_dag": artifact_dag_enabled(),
             "parallel_runtime": parallel_runtime_enabled(),

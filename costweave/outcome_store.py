@@ -127,7 +127,7 @@ class OutcomeStore:
             "data_versions": {
                 "catalog": catalog_revision or "unknown",
                 "contracts": "v4.1",
-                "runtime": "v6.1.0",
+                "runtime": "v6.2.0",
             },
             "plan_revision": record.plan.version if record.plan else 0,
         }

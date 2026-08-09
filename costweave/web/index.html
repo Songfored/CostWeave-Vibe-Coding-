@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 Rational MetaController</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 MetaController · v0.6.2 Capability Router</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -28,6 +28,7 @@
       <a href="#evidence-console-section">证据控制台</a>
       <a href="#decision-intelligence-section">v0.6.0 分流竞赛</a>
       <a href="#meta-controller-section">v0.6.1 元控制</a>
+      <a href="#capability-router-section">v0.6.2 能力图</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
@@ -409,7 +410,7 @@
       <p class="registry-intro">稳定版状态由运行时迁移、事件完整性、EventLog 重放、默认零外部调用和发布证明共同决定。工程合同通过与真实商业效果是两条独立结论。</p>
       <div class="stable-release-grid">
         <article><span>工程稳定门</span><strong id="stable-engineering-state">检查中</strong><small>全部硬门必须通过</small></article>
-        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.1.0</strong><small id="stable-migration-count">31 项 migration</small></article>
+        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.2.0</strong><small id="stable-migration-count">32 项 migration</small></article>
         <article><span>EventLog 重放</span><strong id="stable-replay-state">检查中</strong><small id="stable-replay-count">0 个运行</small></article>
         <article><span>商业效果结论</span><strong id="stable-commercial-state">未验证</strong><small>真实成本 / 质量 / P95 仍需 E2+</small></article>
       </div>
@@ -498,6 +499,27 @@
       <div class="decision-intelligence-actions">
         <button id="run-meta-controller-demo" class="secondary-button" type="button">运行元控制演示</button>
         <span id="meta-controller-feedback" class="catalog-live" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="capability-router-section" class="capability-router-section" aria-labelledby="capability-router-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">V0.6.2 CAPABILITY EVIDENCE GRAPH</span>
+          <h2 id="capability-router-title">用证据决定路线，证据不足就拒答</h2>
+        </div>
+        <span id="capability-router-status" class="registry-boundary">正在读取能力图状态…</span>
+      </div>
+      <p class="registry-intro">这一层只做离线建议：把任务族、模型版本、推理档位、部署、工具和 Validator 组成条件证据图，按样本新鲜度校准成功、成本、延迟和返工区间。低覆盖、分布外或高风险任务会返回 ABSTAIN / ESCALATE，不会暗中调用 Provider。</p>
+      <div class="meta-controller-grid">
+        <article><span>Evidence Samples</span><strong id="capability-router-samples">0</strong><small>只读证据样本</small></article>
+        <article><span>Calibrated Routes</span><strong id="capability-router-posteriors">0</strong><small>已保存后验快照</small></article>
+        <article><span>Decision</span><strong id="capability-router-action">—</strong><small>当前离线建议</small></article>
+        <article><span>External Calls</span><strong id="capability-router-calls">0</strong><small>固定为 0</small></article>
+      </div>
+      <div class="decision-intelligence-actions">
+        <button id="run-capability-router-demo" class="secondary-button" type="button">运行能力图演示</button>
+        <span id="capability-router-feedback" class="catalog-live" role="status" aria-live="polite"></span>
       </div>
     </section>
 
@@ -597,7 +619,7 @@
     </form>
   </dialog>
 
-  <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 Rational MetaController</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.6.1" defer></script>
+  <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 MetaController / v0.6.2 Capability Router</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.6.2" defer></script>
 </body>
 </html>

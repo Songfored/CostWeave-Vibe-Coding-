@@ -98,6 +98,11 @@ from .meta_controller_service import (
     RationalMetaControllerService,
 )
 from .meta_controller_store import MetaControllerStoreError
+from .capability_graph_service import (
+    CapabilityGraphService,
+    CapabilityGraphServiceError,
+)
+from .capability_graph_store import CapabilityGraphStoreError
 
 
 MANAGER: RunManager | None = None
@@ -190,13 +195,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # exposing the active v0.6.1 development line explicitly.
+                # exposing the active v0.6.2 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.1",
+                    "active_development": "v0.6.2",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -260,6 +265,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "provider_calls": 0,
                     "network_calls": 0,
                 },
+                "capability_router": {
+                    "schema_version": "v0.6.2",
+                    "policy_version": "capability-evidence-graph-router-v1",
+                    "advisory_only": True,
+                    "provider_calls": 0,
+                    "network_calls": 0,
+                },
             })
             return
         if path == "/api/v1/meta-controller/status":
@@ -288,6 +300,33 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     self._json(result)
             except (MetaControllerServiceError, ValueError, RuntimeError) as exc:
                 self._json({"error": "meta_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if path == "/api/v1/capability-router/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                self._json(CapabilityGraphService(kernel.capability_graph_store).status(project_id=self._project_id()))
+            except (CapabilityGraphServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "capability_router_status_unavailable", "message": str(exc)}, HTTPStatus.CONFLICT)
+            return
+        if path.startswith("/api/v1/capability-router/"):
+            decision_id = unquote(path.removeprefix("/api/v1/capability-router/").strip("/"))
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if not decision_id or "/" in decision_id or decision_id in {"status", "decide", "evidence"}:
+                    raise ValueError("invalid capability route decision id")
+                result = CapabilityGraphService(kernel.capability_graph_store).get(project_id=self._project_id(), decision_id=decision_id)
+                if result is None:
+                    self._json({"error": "capability_decision_not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except (CapabilityGraphServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "capability_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path == "/api/v1/tournaments/status":
             kernel = self.manager.control_kernel
@@ -1157,6 +1196,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/meta-controller/decide":
             self._run_meta_controller()
             return
+        if path == "/api/v1/capability-router/evidence":
+            self._ingest_capability_evidence()
+            return
+        if path == "/api/v1/capability-router/decide":
+            self._run_capability_router()
+            return
+        if path == "/api/v1/capability-router/drift":
+            self._run_capability_drift()
+            return
         if path == "/api/v1/system/backups":
             self._create_runtime_backup()
             return
@@ -1664,6 +1712,59 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({"error": "meta_controller_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
         except (MetaControllerServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
             self._json({"error": "meta_controller_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _ingest_capability_evidence(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=256_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError("capability evidence requires Idempotency-Key", HTTPStatus.BAD_REQUEST, "idempotency_key_required")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result, replayed = CapabilityGraphService(kernel.capability_graph_store).ingest(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except CapabilityGraphStoreError as exc:
+            self._json({"error": "capability_graph_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (CapabilityGraphServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "capability_evidence_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_capability_router(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=256_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError("capability router requires Idempotency-Key", HTTPStatus.BAD_REQUEST, "idempotency_key_required")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result, replayed = CapabilityGraphService(kernel.capability_graph_store).decide(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except CapabilityGraphStoreError as exc:
+            self._json({"error": "capability_graph_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (CapabilityGraphServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "capability_router_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_capability_drift(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=64_000)
+            if payload.get("confirm") != "RUN_CAPABILITY_ROUTER":
+                raise CapabilityGraphServiceError("confirm must equal RUN_CAPABILITY_ROUTER")
+            if not isinstance(payload.get("baseline"), dict) or not isinstance(payload.get("current"), dict):
+                raise CapabilityGraphServiceError("baseline and current must be JSON objects")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result = CapabilityGraphService(kernel.capability_graph_store).drift(baseline=payload["baseline"], current=payload["current"], now=payload.get("now"))
+            self._json(result)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (CapabilityGraphServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "capability_drift_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def _catalog_import(self) -> None:
         try:

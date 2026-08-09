@@ -1202,3 +1202,15 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 .meta-controller-grid strong { display: block; margin: 7px 0 4px; color: #f0edff; font-size: clamp(1.25rem, 2vw, 1.8rem); }
 @media (max-width: 760px) { .meta-controller-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } .meta-controller-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 390px) { .meta-controller-grid { grid-template-columns: 1fr; } }
+/* v0.6.2 capability evidence graph */
+.capability-router-section {
+  margin: 32px auto;
+  max-width: 1180px;
+  padding: 28px;
+  border: 1px solid rgba(86, 211, 180, .28);
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(12, 46, 48, .95), rgba(9, 18, 28, .98));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .20);
+}
+.capability-router-section .registry-intro { max-width: 900px; }
+@media (max-width: 760px) { .capability-router-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }

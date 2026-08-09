@@ -1663,6 +1663,77 @@ async function runMetaControllerDemo() {
   }
 }
 
+function capabilityRouterDemoPayload() {
+  const now = "2026-08-09T00:00:00Z";
+  const candidate = (route_id, model_revision, reasoning_tier, provider_deployment, cost, latency, group) => ({
+    route_id, model_revision, reasoning_tier, provider_deployment,
+    validator_id: "validator:none", tool_ids: [], modality_ids: [],
+    failure_correlation_group: group,
+    base_cost_usd: { mean: cost, p95: cost * 2 },
+    base_latency_ms: { mean: latency, p95: latency * 2 },
+    schema_version: "v0.6.2",
+  });
+  return {
+    confirm: "RUN_CAPABILITY_ROUTER",
+    context: {
+      project_id: "local-default", task_family: "code", risk_level: "low", ood_score: 0.02,
+      required_tools: [], required_modalities: [], deadline_remaining_ms: 1000,
+      budget_remaining_usd: 0.05, independent_validator_required: false,
+    },
+    candidates: [
+      candidate("local-medium", "local-model@2026-08", "medium", "local:default", 0.001, 120, "local-model-family"),
+      candidate("strong-fallback", "strong-model@2026-08", "high", "offline:strong", 0.02, 350, "strong-model-family"),
+    ],
+    calibration_set_id: "ui-fixture-v062",
+    now,
+  };
+}
+
+async function loadCapabilityRouterStatus() {
+  const statusNode = $("#capability-router-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/capability-router/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取能力图状态");
+    statusNode.textContent = `${data.runtime_authority || "advisory-only"} · ${data.policy_version || "v0.6.2"}`;
+    $("#capability-router-samples").textContent = String(data.evidence_sample_count ?? 0);
+    $("#capability-router-posteriors").textContent = String(data.counts?.capability_calibrations_v062 ?? 0);
+    $("#capability-router-calls").textContent = String(data.provider_calls ?? 0);
+  } catch (error) {
+    statusNode.textContent = "能力图状态暂不可用";
+    $("#capability-router-feedback").textContent = error instanceof Error ? error.message : "无法读取状态";
+  }
+}
+
+async function runCapabilityRouterDemo() {
+  const button = $("#run-capability-router-demo");
+  const feedback = $("#capability-router-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  feedback.textContent = "正在执行离线能力图演示…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function") ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/capability-router/decide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `ui-capability-${suffix}` },
+      body: JSON.stringify(capabilityRouterDemoPayload()),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "能力图演示未完成");
+    const decision = data.decision || {};
+    $("#capability-router-action").textContent = String(decision.action || "—");
+    $("#capability-router-calls").textContent = String(data.provider_calls ?? 0);
+    $("#capability-router-status").textContent = data.replayed ? "已复用确定性建议" : "建议完成 · 离线可审计";
+    feedback.textContent = `${String(decision.reason_codes?.join(", ") || "evidence-aware route")} · ${String(decision.decision_id || "").slice(0, 12)}…`;
+    loadCapabilityRouterStatus();
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "能力图演示未完成";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1728,6 +1799,7 @@ $("#refresh-evidence").addEventListener("click", () => loadEvidenceConsole(state
 $("#export-evidence").addEventListener("click", exportEvidencePackage);
 $("#run-offline-tournament").addEventListener("click", runOfflineTournament);
 $("#run-meta-controller-demo").addEventListener("click", runMetaControllerDemo);
+$("#run-capability-router-demo").addEventListener("click", runCapabilityRouterDemo);
 
 updateGoalCount();
 loadCatalog();
@@ -1739,4 +1811,5 @@ loadStableReleaseStatus();
 loadEvidenceConsole();
 loadDecisionIntelligenceStatus();
 loadMetaControllerStatus();
+loadCapabilityRouterStatus();
 refreshHistory({ restore: true });

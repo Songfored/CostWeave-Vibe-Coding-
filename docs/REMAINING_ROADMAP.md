@@ -10,7 +10,7 @@
 > 2026-08-05 增量：v0.5.8.2 已完成 Adapter 插件白名单、默认关闭的网络准入、短时密钥租约、共享脱敏、项目范围与逻辑撤销、Prompt/工具边界，以及 Provider 幂等副作用合同。当前没有真实 Provider 兼容性数据，物理项目擦除仍未实现，下一工程版本为 v0.5.8.3。
 > 2026-08-09 增量：v0.5.8.3 已完成确定性故障注入、30 秒故障转移合同、deadline miss 评估、安全恢复、不可变恢复收据、事件完整性与逻辑备份恢复。694 项测试与桌面/手机浏览器验收通过；指标仍是 E0 夹具，下一工程版本为 v0.5.8.4。
 > 2026-08-09 增量：v0.5.8.4 已完成全量 EventLog 重放、稳定版就绪清单、migration 029 不可变发布证明、全新安装验证命令、发布文档与资产。v0.5 工程路线结束；v0.6 旧规划保留为候选，启动前重新评审。
-> 2026-08-09 决策智能 Revision 2：新增任务/系统信念、能力证据图、信息价值元控制器、完整策略联合搜索、执行中信念更新与分层信用分配。v0.6 改为“决策智能实验室 → 理性元控制 → 能力图与校准路由 → 联合策略搜索 → 动态恢复 → 安全学习 → 真实 Shadow → 竞争证明”。v0.6.0 已完成实验室合同，v0.6.1 Rational MetaController 已完成离线、可审计的元控制层。下一步应先通过 v0.6.1 验收，再进入能力图与校准路由。产品路线见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)；交给低能力模型施工时，必须先读 [`V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md`](V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)。
+> 2026-08-09 决策智能 Revision 2：新增任务/系统信念、能力证据图、信息价值元控制器、完整策略联合搜索、执行中信念更新与分层信用分配。v0.6 改为“决策智能实验室 → 理性元控制 → 能力图与校准路由 → 联合策略搜索 → 动态恢复 → 安全学习 → 真实 Shadow → 竞争证明”。v0.6.0 已完成实验室合同，v0.6.1 Rational MetaController 已完成离线、可审计的元控制层，v0.6.2 Capability Evidence Graph & Calibrated Router 已完成离线基础实现。下一步进入联合策略搜索；能力图仍不得接管生产路由。产品路线见 [`V0.6_COMPETITIVE_UPGRADE_PLAN.md`](V0.6_COMPETITIVE_UPGRADE_PLAN.md)，算法合同见 [`V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md`](V0.6_DECISION_INTELLIGENCE_ARCHITECTURE.md)；交给低能力模型施工时，必须先读 [`V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md`](V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)。
 > 核心原则：先取得真实证据，再训练预测器；先离线和 Shadow，再允许 Canary；未经真实基准验证，不宣传固定降本比例。
 
 ## 1. 为什么调整后续排期
@@ -57,7 +57,7 @@ v0.5.8.1～v0.5.8.4 集成、压力、安全、v0.5 Stable
 v0.6.0 决策智能实验室（下一版）
         │
         ▼
-v0.6.1～v0.6.7 网关、学习路由、任务级优化与生产证明
+v0.6.2～v0.6.7 能力图、联合策略、恢复、学习、网关与生产证明
 ```
 
 任何版本未通过退出门槛时，后续依赖版本不得把该能力视为已经成立。
@@ -748,7 +748,9 @@ v0.5.8 Stable 已完成，但 v0.6 不自动启动。以下内容保留为候选
 - 每个 Adapter 有故障、限流、重试、取消和账单对账测试；
 - 媒体失败可以定位到镜头或资产，而不是重做整部作品。
 
-### 13.2 v0.6.2：Live Telemetry & Admission
+### 13.2（历史候选，已由当前路线取代）Live Telemetry & Admission
+
+> 本节保留早期排期，当前 v0.6.2 已按“Capability Evidence Graph & Calibrated Router”完成离线基础实现；实时遥测与准入应在能力图证据门之后重新排期，不得与当前版本混称。
 
 - 实时配额、队列、吞吐、错误率和账单；
 - 本地 CPU、GPU、显存、温度和功耗遥测；

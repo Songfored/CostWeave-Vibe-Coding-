@@ -72,9 +72,9 @@ class EventStoreTests(unittest.TestCase):
     def test_fresh_database_uses_wal_and_applies_migration_once(self):
         health = self.store.health()
         self.assertEqual("wal", health["journal_mode"])
-        self.assertEqual(31, health["migrations"])
+        self.assertEqual(32, health["migrations"])
         reopened = EventStore(self.path)
-        self.assertEqual(31, reopened.health()["migrations"])
+        self.assertEqual(32, reopened.health()["migrations"])
 
     def test_v42_database_is_upgraded_without_losing_existing_tables(self):
         legacy_path = f"{self.temp.name}/legacy-v42.sqlite3"
@@ -96,8 +96,8 @@ class EventStoreTests(unittest.TestCase):
         finally:
             connection.close()
         upgraded = EventStore(legacy_path)
-        self.assertEqual("v6.1.0", upgraded.health()["runtime_schema"])
-        self.assertEqual(31, upgraded.health()["migrations"])
+        self.assertEqual("v6.2.0", upgraded.health()["runtime_schema"])
+        self.assertEqual(32, upgraded.health()["migrations"])
         with closing(sqlite3.connect(legacy_path)) as check:
             tables = {
                 row[0]

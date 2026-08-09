@@ -1,4 +1,25 @@
-"""Decision-intelligence contracts introduced by CostWeave v0.6.0/v0.6.1."""
+"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.2."""
+
+from .capability_graph import (
+    CALIBRATION_REVISION,
+    CAPABILITY_GRAPH_POLICY_REVISION,
+    CAPABILITY_GRAPH_SCHEMA_VERSION,
+    CapabilityCalibrator,
+    CapabilityEvidenceV1,
+    CapabilityGraphRouter,
+    CapabilityNodeV1,
+    CapabilityPosteriorV2,
+    CapabilityPriorV1,
+    CapabilityRouterPlugin,
+    CalibratedRouteDecisionV1,
+    DriftReportV1,
+    RouteAssessmentV1,
+    RouteCandidateV1,
+    RouteContextV1,
+    capability_condition_key,
+    calibration_metrics,
+    detect_drift,
+)
 
 from .meta_controller import (
     BudgetAmountV1,
@@ -14,6 +35,24 @@ from .meta_controller import (
 )
 
 __all__ = [
+    "CALIBRATION_REVISION",
+    "CAPABILITY_GRAPH_POLICY_REVISION",
+    "CAPABILITY_GRAPH_SCHEMA_VERSION",
+    "CapabilityCalibrator",
+    "CapabilityEvidenceV1",
+    "CapabilityGraphRouter",
+    "CapabilityNodeV1",
+    "CapabilityPosteriorV2",
+    "CapabilityPriorV1",
+    "CapabilityRouterPlugin",
+    "CalibratedRouteDecisionV1",
+    "DriftReportV1",
+    "RouteAssessmentV1",
+    "RouteCandidateV1",
+    "RouteContextV1",
+    "capability_condition_key",
+    "calibration_metrics",
+    "detect_drift",
     "BudgetAmountV1",
     "MetaControllerConfigV1",
     "MetaControllerEngine",
