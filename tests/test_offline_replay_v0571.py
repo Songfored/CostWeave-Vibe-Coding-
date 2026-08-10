@@ -353,8 +353,8 @@ class OfflineReplayPersistenceTests(unittest.TestCase):
             self.store.record_outcome(item)
 
     def test_migration_and_empty_registry(self):
-        self.assertEqual("v6.3.0", self.health["runtime_schema"])
-        self.assertEqual(33, self.health["migrations"])
+        self.assertEqual("v6.4.0", self.health["runtime_schema"])
+        self.assertEqual(34, self.health["migrations"])
         counts = self.store.counts()
         self.assertEqual(0, counts["replay_version_snapshots"])
         self.assertEqual(0, counts["offline_replay_route_interventions"])

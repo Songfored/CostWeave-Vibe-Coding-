@@ -1,6 +1,6 @@
-# CostWeave v0.5.8.4 / v0.6.0 / v0.6.1 / v0.6.2 / v0.6.3 架构说明
+# CostWeave v0.5.8.4 / v0.6.0 / v0.6.1 / v0.6.2 / v0.6.3 / v0.6.4 架构说明
 
-`v0.5.8.4` remains the frozen stable control-plane baseline. `v0.6.0` and `v0.6.1` are historical Decision Intelligence lines. `v0.6.2` adds the immutable Capability Evidence Graph; `v0.6.3` adds a provider-free Joint Plan–Route–Schedule Search beside both layers. Neither line silently changes the stable routing contract.
+`v0.5.8.4` remains the frozen stable control-plane baseline. `v0.6.0` and `v0.6.1` are historical Decision Intelligence lines. `v0.6.2` adds the immutable Capability Evidence Graph; `v0.6.3` adds provider-free joint strategy search; `v0.6.4` adds provider-free execution-time belief updates and economic recovery beside both layers. None of these lab lines silently changes the stable routing contract.
 
 The v0.6.3 path is:
 
@@ -9,6 +9,18 @@ condition graph → provenance/evidence gate → decayed calibration
         → coverage/OOD/staleness checks → candidate factory
         → hard constraints → Pareto/Anytime search
         → Prompt/Handoff audit → advisory SELECT/ABSTAIN/ESCALATE
+```
+
+The v0.6.4 path is:
+
+```text
+execution snapshot → progress belief
+       → critical path / pollution / artifact reuse
+       → budget, deadline, resource and Validator hard gates
+       → incremental recovery economics
+       → CONTINUE / RETRY / SWITCH / REQUEST-INFO
+          / SUBGRAPH-REPLAN / FULL-REPLAN / STOP
+       → immutable advisory decision
 ```
 
 v0.5.8.4 在既有控制平面之上增加只读 Release Readiness Evaluator 和追加式 Release Attestation Store。稳定版评估不改变任何任务路线；它只把运行时事实、全量重放和默认安全状态组合成可验证结论。

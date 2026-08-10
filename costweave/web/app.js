@@ -1809,6 +1809,86 @@ async function runJointSearchDemo() {
   }
 }
 
+function executionRecoveryNode(node_id, dependencies, status, mean, cost, latency, validator_family, options = {}) {
+  return {
+    node_id, dependencies, dependency_types: Object.fromEntries(dependencies.map((item) => [item, "hard"])), status,
+    predicted_success: { mean, lower: Math.max(0.05, mean - 0.12), upper: Math.min(0.99, mean + 0.08) },
+    predicted_cost_usd: { mean: cost, p95: cost * 1.5 }, predicted_latency_ms: { mean: latency, p95: Math.round(latency * 1.4) },
+    actual_cost_usd: status === "validated" ? cost : 0, actual_latency_ms: status === "validated" ? latency : 0,
+    attempts: ["validated", "rejected"].includes(status) ? 1 : 0, max_attempts: 2,
+    artifact_refs: options.artifacts || [], accepted_artifact_refs: options.accepted || [], reusable_artifact_refs: options.reusable || [],
+    failure_class: options.failure || null, validation_score: options.score ?? null, validator_family,
+    alternate_executor_available: Boolean(options.alternate), criticality: 1, schema_version: "v0.6.4",
+  };
+}
+
+function executionRecoveryDemoPayload() {
+  return {
+    confirm: "RUN_EXECUTION_RECOVERY",
+    snapshot: {
+      project_id: "local-default", case_id: "ui-recovery-demo", objective_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      plan_revision: 3, stage: "milestone",
+      nodes: [
+        executionRecoveryNode("research", [], "validated", 0.95, 0.04, 350, "deterministic", { artifacts: ["artifact-research"], accepted: ["artifact-research"], reusable: ["artifact-research"], score: 0.96 }),
+        executionRecoveryNode("draft", ["research"], "rejected", 0.72, 0.08, 600, "same-judge", { failure: "validator_conflict", alternate: true }),
+        executionRecoveryNode("polish", ["draft"], "pending", 0.86, 0.07, 500, "orthogonal-judge"),
+        executionRecoveryNode("final", ["polish"], "pending", 0.91, 0.03, 250, "deterministic"),
+      ],
+      budget_remaining_usd: 0.30, deadline_remaining_ms: 3000, spent_cost_usd: 0.04, spent_latency_ms: 350,
+      validated_artifact_ids: ["artifact-research"], reusable_artifact_ids: ["artifact-research"], polluted_node_ids: [],
+      failure_node_id: "draft", failure_class: "validator_conflict", failure_confidence: 0.91,
+      required_info_missing: [], trigger_kinds: ["failure", "milestone"],
+      resource: { queue_depth: 1, available_slots: 2, price_multiplier: 1, provider_available: true, telemetry_age_ms: 100, resource_revision: "fixture-r1", alternate_route_available: true, orthogonal_validator_available: true, schema_version: "v0.6.4" },
+      risk_loss_usd: 1.5, max_retries: 2, max_switches: 1, max_subgraph_replans: 1, max_full_replans: 1,
+      observed_at: "2026-08-10T00:00:00Z", evidence_ids: ["execution-recovery-ui-fixture"], schema_version: "v0.6.4",
+    },
+  };
+}
+
+async function loadExecutionRecoveryStatus() {
+  const statusNode = $("#execution-recovery-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/execution-recovery/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取动态恢复状态");
+    statusNode.textContent = `${data.runtime_authority || "advisory-only"} · ${data.policy_version || "v0.6.4"}`;
+    $("#execution-recovery-calls").textContent = String(data.provider_calls ?? 0);
+  } catch (error) {
+    statusNode.textContent = "动态恢复状态暂不可用";
+    $("#execution-recovery-feedback").textContent = error instanceof Error ? error.message : "无法读取动态恢复状态";
+  }
+}
+
+async function runExecutionRecoveryDemo() {
+  const button = $("#run-execution-recovery-demo");
+  const feedback = $("#execution-recovery-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  const sunkCostPolicy = "sunk_cost_excluded";
+  feedback.textContent = "正在根据半程验收证据比较恢复动作…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function") ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/execution-recovery/decide", {
+      method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": `ui-recovery-${suffix}` }, body: JSON.stringify(executionRecoveryDemoPayload()),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "动态恢复演示未完成");
+    const decision = data.decision || {};
+    $("#execution-recovery-action").textContent = String(decision.action || "—");
+    $("#execution-recovery-advantage").textContent = Number(decision.recovery_advantage_usd || 0).toFixed(4);
+    $("#execution-recovery-pollution").textContent = String(decision.belief?.pollution_scope?.length ?? 0);
+    $("#execution-recovery-calls").textContent = String(data.provider_calls ?? 0);
+    $("#execution-recovery-status").textContent = data.replayed ? "已复用确定性恢复建议" : "恢复建议完成 · 离线可审计";
+    feedback.textContent = `${sunkCostPolicy} · ${String(decision.reason_codes?.join(", ") || "economic recovery")} · ${String(decision.decision_id || "").slice(0, 12)}…`;
+    loadExecutionRecoveryStatus();
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "动态恢复演示未完成";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1876,6 +1956,7 @@ $("#run-offline-tournament").addEventListener("click", runOfflineTournament);
 $("#run-meta-controller-demo").addEventListener("click", runMetaControllerDemo);
 $("#run-capability-router-demo").addEventListener("click", runCapabilityRouterDemo);
 $("#run-joint-search-demo").addEventListener("click", runJointSearchDemo);
+$("#run-execution-recovery-demo").addEventListener("click", runExecutionRecoveryDemo);
 
 updateGoalCount();
 loadCatalog();
@@ -1889,4 +1970,5 @@ loadDecisionIntelligenceStatus();
 loadMetaControllerStatus();
 loadCapabilityRouterStatus();
 loadJointSearchStatus();
+loadExecutionRecoveryStatus();
 refreshHistory({ restore: true });

@@ -1226,3 +1226,15 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 .joint-search-section .registry-intro { max-width: 900px; }
 @media (max-width: 760px) { .joint-search-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }
+/* v0.6.4 execution-time belief and economic recovery */
+.execution-recovery-section {
+  margin: 32px auto;
+  max-width: 1180px;
+  padding: 28px;
+  background: linear-gradient(135deg, rgba(25, 56, 54, .96), rgba(8, 20, 24, .98));
+  border: 1px solid rgba(84, 224, 190, .24);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .20);
+}
+.execution-recovery-section .registry-intro { max-width: 940px; }
+@media (max-width: 760px) { .execution-recovery-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }

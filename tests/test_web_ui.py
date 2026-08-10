@@ -179,6 +179,8 @@ class WebUiRegressionTests(unittest.TestCase):
             "exportEvidencePackage",
             "loadJointSearchStatus",
             "runJointSearchDemo",
+            "loadExecutionRecoveryStatus",
+            "runExecutionRecoveryDemo",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
@@ -218,6 +220,10 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("selected_aliases", self.js)
         self.assertIn("v0.6.3 Joint Search", self.html)
         self.assertIn("/api/v1/joint-search/decide", self.js)
+        self.assertIn("v0.6.4 Dynamic Recovery", self.html)
+        self.assertIn('id="execution-recovery-section"', self.html)
+        self.assertIn("/api/v1/execution-recovery/decide", self.js)
+        self.assertIn("sunk_cost_excluded", self.js)
 
 
 if __name__ == "__main__":

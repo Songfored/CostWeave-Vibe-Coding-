@@ -2,7 +2,7 @@
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController` and `v0.6.2 Capability Evidence Graph & Calibrated Router` remain provider-free decision-intelligence lines. The active development release is `v0.6.3 Joint Plan–Route–Schedule Search`: it searches a complete execution strategy under shared cost, latency, authority, chance and handoff constraints, then returns an advisory selection or explicit abstention/escalation.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router` and `v0.6.3 Joint Plan–Route–Schedule Search` remain provider-free decision-intelligence lines. The active development release is `v0.6.4 Execution-Time Belief Update & Economic Recovery`: it re-estimates progress after node or milestone evidence and compares bounded recovery actions under remaining cost, deadline, pollution and resource constraints.
 
 Quick offline reproduction:
 
@@ -10,17 +10,24 @@ Quick offline reproduction:
 python -B -m costweave.tournament_cli --pretty
 python -B -m costweave.meta_controller_cli --pretty
 python -B -m costweave.capability_router_cli --pretty
+python -B -m costweave.execution_recovery_cli --pretty
 ```
 
-The v0.6.3 regression suite includes the prior v0.6.0/v0.6.1/v0.6.2 contracts plus joint candidate generation, Pareto/beam/successive-halving search, chance constraints, tail risk, Prompt/Handoff compiler checks, idempotency, API, UI and release-gate tests. All built-in demonstrations are E0 simulated and make zero provider or network calls; they do not support a commercial cost-reduction claim.
+The v0.6.4 regression suite includes the prior v0.6.0-v0.6.3 contracts plus execution-time progress belief, critical-path recomputation, artifact reuse, pollution scoping, correlated-validator checks, dynamic resource shocks, recovery economics, idempotency, API, UI and release-gate tests. All built-in demonstrations are E0 simulated and make zero provider or network calls; they do not support a commercial cost-reduction claim.
 
-The loopback API is offline by default: `GET /api/v1/joint-search/status`, `POST /api/v1/joint-search/decide`, and `GET /api/v1/joint-search/{decision_id}` expose the v0.6.3 advisory contract. The v0.6.2 capability graph remains available beside it. See [`docs/CHANGELOG-v0.6.3.md`](docs/CHANGELOG-v0.6.3.md), [`docs/V0.6.3_MIGRATION.md`](docs/V0.6.3_MIGRATION.md), and [`docs/ACCEPTANCE-v0.6.3.md`](docs/ACCEPTANCE-v0.6.3.md).
+The loopback API is offline by default: `GET /api/v1/execution-recovery/status`, `POST /api/v1/execution-recovery/decide`, and `GET /api/v1/execution-recovery/{decision_id}` expose the v0.6.4 advisory contract. The v0.6.3 joint search and v0.6.2 capability graph remain available beside it. See [`docs/CHANGELOG-v0.6.4.md`](docs/CHANGELOG-v0.6.4.md), [`docs/V0.6.4_MIGRATION.md`](docs/V0.6.4_MIGRATION.md), and [`docs/ACCEPTANCE-v0.6.4.md`](docs/ACCEPTANCE-v0.6.4.md).
 
 ## v0.6.3 Joint Plan–Route–Schedule Search
 
 v0.6.3 jointly searches management mode, task DAG, model/reasoning route, tools, parallel schedule, validation strength and recovery policy. The candidate factory combines a safety baseline, historical preference, planner preference and bounded local transforms. Hard constraints prune unsafe candidates before scoring; Pareto retention, greedy, beam and successive-halving searchers provide reproducible ablations. CVaR-like tail loss, chance constraints, deadline/cost limits and amortised planning cost are part of the objective. Prompt/Handoff compilation checks deliverable coverage, shared-field contradiction, authority/tool scope and information loss.
 
 The result is always advisory-only. It does not change the stable execution route, call a Provider, access a network or enable training.
+
+## v0.6.4 Execution-Time Belief Update & Economic Recovery
+
+The execution loop turns half-way acceptance into a first-class decision point. `ExecutionBeliefUpdater` recomputes the conservative success interval, remaining critical path, remaining budget, accepted/reusable artifacts, pollution scope, resource pressure and Validator diversity. `EconomicRecoveryPlanner` then compares `CONTINUE`, `RETRY_NODE`, `SWITCH_MODEL`, `REQUEST_MISSING_INFO`, `REPLAN_SUBGRAPH`, `FULL_REPLAN` and `STOP_AND_RETURN_PARTIAL`.
+
+Future cost is incremental: sunk cost is recorded for audit but does not bias the next action. Validated artifacts can reduce future work, correlated Validators trigger an orthogonal-validator requirement, and queue/price/deadline changes can make a previously cheap continuation infeasible. The fixture selects `SWITCH_MODEL` and reports a positive CPS advantage over fixed retry and full-replan baselines, but this remains E0 simulated evidence.
 
 ## v0.6.2 Capability Evidence Graph & Calibrated Router
 

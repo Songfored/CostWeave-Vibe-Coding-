@@ -18,7 +18,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 MetaController · v0.6.2 Capability Router · v0.6.3 Joint Search</div>
+    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 MetaController · v0.6.2 Capability Router · v0.6.3 Joint Search · v0.6.4 Dynamic Recovery</div>
     <nav class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
@@ -30,6 +30,7 @@
       <a href="#meta-controller-section">v0.6.1 元控制</a>
       <a href="#capability-router-section">v0.6.2 能力图</a>
       <a href="#joint-search-section">v0.6.3 联合搜索</a>
+      <a href="#execution-recovery-section">v0.6.4 动态恢复</a>
       <a href="#model-catalog-section">模型管理</a>
     </nav>
   </header>
@@ -411,7 +412,7 @@
       <p class="registry-intro">稳定版状态由运行时迁移、事件完整性、EventLog 重放、默认零外部调用和发布证明共同决定。工程合同通过与真实商业效果是两条独立结论。</p>
       <div class="stable-release-grid">
         <article><span>工程稳定门</span><strong id="stable-engineering-state">检查中</strong><small>全部硬门必须通过</small></article>
-        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.3.0</strong><small id="stable-migration-count">33 项 migration</small></article>
+        <article><span>Runtime Schema</span><strong id="stable-runtime-schema">v6.4.0</strong><small id="stable-migration-count">34 项 migration</small></article>
         <article><span>EventLog 重放</span><strong id="stable-replay-state">检查中</strong><small id="stable-replay-count">0 个运行</small></article>
         <article><span>商业效果结论</span><strong id="stable-commercial-state">未验证</strong><small>真实成本 / 质量 / P95 仍需 E2+</small></article>
       </div>
@@ -545,6 +546,27 @@
       </div>
     </section>
 
+    <section id="execution-recovery-section" class="execution-recovery-section" aria-labelledby="execution-recovery-title">
+      <div class="registry-heading">
+        <div>
+          <span class="section-kicker">V0.6.4 EXECUTION BELIEF · ECONOMIC RECOVERY</span>
+          <h2 id="execution-recovery-title">半程验收后，按证据选择恢复动作</h2>
+        </div>
+        <span id="execution-recovery-status" class="registry-boundary">正在读取动态恢复状态…</span>
+      </div>
+      <p class="registry-intro">这一层把节点状态、关键路径、剩余预算、Artifact 复用、污染范围和资源变化合并成 Progress Belief，再比较继续、重试、切换、补充信息、局部重规划、全量重规划和停止。已经花掉的成本只用于记录，不会绑架下一步决策。</p>
+      <div class="meta-controller-grid">
+        <article><span>Action</span><strong id="execution-recovery-action">—</strong><small>当前动态建议</small></article>
+        <article><span>Recovery Advantage</span><strong id="execution-recovery-advantage">0</strong><small>相对固定基线 USD</small></article>
+        <article><span>Pollution Scope</span><strong id="execution-recovery-pollution">0</strong><small>需重新审查节点</small></article>
+        <article><span>External Calls</span><strong id="execution-recovery-calls">0</strong><small>固定为 0</small></article>
+      </div>
+      <div class="decision-intelligence-actions">
+        <button id="run-execution-recovery-demo" class="secondary-button" type="button">运行动态恢复演示</button>
+        <span id="execution-recovery-feedback" class="catalog-live" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
     <section id="model-catalog-section" class="model-catalog-section" aria-labelledby="model-catalog-title">
       <div class="catalog-heading">
         <div><span class="section-kicker">LIVE MODEL KNOWLEDGE BASE</span><h2 id="model-catalog-title">模型管理中心</h2></div>
@@ -641,7 +663,7 @@
     </form>
   </dialog>
 
-      <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 MetaController / v0.6.2 Capability Router / v0.6.3 Joint Search</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.6.3" defer></script>
+      <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 MetaController / v0.6.2 Capability Router / v0.6.3 Joint Search / v0.6.4 Dynamic Recovery</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v=0.6.4" defer></script>
 </body>
 </html>

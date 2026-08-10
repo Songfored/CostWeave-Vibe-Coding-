@@ -105,6 +105,11 @@ from .capability_graph_service import (
 from .capability_graph_store import CapabilityGraphStoreError
 from .joint_search_service import JointSearchService, JointSearchServiceError
 from .joint_search_store import JointSearchStoreError
+from .execution_recovery_service import (
+    ExecutionRecoveryService,
+    ExecutionRecoveryServiceError,
+)
+from .execution_recovery_store import ExecutionRecoveryStoreError
 
 
 MANAGER: RunManager | None = None
@@ -131,7 +136,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.6.3"
+    server_version = "CostWeave/0.6.4"
 
     def setup(self) -> None:
         super().setup()
@@ -197,13 +202,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # exposing the active v0.6.3 development line explicitly.
+                # exposing the active v0.6.4 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.3",
+                    "active_development": "v0.6.4",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -277,6 +282,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "joint_search": {
                     "schema_version": "v0.6.3",
                     "policy_version": "joint-plan-route-schedule-search-v1",
+                    "advisory_only": True,
+                    "production_route_intervention": False,
+                    "provider_calls": 0,
+                    "network_calls": 0,
+                },
+                "execution_recovery": {
+                    "schema_version": "v0.6.4",
+                    "policy_version": "execution-time-belief-economic-recovery-v1",
                     "advisory_only": True,
                     "production_route_intervention": False,
                     "provider_calls": 0,
@@ -364,6 +377,33 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     self._json(result)
             except (JointSearchServiceError, ValueError, RuntimeError) as exc:
                 self._json({"error": "joint_search_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if path == "/api/v1/execution-recovery/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                self._json(ExecutionRecoveryService(kernel.execution_recovery_store).status(project_id=self._project_id()))
+            except (ExecutionRecoveryServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "execution_recovery_status_unavailable", "message": str(exc)}, HTTPStatus.CONFLICT)
+            return
+        if path.startswith("/api/v1/execution-recovery/"):
+            decision_id = unquote(path.removeprefix("/api/v1/execution-recovery/").strip("/"))
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if not decision_id or "/" in decision_id or decision_id in {"status", "decide"}:
+                    raise ValueError("invalid execution recovery decision id")
+                result = ExecutionRecoveryService(kernel.execution_recovery_store).get(project_id=self._project_id(), decision_id=decision_id)
+                if result is None:
+                    self._json({"error": "execution_recovery_decision_not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except (ExecutionRecoveryServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "execution_recovery_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path == "/api/v1/tournaments/status":
             kernel = self.manager.control_kernel
@@ -1242,6 +1282,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/joint-search/decide":
             self._run_joint_search()
             return
+        if path == "/api/v1/execution-recovery/decide":
+            self._run_execution_recovery()
+            return
         if path == "/api/v1/capability-router/drift":
             self._run_capability_drift()
             return
@@ -1823,6 +1866,24 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({"error": "joint_search_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
         except (JointSearchServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
             self._json({"error": "joint_search_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_execution_recovery(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=512_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError("execution recovery requires Idempotency-Key", HTTPStatus.BAD_REQUEST, "idempotency_key_required")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result, replayed = ExecutionRecoveryService(kernel.execution_recovery_store).decide(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except ExecutionRecoveryStoreError as exc:
+            self._json({"error": "execution_recovery_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (ExecutionRecoveryServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "execution_recovery_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def _catalog_import(self) -> None:
         try:

@@ -1,4 +1,4 @@
-"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.3."""
+"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.4."""
 
 from .capability_graph import (
     CALIBRATION_REVISION,
@@ -55,6 +55,27 @@ from .joint_search import (
     compile_prompt_handoff,
 )
 
+from .execution_recovery import (
+    DEPENDENCY_TYPES,
+    EXECUTION_ACTIONS,
+    EXECUTION_RECOVERY_POLICY_REVISION,
+    EXECUTION_RECOVERY_SCHEMA_VERSION,
+    EXECUTION_STAGES,
+    ExecutionBeliefUpdater,
+    ExecutionNodeStateV1,
+    ExecutionRecoveryDecisionV1,
+    ExecutionRecoveryPlugin,
+    ExecutionResourceBeliefV1,
+    ExecutionSnapshotV1,
+    EconomicRecoveryPlanner,
+    NODE_STATUSES,
+    ProgressBeliefV1,
+    RecoveryOptionV1,
+    TRIGGER_KINDS,
+    build_demo_snapshot,
+    run_demo,
+)
+
 __all__ = [
     "CALIBRATION_REVISION",
     "CAPABILITY_GRAPH_POLICY_REVISION",
@@ -102,4 +123,22 @@ __all__ = [
     "PromptHandoffAuditV1",
     "build_demo_problem",
     "compile_prompt_handoff",
+    "DEPENDENCY_TYPES",
+    "EXECUTION_ACTIONS",
+    "EXECUTION_RECOVERY_POLICY_REVISION",
+    "EXECUTION_RECOVERY_SCHEMA_VERSION",
+    "EXECUTION_STAGES",
+    "ExecutionBeliefUpdater",
+    "ExecutionNodeStateV1",
+    "ExecutionRecoveryDecisionV1",
+    "ExecutionRecoveryPlugin",
+    "ExecutionResourceBeliefV1",
+    "ExecutionSnapshotV1",
+    "EconomicRecoveryPlanner",
+    "NODE_STATUSES",
+    "ProgressBeliefV1",
+    "RecoveryOptionV1",
+    "TRIGGER_KINDS",
+    "build_demo_snapshot",
+    "run_demo",
 ]

@@ -587,8 +587,8 @@ class Migration030Tests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_new_database_has_migration_030_and_v6_runtime(self):
-        self.assertEqual("v6.3.0", RUNTIME_SCHEMA_VERSION)
-        self.assertEqual(33, self.store.health()["migrations"])
+        self.assertEqual("v6.4.0", RUNTIME_SCHEMA_VERSION)
+        self.assertEqual(34, self.store.health()["migrations"])
         with closing(sqlite3.connect(self.path)) as connection:
             tables = {
                 row[0]
@@ -596,14 +596,14 @@ class Migration030Tests(unittest.TestCase):
             }
             self.assertTrue({"decision_objects_v060", "tournament_runs_v060"} <= tables)
 
-    def test_migration_001_to_033_checksums_match_files(self):
+    def test_migration_001_to_034_checksums_match_files(self):
         with closing(sqlite3.connect(self.path)) as connection:
             rows = connection.execute(
                 "SELECT version,checksum FROM schema_migrations ORDER BY version"
             ).fetchall()
-        self.assertEqual(list(range(1, 34)), [row[0] for row in rows])
+        self.assertEqual(list(range(1, 35)), [row[0] for row in rows])
         expected = []
-        for version in range(1, 34):
+        for version in range(1, 35):
             filename = f"{version:03d}_" + {
                 1: "runtime.sql", 2: "artifacts.sql", 3: "parallel_runtime.sql", 4: "cost_economics.sql",
                 5: "evidence_recovery.sql", 6: "outcome_evaluation.sql", 7: "media_workflow.sql", 8: "release_hardening.sql",
@@ -612,7 +612,7 @@ class Migration030Tests(unittest.TestCase):
                 17: "predictor_admission.sql", 18: "predictor_offline_evaluation.sql", 19: "portfolio_audit.sql", 20: "portfolio_validation.sql",
                 21: "policy_candidates.sql", 22: "offline_replay.sql", 23: "production_shadow.sql", 24: "policy_registry.sql",
                 25: "bounded_canary.sql", 26: "evidence_console.sql", 27: "security_boundary.sql", 28: "resilience.sql",
-                29: "release_attestations.sql", 30: "decision_intelligence.sql", 31: "rational_meta_controller.sql", 32: "capability_evidence_graph.sql", 33: "joint_plan_route_schedule_search.sql",
+                29: "release_attestations.sql", 30: "decision_intelligence.sql", 31: "rational_meta_controller.sql", 32: "capability_evidence_graph.sql", 33: "joint_plan_route_schedule_search.sql", 34: "execution_time_belief_economic_recovery.sql",
             }[version]
             raw = files("costweave.migrations").joinpath(filename).read_bytes()
             expected.append(hashlib.sha256(raw).hexdigest())
@@ -824,7 +824,7 @@ class ControlKernelDecisionIntelligenceTests(unittest.TestCase):
 
     def test_kernel_does_not_create_a_second_database(self):
         self.assertEqual(self.kernel.store.path.resolve(), self.kernel.decision_intelligence_store.path.resolve())
-        self.assertEqual(33, self.kernel.health()["migrations"])
+        self.assertEqual(34, self.kernel.health()["migrations"])
 
     def test_payload_must_be_finite_json_and_ids_are_bounded(self):
         with self.assertRaises(DecisionIntelligenceStoreError):

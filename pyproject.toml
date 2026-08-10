@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "costweave"
-version = "0.6.3"
+version = "0.6.4"
 description = "Cross-provider expected-value control plane for cost-aware multi-model orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ costweave-tournament = "costweave.tournament_cli:main"
 costweave-metacontroller = "costweave.meta_controller_cli:main"
 costweave-capability-router = "costweave.capability_router_cli:main"
 costweave-joint-search = "costweave.joint_search_cli:main"
+costweave-execution-recovery = "costweave.execution_recovery_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["costweave*"]

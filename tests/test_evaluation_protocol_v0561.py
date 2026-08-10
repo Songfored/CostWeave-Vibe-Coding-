@@ -394,8 +394,8 @@ class EvaluationProtocolStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "runtime.sqlite3"
             health = EventStore(database).health()
-            self.assertEqual("v6.3.0", health["runtime_schema"])
-            self.assertEqual(33, health["migrations"])
+            self.assertEqual("v6.4.0", health["runtime_schema"])
+            self.assertEqual(34, health["migrations"])
             report = build_seed_runner().run()
             store = EvaluationProtocolStore(database)
             self.assertTrue(store.record(report))
