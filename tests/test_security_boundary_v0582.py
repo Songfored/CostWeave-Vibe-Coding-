@@ -99,8 +99,8 @@ class SecurityContractTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_and_public_redaction_contract(self):
-        self.assertEqual("v6.2.0", self.health["runtime_schema"])
-        self.assertEqual(32, self.health["migrations"])
+        self.assertEqual("v6.3.0", self.health["runtime_schema"])
+        self.assertEqual(33, self.health["migrations"])
         secret = "sk-test-secret-value-123456"
         value = {
             "authorization": f"Bearer {secret}",

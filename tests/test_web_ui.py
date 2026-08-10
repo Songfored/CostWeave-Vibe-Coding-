@@ -123,6 +123,14 @@ class WebUiRegressionTests(unittest.TestCase):
             "stable-replay-count",
             "stable-commercial-state",
             "stable-release-live",
+            "joint-search-section",
+            "joint-search-title",
+            "joint-search-evaluated",
+            "joint-search-feasible",
+            "joint-search-action",
+            "joint-search-calls",
+            "run-joint-search-demo",
+            "joint-search-feedback",
         }
         self.assertTrue(required <= set(inventory.ids), required - set(inventory.ids))
 
@@ -169,6 +177,8 @@ class WebUiRegressionTests(unittest.TestCase):
             "loadEvidenceConsole",
             "renderEvidenceConsole",
             "exportEvidencePackage",
+            "loadJointSearchStatus",
+            "runJointSearchDemo",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
@@ -206,6 +216,8 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn("anonymous_proposals", self.js)
         self.assertIn("hard_constraints_passed", self.js)
         self.assertIn("selected_aliases", self.js)
+        self.assertIn("v0.6.3 Joint Search", self.html)
+        self.assertIn("/api/v1/joint-search/decide", self.js)
 
 
 if __name__ == "__main__":

@@ -764,7 +764,9 @@ v0.5.8 Stable 已完成，但 v0.6 不自动启动。以下内容保留为候选
 - Provider 状态过期时不使用伪实时信号；
 - 遥测缺失时回退到保守容量而不是乐观放行。
 
-### 13.3 v0.6.3：Distributed Runtime
+### 13.3（历史候选，已由当前路线取代）Distributed Runtime
+
+> 当前 v0.6.3 已按“Joint Plan–Route–Schedule Search”完成离线基础实现。分布式运行时不再占用 v0.6.3 版本号，应在动态恢复、真实 Shadow 和生产证据之后重新排期。
 
 - 分布式事件总线；
 - 多进程和多节点 Executor；

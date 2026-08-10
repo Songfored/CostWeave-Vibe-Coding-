@@ -1,4 +1,4 @@
-"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.2."""
+"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.3."""
 
 from .capability_graph import (
     CALIBRATION_REVISION,
@@ -34,6 +34,27 @@ from .meta_controller import (
     select_adaptive_committee,
 )
 
+from .joint_search import (
+    JOINT_CANDIDATE_SOURCES,
+    JOINT_SEARCH_ACTIONS,
+    JOINT_SEARCHERS,
+    JOINT_SEARCH_POLICY_REVISION,
+    JOINT_SEARCH_SCHEMA_VERSION,
+    JointCandidateFactory,
+    JointRouteOptionV1,
+    JointRouteSetV1,
+    JointSearchBudgetV1,
+    JointSearchCandidateV1,
+    JointSearchDecisionV1,
+    JointSearchPlugin,
+    JointSearchProblemV1,
+    JointStrategySearcher,
+    JointTaskNodeV1,
+    PromptHandoffAuditV1,
+    build_demo_problem,
+    compile_prompt_handoff,
+)
+
 __all__ = [
     "CALIBRATION_REVISION",
     "CAPABILITY_GRAPH_POLICY_REVISION",
@@ -63,4 +84,22 @@ __all__ = [
     "UtilityIntervalV1",
     "belief_hash",
     "select_adaptive_committee",
+    "JOINT_CANDIDATE_SOURCES",
+    "JOINT_SEARCH_ACTIONS",
+    "JOINT_SEARCHERS",
+    "JOINT_SEARCH_POLICY_REVISION",
+    "JOINT_SEARCH_SCHEMA_VERSION",
+    "JointCandidateFactory",
+    "JointRouteOptionV1",
+    "JointRouteSetV1",
+    "JointSearchBudgetV1",
+    "JointSearchCandidateV1",
+    "JointSearchDecisionV1",
+    "JointSearchPlugin",
+    "JointSearchProblemV1",
+    "JointStrategySearcher",
+    "JointTaskNodeV1",
+    "PromptHandoffAuditV1",
+    "build_demo_problem",
+    "compile_prompt_handoff",
 ]

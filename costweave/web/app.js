@@ -1734,6 +1734,81 @@ async function runCapabilityRouterDemo() {
   }
 }
 
+function jointSearchDemoPayload() {
+  const estimate = (mean, p95) => ({ mean, p95 });
+  const success = (mean, lower, upper) => ({ mean, lower, upper });
+  const route = (route_id, executor_id, tier, validator_id, tools, cost, latency, group, objective) => ({
+    route_id, executor_id, reasoning_tier: tier, validator_id, tool_ids: tools,
+    authority_scopes: ["workspace"], predicted_success: success(...(route_id.includes("strong") ? [0.96, 0.90, 0.99] : [0.82, 0.70, 0.90])),
+    predicted_cost_usd: estimate(cost, cost * 2), validation_cost_usd: estimate(0, 0),
+    predicted_latency_ms: estimate(latency, latency * 1.5), validation_latency_ms: estimate(0, 0),
+    failure_correlation_group: group, handoff_fields: { objective }, information_loss: 0,
+    capacity_units: 1, cost_known: true, latency_known: true, schema_version: "v0.6.3",
+  });
+  return {
+    confirm: "RUN_JOINT_SEARCH",
+    searcher: "beam",
+    problem: {
+      project_id: "local-default", case_id: "ui-joint-demo", task_family: "code",
+      nodes: [
+        { node_id: "inspect", objective_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", dependencies: [], deliverables: ["patch"], required_authority_scopes: ["workspace"], risk_level: "low", context_tokens: 120, schema_version: "v0.6.3" },
+        { node_id: "verify", objective_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", dependencies: ["inspect"], deliverables: ["validation"], required_authority_scopes: ["workspace"], risk_level: "low", context_tokens: 80, schema_version: "v0.6.3" },
+      ],
+      route_sets: [
+        { node_id: "inspect", options: [route("local-fast", "local-model", "low", "validator:syntax", ["repo-read"], 0.001, 80, "local", "patch"), route("strong-safe", "strong-model", "high", "validator:independent", ["repo-read", "repo-write"], 0.02, 180, "strong", "patch")], schema_version: "v0.6.3" },
+        { node_id: "verify", options: [route("local-check", "local-model", "medium", "validator:syntax", ["repo-read"], 0.001, 70, "local", "validation"), route("strong-review", "strong-model", "high", "validator:independent", ["repo-read"], 0.015, 150, "strong", "validation")], schema_version: "v0.6.3" },
+      ],
+      budget: { money_usd: 0.05, input_tokens: 10000, wall_clock_ms: 2000, max_evaluations: 32, beam_width: 4, max_candidates: 64, amortization_count: 1, schema_version: "v0.6.3" },
+      deadline_ms: 2000, min_success_lower: 0.55, max_parallelism: 2, max_information_loss: 0.2, failure_loss_usd: 1, latency_weight_usd_per_second: 0.001,
+      allowed_tools: ["repo-read", "repo-write"], allowed_authority_scopes: ["workspace"], required_deliverables: ["patch", "validation"],
+      management_modes: ["no_delegation", "planner", "multiplanner"], recovery_policies: ["retry_node", "subgraph_first", "full_replan"], historical_route_ids: {}, planner_route_ids: {}, reuse_count: 1, schema_version: "v0.6.3",
+    },
+  };
+}
+
+async function loadJointSearchStatus() {
+  const statusNode = $("#joint-search-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/joint-search/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "无法读取联合搜索状态");
+    statusNode.textContent = `${data.runtime_authority || "advisory-only"} · ${data.policy_version || "v0.6.3"}`;
+    $("#joint-search-calls").textContent = String(data.provider_calls ?? 0);
+  } catch (error) {
+    statusNode.textContent = "联合搜索状态暂不可用";
+    $("#joint-search-feedback").textContent = error instanceof Error ? error.message : "无法读取状态";
+  }
+}
+
+async function runJointSearchDemo() {
+  const button = $("#run-joint-search-demo");
+  const feedback = $("#joint-search-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  feedback.textContent = "正在按预算执行有界联合搜索…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function") ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/joint-search/decide", {
+      method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": `ui-joint-${suffix}` }, body: JSON.stringify(jointSearchDemoPayload()),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "联合搜索演示未完成");
+    const decision = data.decision || {};
+    $("#joint-search-action").textContent = String(decision.action || "—");
+    $("#joint-search-evaluated").textContent = String(decision.evaluated_count ?? 0);
+    $("#joint-search-feasible").textContent = String(decision.feasible_count ?? 0);
+    $("#joint-search-calls").textContent = String(data.provider_calls ?? 0);
+    $("#joint-search-status").textContent = data.replayed ? "已复用确定性搜索" : "搜索完成 · 离线可审计";
+    feedback.textContent = `${String(decision.stop_reason || "anytime") } · ${String(decision.decision_id || "").slice(0, 12)}…`;
+    loadJointSearchStatus();
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "联合搜索演示未完成";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1800,6 +1875,7 @@ $("#export-evidence").addEventListener("click", exportEvidencePackage);
 $("#run-offline-tournament").addEventListener("click", runOfflineTournament);
 $("#run-meta-controller-demo").addEventListener("click", runMetaControllerDemo);
 $("#run-capability-router-demo").addEventListener("click", runCapabilityRouterDemo);
+$("#run-joint-search-demo").addEventListener("click", runJointSearchDemo);
 
 updateGoalCount();
 loadCatalog();
@@ -1812,4 +1888,5 @@ loadEvidenceConsole();
 loadDecisionIntelligenceStatus();
 loadMetaControllerStatus();
 loadCapabilityRouterStatus();
+loadJointSearchStatus();
 refreshHistory({ restore: true });

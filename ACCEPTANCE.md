@@ -1,27 +1,35 @@
-# CostWeave v0.6.2 acceptance record
+# CostWeave v0.6.3 acceptance record
 
-The release acceptance was executed in the workspace on 2026-08-09.
+This file records the final implementation run and release build.
 
-- Runtime schema: `v6.2.0`
-- Migration: `032_capability_evidence_graph.sql`
-- Full isolated regression: **870 tests passed, 0 failed** (`328.60s`)
-- Fresh wheel install: `costweave-0.6.2-py3-none-any.whl`, import version `0.6.2`
-- Fresh install health: WAL, runtime `v6.2.0`, **32 migrations**
-- Offline CLI smoke: capability evidence → calibrated posterior → `ROUTE`
-- Release CLI: `success=true`, `engineering_ready=true`, event replay and backup verification passed
-- Evidence level of bundled demo: `E0-simulated`
-- Provider/network calls: **0**
-- Commercial claims: `false`
+- Version: `0.6.3`
+- Runtime schema: `v6.3.0`
+- Migration: `033_joint_plan_route_schedule_search.sql`
+- Scope: offline single-process advisory joint search
+- Provider calls: `0`
+- Network calls: `0`
+- Commercial claims: disabled
+- Production route intervention: disabled
 
-## Published artifacts
+## Results
 
-- `outputs/costweave-v0.6.2.zip`
-- `outputs/costweave-v0.6.2-source.zip`
-- `outputs/v062-dist/costweave-0.6.2-py3-none-any.whl`
+- Focused v0.6.3 tests: `11 passed`
+- Full regression: **881 tests, 0 failures, 351.05 seconds**
+- Release readiness: `success=true`, `engineering_ready=true`
+- Fresh Wheel import: `costweave 0.6.3`
+- Fresh runtime: WAL, `v6.3.0`, **33 migrations**
+- Offline CLI: `SELECT` on the bundled fixture; Provider/network calls `0`
+- Archive hygiene: Wheel, runtime archive and source archive contain no
+  `__pycache__`, `.pyc`, `.sqlite3`, `.env` or secret-named files
 
-SHA-256 values are published separately in
-`outputs/costweave-v0.6.2-SHA256SUMS.txt` to avoid making the archive hash
-self-referential.
+Acceptance must record:
 
-These are engineering-contract results, not evidence of real model quality,
-cost reduction, throughput or competitive superiority.
+1. focused v0.6.3 contract/API tests;
+2. complete regression count and failure count;
+3. release readiness gates;
+4. independent Wheel import and CLI smoke;
+5. SHA-256 and archive hygiene results.
+
+The E0 fixture is evidence of deterministic engineering behavior only. It is
+not evidence of real cost reduction, real model quality or competitive
+superiority.

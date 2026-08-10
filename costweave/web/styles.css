@@ -1214,3 +1214,15 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 .capability-router-section .registry-intro { max-width: 900px; }
 @media (max-width: 760px) { .capability-router-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }
+/* v0.6.3 joint plan-route-schedule search */
+.joint-search-section {
+  margin: 32px auto;
+  max-width: 1180px;
+  padding: 28px;
+  background: linear-gradient(135deg, rgba(34, 30, 58, .95), rgba(11, 18, 29, .98));
+  border: 1px solid rgba(166, 139, 255, .22);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .20);
+}
+.joint-search-section .registry-intro { max-width: 900px; }
+@media (max-width: 760px) { .joint-search-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }
