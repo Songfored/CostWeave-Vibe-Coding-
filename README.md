@@ -1,8 +1,22 @@
 # CostWeave
 
+## v0.6.6 Gateway/Runtime Interop (WP02)
+
+The current increment adds an OpenAI-compatible local Gateway Backend on top
+of the provider-neutral contract. It supports text requests, tools,
+structured-output parsing, usage, provider billing headers, streaming events,
+error mapping and fail-closed cancellation semantics. A deterministic
+in-process Fake Server verifies the wire contract without opening a socket.
+
+An actual local endpoint is accepted only when the caller explicitly enables
+the local network policy. Remote endpoints and paid calls are not representable
+in this work package. See docs/CHANGELOG-v0.6.6-wp02.md,
+docs/V0.6.6_WP02_IMPLEMENTATION_SPEC.md and
+docs/ACCEPTANCE-v0.6.6-wp02.md.
+
 ## v0.6.6 Gateway Backend Contract (WP01)
 
-The active development line is v0.6.6. This first work package defines a
+This foundational work package defines a
 provider-neutral Gateway Backend contract for requests, streaming events,
 structured output, tools, usage, billing, errors, cancellation and provider
 request IDs. It is contract-only: network, paid calls and provider SDKs remain

@@ -1,36 +1,31 @@
-# CostWeave v0.6.6 acceptance
-
-## Scope
-
-This acceptance covers V066-WP01, the provider-neutral Gateway Backend
-contract. It does not accept a real provider integration.
+# v0.6.6 V066-WP02 acceptance
 
 ## Required gates
 
-- Package version and release policy report v0.6.6.
-- Runtime schema v6.5.0 and migration 035 remain intact.
-- Request, capability, usage, billing, error, event, response and cancellation
-  objects round-trip through strict JSON dictionaries.
-- Unknown fields, secret-like metadata, invalid identifiers, duplicate tools,
-  invalid usage/billing and status inconsistencies fail closed.
-- Stream events are correlated to the request and strictly ordered.
-- Streaming and non-streaming response modes are checked before planner use.
-- Gateway policy reports network, provider and paid calls disabled by default.
-- Focused and full regression suites pass.
+- Fake Server request and response wire contract passes without a socket.
+- Provider-neutral message schema fields are not leaked to the provider body.
+- Default policy rejects before transport and records zero fake requests.
+- Remote endpoints, credentials, query strings and fragments fail closed.
+- Usage, cached tokens, structured output and provider billing are mapped.
+- HTTP errors become typed retryable/non-retryable gateway errors.
+- Stream sequences are contiguous and include completion/error semantics.
+- Cancellation never claims provider acceptance when unsupported.
+- Existing v0.6.6 WP01 and prior regression suites remain green.
 
 ## Evidence boundary
 
-All evidence in this release is offline E0 engineering evidence. The release
-does not measure provider quality, savings, latency, high-concurrency capacity
-or competitive superiority.
+This is E0 local/fake-server engineering evidence. It proves contract and
+admission behavior only. It does not prove local model quality, throughput,
+cost reduction, remote-provider compatibility or production readiness.
 
-## Results
+## Current result
 
-- Focused contract/release/safe-learning/event/UI tests: **60 passed**.
-- Full regression suite: **924 passed in 321.691 seconds**.
-- Release CLI: engineering gates passed, runtime v6.5.0, migration 035, WAL,
-  zero external-call attempts and `production_ready=false`.
-- Real provider calls, paid calls and network calls: **0**.
-
-The wheel and archive SHA-256 values are recorded in the generated
-`v0.6.6-SHA256SUMS.txt` manifest.
+WP02 focused tests cover the fake server, local endpoint admission, payload
+mapping, structured output, usage, billing, streaming, errors and cancellation.
+The WP02 focused suite passed **15/15**. The complete regression suite passed
+**939 tests in 362.676 seconds**. Release CLI engineering gates remain green,
+with runtime v6.5.0, migration 035, WAL and zero external-call attempts.
+The wheel was then installed into a clean target directory; the installed
+package completed a Fake Server request, and its release report remained
+`engineering_ready=true`, `production_ready=false`, with zero external-call
+attempts.

@@ -38,6 +38,21 @@ from ..gateway_backend import (
     public_gateway_policy,
     validate_response_for_request,
 )
+from ..gateway_openai import (
+    FakeOpenAICompatibleServer,
+    GatewayHTTPResponse,
+    GatewayHTTPTransport,
+    LocalGatewayHTTPTransport,
+    OPENAI_GATEWAY_DEPLOYMENT,
+    OPENAI_GATEWAY_POLICY_REVISION,
+    OPENAI_GATEWAY_REVISION,
+    OpenAICompatibleGatewayBackend,
+    OpenAICompatibleGatewayConfig,
+    OpenAICompatibleGatewayError,
+    OpenAICompatibleRuntimePolicy,
+    OpenAICompatibleTransportError,
+    public_openai_gateway_policy,
+)
 
 __all__ = [
     "AdapterCapabilities",
@@ -76,4 +91,17 @@ __all__ = [
     "GatewayUsageV1",
     "public_gateway_policy",
     "validate_response_for_request",
+    "FakeOpenAICompatibleServer",
+    "GatewayHTTPResponse",
+    "GatewayHTTPTransport",
+    "LocalGatewayHTTPTransport",
+    "OPENAI_GATEWAY_DEPLOYMENT",
+    "OPENAI_GATEWAY_POLICY_REVISION",
+    "OPENAI_GATEWAY_REVISION",
+    "OpenAICompatibleGatewayBackend",
+    "OpenAICompatibleGatewayConfig",
+    "OpenAICompatibleGatewayError",
+    "OpenAICompatibleRuntimePolicy",
+    "OpenAICompatibleTransportError",
+    "public_openai_gateway_policy",
 ]

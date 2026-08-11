@@ -51,6 +51,7 @@ from .outcome_dataset import (
     PURPOSES,
 )
 from .adapters import AdapterRuntimePolicy
+from .gateway_openai import public_openai_gateway_policy
 from .experimental_calls import (
     EXPERIMENTAL_CALL_POLICY_REVISION,
     EXPERIMENTAL_CALL_SCHEMA_VERSION,
@@ -261,6 +262,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "bounded_canary": public_canary_policy(),
                 "resilience": public_resilience_policy(),
                 "stable_release": public_release_policy(),
+                "openai_gateway": public_openai_gateway_policy(),
                 "unified_evidence_console": public_evidence_console_policy(),
                 "security_boundary": public_security_policy(
                     runtime_counts=dict(runtime_health.get("security") or {})

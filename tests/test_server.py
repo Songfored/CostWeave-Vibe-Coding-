@@ -70,6 +70,9 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])
         self.assertTrue(health["features"]["outcome_forecast"])
+        self.assertEqual("local-openai-endpoint-v1", health["openai_gateway"]["policy_revision"])
+        self.assertFalse(health["openai_gateway"]["network_enabled"])
+        self.assertTrue(health["openai_gateway"]["local_endpoint_only"])
         self.assertTrue(health["features"]["handoff_intelligence"])
         self.assertEqual(
             "v0.5.5",

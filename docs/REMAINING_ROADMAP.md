@@ -952,7 +952,7 @@ CostWeave 只有在以下事实同时成立后，才可以被称为经过验证�
 # v0.6.0 implementation status
 
 The frozen baseline is `v0.5.8.4`; the current development line is `v0.6.0`. The initial Decision Intelligence contracts, migration 030, benchmark seed, importers, blind policies, metrics, statistics, claim gates, tournament runner, CLI, API, and UI slice are implemented. Real-provider integration and commercial claims remain deliberately out of scope.
-# Current active line: v0.6.6 (V066-WP01 Gateway Backend Contract)
+# Current active line: v0.6.6 (V066-WP02 OpenAI-compatible Local Gateway)
 
 The next safe-learning increment is deliberately offline first. Before any
 real Shadow or Canary, collect independently validated E2+ traces with

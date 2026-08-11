@@ -1,28 +1,26 @@
-# CostWeave v0.6.6 release acceptance report
+# CostWeave v0.6.6 V066-WP02 acceptance report
 
 ## Scope
 
-V066-WP01 Gateway Backend Contract only. This report accepts the provider-
-neutral request/event/response boundary and its offline regression evidence.
-It does not accept a real provider integration or production deployment.
+This incremental artifact adds the OpenAI-compatible local Gateway Backend and
+the in-process Fake Server contract. It does not add remote providers, paid
+calls, LiteLLM, or production Shadow.
 
 ## Verification
 
-- Focused suite: 60 passed.
-- Full suite: 924 passed in 321.691 seconds.
-- Release CLI: engineering gates passed.
+- WP02 focused suite: 15 passed.
+- Full regression suite after WP02: 939 passed in 362.676 seconds.
 - Runtime schema: v6.5.0; migrations: 35; journal: WAL.
-- External-call attempts: 0; paid calls: 0; network: disabled by default.
-- Package version: 0.6.6.
-
-## Artifacts
-
-The release directory contains the wheel, source archive, runtime archive and
-SHA-256 manifest. Hashes in the manifest are generated after the final files
-are assembled.
+- Release engineering gates: passed.
+- External-call attempts in built-in verification: 0.
+- Default local gateway network policy: disabled.
+- Clean-target wheel install smoke: passed (`completed`, `fake-request-001`).
+- Clean-target release report: `engineering_ready=true`,
+  `production_ready=false`, external-call attempts `0`.
 
 ## Evidence boundary
 
-This is E0 local verification. It supports contract and regression-health
-claims only. It does not support provider quality, cost reduction, latency,
-high-concurrency capacity, production readiness or commercial superiority.
+This is E0 local/fake-server engineering evidence. It verifies contract,
+mapping and admission behavior only. It does not support real model quality,
+throughput, cost reduction, remote compatibility, production readiness or
+commercial superiority claims.
