@@ -1889,6 +1889,87 @@ async function runExecutionRecoveryDemo() {
   }
 }
 
+function safeLearningDemoPayload() {
+  const observations = Array.from({ length: 12 }, (_, index) => ({
+    observation_id: `ui-safe-learning-${String(index).padStart(2, "0")}`,
+    project_id: "local-default",
+    task_family: "classification",
+    risk_level: "low",
+    logged_action: "terra",
+    logging_action_probabilities: { luna: 0.25, terra: 0.75 },
+    candidate_action_probabilities: { luna: 0.4, terra: 0.6 },
+    predicted_rewards: { luna: 0.55, terra: 0.75 },
+    observed_reward: 0.7 + (index % 3) * 0.02,
+    evidence_level: "E0-simulated",
+    data_origin: "test_fixture",
+    independently_validated: false,
+    created_at: "2026-01-01T00:00:00+00:00",
+    schema_version: "v0.6.5",
+  }));
+  return {
+    confirm: "RUN_SAFE_LEARNING",
+    policy_id: "ui-safe-learning-policy",
+    policy_version: "1",
+    candidate_policy_id: "ui-safe-learning-policy",
+    candidate_policy_version: "1",
+    champion_policy_id: "champion",
+    champion_policy_version: "1",
+    champion_estimate: 0.68,
+    rollback_policy_id: "ui-safe-learning-rollback",
+    task_family: "classification",
+    method: "dr",
+    stage: "shadow",
+    observations,
+  };
+}
+
+async function loadSafeLearningStatus() {
+  const statusNode = $("#safe-learning-status");
+  if (!statusNode) return;
+  try {
+    const response = await fetch("/api/v1/safe-learning/status");
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "safe-learning status unavailable");
+    statusNode.textContent = `${data.runtime_authority || "advisory-only"} · ${data.policy_version || "v0.6.5"}`;
+    $("#safe-learning-calls").textContent = String(data.provider_calls ?? 0);
+    $("#safe-learning-action").textContent = data.training_enabled ? "ON" : "OFF";
+  } catch (error) {
+    statusNode.textContent = "safe-learning status unavailable";
+    $("#safe-learning-feedback").textContent = error instanceof Error ? error.message : "status unavailable";
+  }
+}
+
+async function runSafeLearningDemo() {
+  const button = $("#run-safe-learning-demo");
+  const feedback = $("#safe-learning-feedback");
+  if (!button || !feedback) return;
+  button.disabled = true;
+  feedback.textContent = "running deterministic E0 safe-learning demo…";
+  const suffix = (window.crypto && typeof window.crypto.randomUUID === "function") ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const response = await fetch("/api/v1/safe-learning/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `ui-safe-learning-${suffix}` },
+      body: JSON.stringify(safeLearningDemoPayload()),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.message || "safe-learning demo failed");
+    const assessment = data.assessment || {};
+    const estimate = data.estimate || {};
+    $("#safe-learning-state").textContent = String(assessment.state || "rejected");
+    $("#safe-learning-usable").textContent = estimate.usable_for_learning ? "usable" : "E0 fixture";
+    $("#safe-learning-action").textContent = "OFF";
+    $("#safe-learning-calls").textContent = String(data.provider_calls ?? 0);
+    $("#safe-learning-status").textContent = data.replayed ? "idempotent replay · advisory-only" : "candidate assessed · advisory-only";
+    feedback.textContent = String((assessment.reason_codes || ["safe gate"]).join(", "));
+    loadSafeLearningStatus();
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "safe-learning demo failed";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setEvidenceFilter(kind) {
   state.evidenceKind = ["all", "actual", "predicted", "simulated", "missing"].includes(kind) ? kind : "all";
   $$(".evidence-filter").forEach((button) => {
@@ -1957,6 +2038,7 @@ $("#run-meta-controller-demo").addEventListener("click", runMetaControllerDemo);
 $("#run-capability-router-demo").addEventListener("click", runCapabilityRouterDemo);
 $("#run-joint-search-demo").addEventListener("click", runJointSearchDemo);
 $("#run-execution-recovery-demo").addEventListener("click", runExecutionRecoveryDemo);
+$("#run-safe-learning-demo").addEventListener("click", runSafeLearningDemo);
 
 updateGoalCount();
 loadCatalog();
@@ -1971,4 +2053,5 @@ loadMetaControllerStatus();
 loadCapabilityRouterStatus();
 loadJointSearchStatus();
 loadExecutionRecoveryStatus();
+loadSafeLearningStatus();
 refreshHistory({ restore: true });

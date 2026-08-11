@@ -110,6 +110,8 @@ from .execution_recovery_service import (
     ExecutionRecoveryServiceError,
 )
 from .execution_recovery_store import ExecutionRecoveryStoreError
+from .safe_learning_service import SafeLearningService, SafeLearningServiceError
+from .safe_learning_store import SafeLearningStoreError
 
 
 MANAGER: RunManager | None = None
@@ -136,7 +138,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.6.4"
+    server_version = "CostWeave/0.6.5"
 
     def setup(self) -> None:
         super().setup()
@@ -202,13 +204,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # exposing the active v0.6.4 development line explicitly.
+                # exposing the active v0.6.5 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.4",
+                    "active_development": "v0.6.5",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -292,6 +294,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "policy_version": "execution-time-belief-economic-recovery-v1",
                     "advisory_only": True,
                     "production_route_intervention": False,
+                    "provider_calls": 0,
+                    "network_calls": 0,
+                },
+                "safe_learning": {
+                    "schema_version": "v0.6.5",
+                    "policy_version": "trace-credit-assignment-safe-learning-v1",
+                    "advisory_only": True,
+                    "training_enabled": False,
+                    "route_intervention": False,
                     "provider_calls": 0,
                     "network_calls": 0,
                 },
@@ -404,6 +415,33 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     self._json(result)
             except (ExecutionRecoveryServiceError, ValueError, RuntimeError) as exc:
                 self._json({"error": "execution_recovery_decision_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if path == "/api/v1/safe-learning/status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                self._json(SafeLearningService(kernel.safe_learning_store).status(project_id=self._project_id()))
+            except (SafeLearningServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "safe_learning_status_unavailable", "message": str(exc)}, HTTPStatus.CONFLICT)
+            return
+        if path.startswith("/api/v1/safe-learning/"):
+            record_id = unquote(path.removeprefix("/api/v1/safe-learning/").strip("/"))
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json({"error": "persistent_runtime_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if not record_id or "/" in record_id or record_id in {"status", "credit", "replay", "evaluate"}:
+                    raise ValueError("invalid safe-learning record id")
+                result = SafeLearningService(kernel.safe_learning_store).get(project_id=self._project_id(), record_id=record_id)
+                if result is None:
+                    self._json({"error": "safe_learning_record_not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except (SafeLearningServiceError, ValueError, RuntimeError) as exc:
+                self._json({"error": "safe_learning_record_lookup_failed", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path == "/api/v1/tournaments/status":
             kernel = self.manager.control_kernel
@@ -1285,6 +1323,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/execution-recovery/decide":
             self._run_execution_recovery()
             return
+        if path == "/api/v1/safe-learning/credit":
+            self._run_safe_learning_credit()
+            return
+        if path == "/api/v1/safe-learning/replay":
+            self._run_safe_learning_replay()
+            return
+        if path == "/api/v1/safe-learning/evaluate":
+            self._run_safe_learning_evaluate()
+            return
         if path == "/api/v1/capability-router/drift":
             self._run_capability_drift()
             return
@@ -1884,6 +1931,56 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({"error": "execution_recovery_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
         except (ExecutionRecoveryServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
             self._json({"error": "execution_recovery_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_safe_learning_credit(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=512_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError("safe learning credit requires Idempotency-Key", HTTPStatus.BAD_REQUEST, "idempotency_key_required")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result, replayed = SafeLearningService(kernel.safe_learning_store).credit(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except SafeLearningStoreError as exc:
+            self._json({"error": "safe_learning_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (SafeLearningServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "safe_learning_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_safe_learning_replay(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=512_000)
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            self._json(SafeLearningService(kernel.safe_learning_store).replay(project_id=self._project_id(), payload=payload), HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except SafeLearningStoreError as exc:
+            self._json({"error": "safe_learning_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (SafeLearningServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "safe_learning_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _run_safe_learning_evaluate(self) -> None:
+        try:
+            payload = self._read_write_json(max_bytes=2_000_000)
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError("safe learning evaluation requires Idempotency-Key", HTTPStatus.BAD_REQUEST, "idempotency_key_required")
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
+            result, replayed = SafeLearningService(kernel.safe_learning_store).evaluate(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except SafeLearningStoreError as exc:
+            self._json({"error": "safe_learning_conflict", "message": str(exc)}, HTTPStatus.CONFLICT)
+        except (SafeLearningServiceError, ValueError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
+            self._json({"error": "safe_learning_request_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def _catalog_import(self) -> None:
         try:

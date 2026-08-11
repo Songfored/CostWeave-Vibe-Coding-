@@ -77,8 +77,8 @@ class JointSearchPersistenceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_and_immutable_idempotent_records(self):
-        self.assertEqual("v6.4.0", self.store._runtime.health()["runtime_schema"])
-        self.assertEqual(34, self.store._runtime.health()["migrations"])
+        self.assertEqual("v6.5.0", self.store._runtime.health()["runtime_schema"])
+        self.assertEqual(35, self.store._runtime.health()["migrations"])
         payload = {"confirm": CONFIRM_TOKEN, "problem": build_demo_problem().to_dict(), "searcher": "beam"}
         service = JointSearchService(self.store)
         result, replayed = service.decide(project_id="local-default", idempotency_key="joint-persist-1", payload=payload)

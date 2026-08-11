@@ -181,6 +181,8 @@ class WebUiRegressionTests(unittest.TestCase):
             "runJointSearchDemo",
             "loadExecutionRecoveryStatus",
             "runExecutionRecoveryDemo",
+            "loadSafeLearningStatus",
+            "runSafeLearningDemo",
         ):
             self.assertIn(f"function {function_name}", self.js)
         self.assertIn("analysis.classifications", self.js)
@@ -224,6 +226,9 @@ class WebUiRegressionTests(unittest.TestCase):
         self.assertIn('id="execution-recovery-section"', self.html)
         self.assertIn("/api/v1/execution-recovery/decide", self.js)
         self.assertIn("sunk_cost_excluded", self.js)
+        self.assertIn('id="safe-learning-section"', self.html)
+        self.assertIn("/api/v1/safe-learning/evaluate", self.js)
+        self.assertIn("training_enabled", self.js)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,26 @@
 # CostWeave
 
+## v0.6.5 Trace Credit Assignment & Safe Learning
+
+The active development line is v0.6.5. It adds a provider-free, advisory-only
+learning contract: Planner, Router, Handoff, Executor, Validator and Recovery
+receive separate credit; deterministic single-node counterfactual replay and
+IPS/DR logged-policy estimates are persisted with evidence, propensity,
+version and rollback metadata. E0 fixtures can exercise the full workflow but
+are never treated as training data.
+
+Quick reproduction: python -B -m costweave.safe_learning_cli --pretty
+
+API: GET /api/v1/safe-learning/status; POST /api/v1/safe-learning/credit;
+POST /api/v1/safe-learning/replay; POST /api/v1/safe-learning/evaluate.
+
+Every v0.6.5 candidate is advisory_only=true, cannot mutate the live route,
+cannot auto-promote, and cannot make commercial claims. Real learning requires
+E2+ independently validated production or human-benchmark observations,
+common support, calibrated rewards, minimum effective sample size and a
+rollback policy. See docs/CHANGELOG-v0.6.5.md, docs/V0.6.5_MIGRATION.md and
+docs/ACCEPTANCE-v0.6.5.md.
+
 ## Version line (important)
 
 `v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router` and `v0.6.3 Joint Plan–Route–Schedule Search` remain provider-free decision-intelligence lines. The active development release is `v0.6.4 Execution-Time Belief Update & Economic Recovery`: it re-estimates progress after node or milestone evidence and compares bounded recovery actions under remaining cost, deadline, pollution and resource constraints.

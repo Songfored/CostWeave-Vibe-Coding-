@@ -1238,3 +1238,16 @@ footer { display: flex; justify-content: space-between; padding: 25px 0 36px; co
 }
 .execution-recovery-section .registry-intro { max-width: 940px; }
 @media (max-width: 760px) { .execution-recovery-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }
+/* v0.6.5 trace credit assignment and safe-learning gates */
+.safe-learning-section {
+  margin: 32px auto;
+  max-width: 1180px;
+  padding: 28px;
+  background: linear-gradient(135deg, rgba(48, 35, 67, .96), rgba(12, 16, 29, .98));
+  border: 1px solid rgba(213, 160, 255, .26);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .20);
+}
+.safe-learning-section .registry-intro { max-width: 960px; }
+.safe-learning-section #safe-learning-state { color: #f4c2ff; }
+@media (max-width: 760px) { .safe-learning-section { margin: 20px 12px; padding: 20px; border-radius: 18px; } }

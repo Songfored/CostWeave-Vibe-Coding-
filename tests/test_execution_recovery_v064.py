@@ -86,8 +86,8 @@ class ExecutionRecoveryPersistenceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_and_immutable_idempotent_records(self):
-        self.assertEqual("v6.4.0", self.store._runtime.health()["runtime_schema"])
-        self.assertEqual(34, self.store._runtime.health()["migrations"])
+        self.assertEqual("v6.5.0", self.store._runtime.health()["runtime_schema"])
+        self.assertEqual(35, self.store._runtime.health()["migrations"])
         payload = {"confirm": CONFIRM_TOKEN, "snapshot": build_demo_snapshot().to_dict()}
         service = ExecutionRecoveryService(self.store)
         result, replayed = service.decide(project_id="local-default", idempotency_key="recovery-persist-1", payload=payload)

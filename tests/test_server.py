@@ -65,7 +65,7 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
         self.assertTrue(health["features"]["runtime_v4"])
-        self.assertEqual("v6.4.0", health["control_kernel"]["runtime_schema"])
+        self.assertEqual("v6.5.0", health["control_kernel"]["runtime_schema"])
         self.assertTrue(health["features"]["parallel_runtime"])
         self.assertTrue(health["features"]["artifact_dag"])
         self.assertTrue(health["features"]["evidence_recovery"])

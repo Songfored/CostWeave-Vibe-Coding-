@@ -282,8 +282,8 @@ class EvidenceConsoleStoreTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_migration_26_and_empty_receipt_store(self):
-        self.assertEqual(34, self.health["migrations"])
-        self.assertEqual("v6.4.0", self.health["runtime_schema"])
+        self.assertEqual(35, self.health["migrations"])
+        self.assertEqual("v6.5.0", self.health["runtime_schema"])
         self.assertEqual(0, self.store.counts()["evidence_export_receipts"])
 
     def test_export_receipt_is_idempotent_and_integrity_checked(self):

@@ -159,7 +159,7 @@ class RuntimeMaintenance:
             "sha256": _sha256(destination),
             "source_database": self.runtime_path.name,
             "verified": True,
-            "runtime_schema": "v6.4.0",
+            "runtime_schema": "v6.5.0",
             "logical_snapshot": backup_snapshot,
             "logical_snapshot_matches_source": (
                 backup_snapshot == diagnostics["logical_snapshot"]
