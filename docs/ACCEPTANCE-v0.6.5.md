@@ -12,8 +12,20 @@ not a production-learning release.
 - Six component credit is deterministic and round-trippable.
 - E0 and E1 data cannot pass the learning gate.
 - IPS and DR reject missing support, propensity, calibration or sample floors.
+- Every positively weighted candidate action has logging-policy support.
+- Raw importance weights above 20 fail closed even though calculations remain capped.
+- Mixed-project observations are rejected before estimation.
+- Evaluation records and their idempotency binding commit or roll back together.
+- Idempotent evaluation replay returns the complete estimate, candidate and assessment.
 - Candidate assessments remain advisory-only and route mutation is false.
 - Provider, network and paid calls are zero by default.
+
+## Repair verification
+
+- Focused safe-learning, API, migration, release and UI tests: 47 passed.
+- Full regression suite: 911 passed in 324.621 seconds.
+- A database-trigger fault injected during assessment persistence left zero
+  estimate, candidate, assessment and idempotency rows.
 
 ## Evidence statement
 

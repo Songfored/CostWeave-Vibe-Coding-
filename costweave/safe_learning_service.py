@@ -20,7 +20,7 @@ from .intelligence.safe_learning import (
     counterfactual_replay,
     estimate_policy,
 )
-from .safe_learning_store import SafeLearningStore
+from .safe_learning_store import SafeLearningStore, SafeLearningStoreError
 from .security_boundary import normalize_project_id
 
 
@@ -157,10 +157,18 @@ class SafeLearningService:
         request_hash = stable_digest(payload, length=64)
         try:
             existing = self.store.evaluation_for_idempotency(project_id=project, idempotency_key=idempotency_key, request_hash=request_hash)
+        except SafeLearningStoreError:
+            raise
         except Exception as exc:
             raise SafeLearningServiceError(str(exc)) from exc
         if existing is not None:
-            return self._assessment_result(existing, replayed=True), True
+            existing_assessment, existing_estimate, existing_candidate = existing
+            return self._assessment_result(
+                existing_assessment,
+                estimate=existing_estimate,
+                candidate=existing_candidate,
+                replayed=True,
+            ), True
         observations = self._observations(payload, project)
         try:
             estimate = estimate_policy(
@@ -182,14 +190,32 @@ class SafeLearningService:
         except (TypeError, ValueError, KeyError) as exc:
             raise SafeLearningServiceError(str(exc)) from exc
         try:
-            self.store.record_estimate(estimate)
-            self.store.record_candidate(candidate)
-            self.store.record_assessment(assessment)
-            # Attach the request key to the immutable assessment after all
-            # related objects exist.  Reusing record_assessment is idempotent.
-            self.store._record(kind="assessment", item=assessment, idempotency_key=idempotency_key, request_hash=request_hash)
+            inserted = self.store.record_evaluation(
+                estimate,
+                candidate,
+                assessment,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+        except SafeLearningStoreError:
+            raise
         except Exception as exc:
             raise SafeLearningServiceError(str(exc)) from exc
+        if not inserted:
+            existing = self.store.evaluation_for_idempotency(
+                project_id=project,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+            if existing is None:
+                raise SafeLearningServiceError("idempotent evaluation disappeared after commit")
+            existing_assessment, existing_estimate, existing_candidate = existing
+            return self._assessment_result(
+                existing_assessment,
+                estimate=existing_estimate,
+                candidate=existing_candidate,
+                replayed=True,
+            ), True
         return self._assessment_result(assessment, estimate=estimate, candidate=candidate, replayed=False), False
 
     @staticmethod

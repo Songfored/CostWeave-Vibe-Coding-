@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
+from dataclasses import replace
 
 from costweave.intelligence.common import CREDIT_COMPONENTS
 from costweave.intelligence.safe_learning import (
@@ -94,6 +95,53 @@ class SafeLearningContractTests(unittest.TestCase):
         self.assertTrue(estimate.common_support)
         self.assertGreaterEqual(estimate.effective_sample_size, 8)
 
+    def test_candidate_action_without_logging_support_fails_closed(self):
+        unsupported = tuple(replace(
+            item,
+            logging_action_probabilities={"terra": 1.0},
+            candidate_action_probabilities={"luna": 0.5, "terra": 0.5},
+            predicted_rewards={"luna": 0.55, "terra": 0.75},
+            evidence_level="E2-directional-real",
+            data_origin="production",
+            independently_validated=True,
+        ) for item in observations())
+        estimate = estimate_policy(
+            unsupported, policy_id="p", policy_version="1",
+            task_family="classification",
+        )
+        self.assertFalse(estimate.common_support)
+        self.assertFalse(estimate.usable_for_learning)
+        self.assertIn("common_support_failed", estimate.reason_codes)
+
+    def test_raw_importance_weight_above_cap_fails_closed(self):
+        extreme = tuple(replace(
+            item,
+            logging_action_probabilities={"luna": 0.999, "terra": 0.001},
+            candidate_action_probabilities={"terra": 1.0},
+            predicted_rewards={"terra": 0.75},
+            evidence_level="E2-directional-real",
+            data_origin="production",
+            independently_validated=True,
+        ) for item in observations())
+        estimate = estimate_policy(
+            extreme, policy_id="p", policy_version="1",
+            task_family="classification",
+        )
+        self.assertAlmostEqual(1000.0, estimate.max_weight)
+        self.assertFalse(estimate.usable_for_learning)
+        self.assertIn("importance_weight_exceeds_cap", estimate.reason_codes)
+
+    def test_mixed_projects_are_rejected_by_public_estimator(self):
+        mixed = tuple(
+            replace(item, project_id="project-b") if index >= 6 else replace(item, project_id="project-a")
+            for index, item in enumerate(observations())
+        )
+        with self.assertRaisesRegex(ValueError, "same project"):
+            estimate_policy(
+                mixed, policy_id="p", policy_version="1",
+                task_family="classification",
+            )
+
     def test_candidate_and_assessment_fail_closed_for_e0_demo(self):
         estimate = estimate_policy(observations(), policy_id="p", policy_version="1", task_family="classification")
         candidate = SafeLearningCandidateV1.create(
@@ -125,6 +173,8 @@ class SafeLearningPersistenceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_immutable_credit_idempotency_and_project_scope(self):
+        self.assertEqual("v6.5.0", self.store._runtime.health()["runtime_schema"])
+        self.assertEqual(35, self.store._runtime.health()["migrations"])
         service = SafeLearningService(self.store)
         item = trace()
         payload = {"confirm": SAFE_LEARNING_CONFIRM_TOKEN, "trace": item.to_dict()}
@@ -162,6 +212,40 @@ class SafeLearningPersistenceTests(unittest.TestCase):
         again, replayed_again = service.evaluate(project_id="local-default", idempotency_key="safe-eval-001", payload=payload)
         self.assertTrue(replayed_again)
         self.assertEqual(result["assessment"]["assessment_id"], again["assessment"]["assessment_id"])
+        self.assertEqual(result["estimate"], again["estimate"])
+        self.assertEqual(result["candidate"], again["candidate"])
+
+    def test_evaluation_persistence_rolls_back_as_one_transaction(self):
+        connection = sqlite3.connect(self.store.path)
+        try:
+            connection.execute(
+                "CREATE TRIGGER fail_test_assessment_insert "
+                "BEFORE INSERT ON safe_learning_assessments_v065 "
+                "BEGIN SELECT RAISE(ABORT, 'injected assessment failure'); END"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        service = SafeLearningService(self.store)
+        payload = {
+            "confirm": SAFE_LEARNING_CONFIRM_TOKEN, "policy_id": "p", "policy_version": "1",
+            "candidate_policy_id": "p", "candidate_policy_version": "1",
+            "champion_policy_id": "champion", "champion_policy_version": "1",
+            "champion_estimate": 0.68, "rollback_policy_id": "rollback",
+            "task_family": "classification", "method": "dr", "stage": "shadow",
+            "observations": [item.to_dict() for item in observations()],
+        }
+        with self.assertRaises(SafeLearningStoreError):
+            service.evaluate(
+                project_id="local-default",
+                idempotency_key="safe-eval-atomic-001",
+                payload=payload,
+            )
+        counts = self.store.counts()
+        self.assertEqual(0, counts["safe_learning_estimates_v065"])
+        self.assertEqual(0, counts["safe_learning_candidates_v065"])
+        self.assertEqual(0, counts["safe_learning_assessments_v065"])
+        self.assertEqual(0, counts["safe_learning_idempotency_v065"])
 
     def test_confirmation_and_unknown_fields_fail_closed(self):
         service = SafeLearningService(self.store)

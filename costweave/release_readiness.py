@@ -1,4 +1,4 @@
-"""Machine-verifiable v0.6.5 lab release readiness contracts."""
+"""Machine-verifiable v0.6.6 lab release readiness contracts."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 from typing import Any, Mapping
 
 
-RELEASE_SCHEMA_VERSION = "v0.6.5"
+RELEASE_SCHEMA_VERSION = "v0.6.6"
 EXPECTED_RUNTIME_SCHEMA = "v6.5.0"
 EXPECTED_MIGRATIONS = 35
 

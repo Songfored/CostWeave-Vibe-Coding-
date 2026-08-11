@@ -1,4 +1,4 @@
-"""Provider adapters; v0.5.6.3 external adapters are default-off."""
+"""Provider adapters and the v0.6.6 provider-neutral gateway contract."""
 
 from .base import AdapterCapabilities, ProviderAdapter
 from .mock import MockProvider, MockScenario
@@ -10,6 +10,33 @@ from .http import (
     HTTPResponse,
     LocalHTTPAdapter,
     OpenAICompatibleHTTPAdapter,
+)
+from ..gateway_backend import (
+    GATEWAY_BILLING_SOURCES,
+    GATEWAY_DEPLOYMENTS,
+    GATEWAY_ERROR_CATEGORIES,
+    GATEWAY_EVENT_TYPES,
+    GATEWAY_MODALITIES,
+    GATEWAY_POLICY_REVISION,
+    GATEWAY_PROTOCOLS,
+    GATEWAY_ROLES,
+    GATEWAY_SCHEMA_VERSION,
+    GATEWAY_STATUSES,
+    GatewayBackend,
+    GatewayBackendContractError,
+    GatewayBackendDisabledError,
+    GatewayBillingV1,
+    GatewayCapabilitiesV1,
+    GatewayCancellationV1,
+    GatewayErrorV1,
+    GatewayMessageV1,
+    GatewayRequestV1,
+    GatewayResponseV1,
+    GatewayStreamEventV1,
+    GatewayToolV1,
+    GatewayUsageV1,
+    public_gateway_policy,
+    validate_response_for_request,
 )
 
 __all__ = [
@@ -24,4 +51,29 @@ __all__ = [
     "MockScenario",
     "OpenAICompatibleHTTPAdapter",
     "ProviderAdapter",
+    "GATEWAY_BILLING_SOURCES",
+    "GATEWAY_DEPLOYMENTS",
+    "GATEWAY_ERROR_CATEGORIES",
+    "GATEWAY_EVENT_TYPES",
+    "GATEWAY_MODALITIES",
+    "GATEWAY_POLICY_REVISION",
+    "GATEWAY_PROTOCOLS",
+    "GATEWAY_ROLES",
+    "GATEWAY_SCHEMA_VERSION",
+    "GATEWAY_STATUSES",
+    "GatewayBackend",
+    "GatewayBackendContractError",
+    "GatewayBackendDisabledError",
+    "GatewayBillingV1",
+    "GatewayCapabilitiesV1",
+    "GatewayCancellationV1",
+    "GatewayErrorV1",
+    "GatewayMessageV1",
+    "GatewayRequestV1",
+    "GatewayResponseV1",
+    "GatewayStreamEventV1",
+    "GatewayToolV1",
+    "GatewayUsageV1",
+    "public_gateway_policy",
+    "validate_response_for_request",
 ]

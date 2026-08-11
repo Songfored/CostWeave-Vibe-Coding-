@@ -1,8 +1,18 @@
 # CostWeave
 
+## v0.6.6 Gateway Backend Contract (WP01)
+
+The active development line is v0.6.6. This first work package defines a
+provider-neutral Gateway Backend contract for requests, streaming events,
+structured output, tools, usage, billing, errors, cancellation and provider
+request IDs. It is contract-only: network, paid calls and provider SDKs remain
+disabled by default. The existing v0.6.5 safe-learning schema and migration set
+remain compatible. See docs/CHANGELOG-v0.6.6.md, docs/V0.6.6_MIGRATION.md and
+docs/ACCEPTANCE-v0.6.6.md.
+
 ## v0.6.5 Trace Credit Assignment & Safe Learning
 
-The active development line is v0.6.5. It adds a provider-free, advisory-only
+The previous lab line is v0.6.5. It adds a provider-free, advisory-only
 learning contract: Planner, Router, Handoff, Executor, Validator and Recovery
 receive separate credit; deterministic single-node counterfactual replay and
 IPS/DR logged-policy estimates are persisted with evidence, propensity,
@@ -23,7 +33,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router` and `v0.6.3 Joint Plan–Route–Schedule Search` remain provider-free decision-intelligence lines. The active development release is `v0.6.4 Execution-Time Belief Update & Economic Recovery`: it re-estimates progress after node or milestone evidence and compares bounded recovery actions under remaining cost, deadline, pollution and resource constraints.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway Backend Contract`; it defines the interop boundary without enabling network or paid calls.
 
 Quick offline reproduction:
 

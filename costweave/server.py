@@ -138,7 +138,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.6.5"
+    server_version = "CostWeave/0.6.6"
 
     def setup(self) -> None:
         super().setup()
@@ -204,13 +204,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # exposing the active v0.6.5 development line explicitly.
+                # exposing the active v0.6.6 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.5",
+                    "active_development": "v0.6.6",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {

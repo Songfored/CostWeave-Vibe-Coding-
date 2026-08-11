@@ -100,19 +100,50 @@ class SafeLearningStore:
             raise SafeLearningStoreError(f"persisted {kind} identity mismatch")
         return item
 
-    def _record(self, *, kind: str, item: Any, idempotency_key: str | None = None, request_hash: str | None = None) -> bool:
+    def _insert_record(self, connection: sqlite3.Connection, *, kind: str, item: Any) -> bool:
+        """Insert or verify one immutable record using the caller's transaction."""
         item_cls, table, id_column, json_column, hash_column = _KINDS[kind]
         if not isinstance(item, item_cls):
             raise SafeLearningStoreError(f"item is not a {kind} contract")
         project = self._project(item.project_id)
         raw, digest = self._payload(item)
+        item_id = getattr(item, id_column)
+        existing = connection.execute(
+            f"SELECT {json_column},{hash_column} FROM {table} WHERE project_id=? AND {id_column}=?",
+            (project, item_id),
+        ).fetchone()
+        if existing is not None:
+            if existing[json_column] != raw or existing[hash_column] != digest:
+                raise SafeLearningStoreError(f"{kind} id was reused with different content")
+            return False
+
+        columns = ["project_id", id_column]
+        values: list[Any] = [project, item_id]
+        if kind in ("credit", "replay"):
+            columns.append("trace_id")
+            values.append(getattr(item, "trace_id"))
+        elif kind in ("estimate", "candidate"):
+            columns.append("task_family")
+            values.append(getattr(item, "task_family"))
+        elif kind == "assessment":
+            columns.extend(["candidate_id", "stage"])
+            values.extend([getattr(item, "candidate_id"), getattr(item, "stage")])
+        columns.extend([json_column, hash_column, "created_at"])
+        values.extend([raw, digest, utc_now()])
+        connection.execute(
+            f"INSERT INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+            tuple(values),
+        )
+        return True
+
+    def _record(self, *, kind: str, item: Any, idempotency_key: str | None = None, request_hash: str | None = None) -> bool:
+        item_cls, table, id_column, json_column, hash_column = _KINDS[kind]
+        if not isinstance(item, item_cls):
+            raise SafeLearningStoreError(f"item is not a {kind} contract")
+        project = self._project(item.project_id)
         idem = self._key(idempotency_key, "idempotency_key") if idempotency_key is not None else None
         req_hash = self._hash(request_hash) if request_hash is not None else None
         item_id = getattr(item, id_column)
-        task_family = getattr(item, "task_family", "")
-        trace_id = getattr(item, "trace_id", "")
-        candidate_id = getattr(item, "candidate_id", "")
-        stage = getattr(item, "stage", "")
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
@@ -126,32 +157,7 @@ class SafeLearningStore:
                             raise SafeLearningStoreError("safe-learning idempotency key was reused with different content")
                         connection.execute("COMMIT")
                         return False
-                existing = connection.execute(
-                    f"SELECT {json_column},{hash_column} FROM {table} WHERE project_id=? AND {id_column}=?",
-                    (project, item_id),
-                ).fetchone()
-                inserted = False
-                if existing is not None:
-                    if existing[json_column] != raw or existing[hash_column] != digest:
-                        raise SafeLearningStoreError(f"{kind} id was reused with different content")
-                else:
-                    columns = ["project_id", id_column]
-                    values: list[Any] = [project, item_id]
-                    if kind == "credit":
-                        columns.append("trace_id"); values.append(trace_id)
-                    elif kind == "replay":
-                        columns.append("trace_id"); values.append(trace_id)
-                    elif kind in ("estimate", "candidate"):
-                        columns.append("task_family"); values.append(task_family)
-                    elif kind == "assessment":
-                        columns.extend(["candidate_id", "stage"]); values.extend([candidate_id, stage])
-                    columns.extend([json_column, hash_column, "created_at"])
-                    values.extend([raw, digest, utc_now()])
-                    connection.execute(
-                        f"INSERT INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                        tuple(values),
-                    )
-                    inserted = True
+                inserted = self._insert_record(connection, kind=kind, item=item)
                 if idem is not None:
                     connection.execute(
                         "INSERT INTO safe_learning_idempotency_v065(project_id,idempotency_key,request_hash,object_kind,object_id,created_at) VALUES(?,?,?,?,?,?)",
@@ -187,7 +193,65 @@ class SafeLearningStore:
     def record_assessment(self, item: PromotionAssessmentV1) -> bool:
         return self._record(kind="assessment", item=item)
 
-    def evaluation_for_idempotency(self, *, project_id: str, idempotency_key: str, request_hash: str) -> PromotionAssessmentV1 | None:
+    def record_evaluation(
+        self,
+        estimate: LearningEstimateV1,
+        candidate: SafeLearningCandidateV1,
+        assessment: PromotionAssessmentV1,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> bool:
+        """Persist a complete evaluation and its idempotency key atomically."""
+        project = self._project(estimate.project_id)
+        if self._project(candidate.project_id) != project or self._project(assessment.project_id) != project:
+            raise SafeLearningStoreError("evaluation records must belong to the same project")
+        if candidate.estimate_id != estimate.estimate_id:
+            raise SafeLearningStoreError("candidate estimate_id mismatch")
+        if assessment.estimate_id != estimate.estimate_id or assessment.candidate_id != candidate.candidate_id:
+            raise SafeLearningStoreError("assessment links do not match evaluation records")
+        idem = self._key(idempotency_key, "idempotency_key")
+        req_hash = self._hash(request_hash)
+        with self._lock, self._connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT request_hash,object_kind FROM safe_learning_idempotency_v065 "
+                    "WHERE project_id=? AND idempotency_key=?",
+                    (project, idem),
+                ).fetchone()
+                if existing is not None:
+                    if existing["request_hash"] != req_hash or existing["object_kind"] != "assessment":
+                        raise SafeLearningStoreError("safe-learning idempotency key was reused with different content")
+                    connection.execute("COMMIT")
+                    return False
+                self._insert_record(connection, kind="estimate", item=estimate)
+                self._insert_record(connection, kind="candidate", item=candidate)
+                self._insert_record(connection, kind="assessment", item=assessment)
+                connection.execute(
+                    "INSERT INTO safe_learning_idempotency_v065"
+                    "(project_id,idempotency_key,request_hash,object_kind,object_id,created_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (project, idem, req_hash, "assessment", assessment.assessment_id, utc_now()),
+                )
+                connection.execute("COMMIT")
+                return True
+            except SafeLearningStoreError:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            except sqlite3.IntegrityError as exc:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise SafeLearningStoreError(str(exc)) from exc
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def evaluation_for_idempotency(
+        self, *, project_id: str, idempotency_key: str, request_hash: str,
+    ) -> tuple[PromotionAssessmentV1, LearningEstimateV1, SafeLearningCandidateV1] | None:
         project = self._project(project_id)
         idem = self._key(idempotency_key, "idempotency_key")
         req_hash = self._hash(request_hash)
@@ -206,9 +270,24 @@ class SafeLearningStore:
                 "SELECT * FROM safe_learning_assessments_v065 WHERE project_id=? AND assessment_id=?",
                 (project, row["object_id"]),
             ).fetchone()
-        if target is None:
-            raise SafeLearningStoreError("idempotency record points to missing assessment")
-        return self._row_item(target, "assessment")
+            if target is None:
+                raise SafeLearningStoreError("idempotency record points to missing assessment")
+            assessment = self._row_item(target, "assessment")
+            estimate_row = connection.execute(
+                "SELECT * FROM safe_learning_estimates_v065 WHERE project_id=? AND estimate_id=?",
+                (project, assessment.estimate_id),
+            ).fetchone()
+            candidate_row = connection.execute(
+                "SELECT * FROM safe_learning_candidates_v065 WHERE project_id=? AND candidate_id=?",
+                (project, assessment.candidate_id),
+            ).fetchone()
+            if estimate_row is None or candidate_row is None:
+                raise SafeLearningStoreError("idempotent evaluation points to an incomplete record set")
+            estimate = self._row_item(estimate_row, "estimate")
+            candidate = self._row_item(candidate_row, "candidate")
+            if candidate.estimate_id != estimate.estimate_id:
+                raise SafeLearningStoreError("idempotent evaluation links are inconsistent")
+        return assessment, estimate, candidate
 
     def credit_for_idempotency(self, *, project_id: str, idempotency_key: str, request_hash: str) -> CreditAssignmentV1 | None:
         project = self._project(project_id)

@@ -394,6 +394,8 @@ class CounterfactualReplayV1:
 
     @classmethod
     def replay(cls, trace: TraceCreditInputV1, replaced_component: str, alternative_effect: float, *, assumptions: Sequence[str] = ()) -> "CounterfactualReplayV1":
+        if replaced_component not in CREDIT_COMPONENTS:
+            raise ValueError("replaced_component must be a credit component")
         alternative = _finite(alternative_effect, "alternative_effect", minimum=-1.0, maximum=1.0)
         baseline = trace.reward
         counterfactual = _finite(baseline - trace.component_effects[replaced_component] + alternative, "counterfactual_reward", minimum=-1.0, maximum=1.0)
@@ -855,14 +857,29 @@ def estimate_policy(observations: Sequence[LoggedDecisionV1], *, policy_id: str,
     selected = [item for item in observations if item.task_family == task]
     if not selected:
         raise ValueError("no observations match task_family")
+    projects = {item.project_id for item in selected}
+    if len(projects) != 1:
+        raise ValueError("all selected observations must belong to the same project")
     values: list[float] = []
     weights: list[float] = []
+    raw_weights: list[float] = []
     support = True
     calibration = True
     for item in selected:
         target_prob = item.candidate_action_probabilities.get(item.logged_action, 0.0)
-        support = support and target_prob > 0.0 and item.logging_propensity > 0.0
-        weight = min(target_prob / item.logging_propensity, MAX_IMPORTANCE_WEIGHT) if item.logging_propensity > 0 else MAX_IMPORTANCE_WEIGHT
+        item_support = item.logging_propensity > 0.0 and all(
+            candidate_probability <= 0.0
+            or item.logging_action_probabilities.get(action, 0.0) > 0.0
+            for action, candidate_probability in item.candidate_action_probabilities.items()
+        )
+        support = support and item_support
+        raw_weight = (
+            target_prob / item.logging_propensity
+            if item.logging_propensity > 0.0
+            else MAX_IMPORTANCE_WEIGHT + 1.0
+        )
+        raw_weights.append(raw_weight)
+        weight = min(raw_weight, MAX_IMPORTANCE_WEIGHT)
         weights.append(weight)
         target_baseline = sum(item.candidate_action_probabilities[action] * item.predicted_rewards[action] for action in item.candidate_action_probabilities)
         logged_baseline = item.predicted_rewards[item.logged_action]
@@ -871,7 +888,10 @@ def estimate_policy(observations: Sequence[LoggedDecisionV1], *, policy_id: str,
     estimate, lower, upper = _interval(values)
     denom = sum(weight * weight for weight in weights)
     effective = (sum(weights) ** 2 / denom) if denom else 0.0
-    max_weight = max(weights) if weights else 0.0
+    # Preserve the uncapped diagnostic value.  The estimator may use clipped
+    # weights for numerical stability, but promotion gates must see whether
+    # clipping was required instead of comparing a cap to itself.
+    max_weight = max(raw_weights) if raw_weights else 0.0
     evidence = _evidence_min([item.evidence_level for item in selected])
     all_independent = all(item.independently_validated for item in selected)
     all_real = all(item.data_origin in REAL_DATA_ORIGINS for item in selected)
@@ -880,6 +900,8 @@ def estimate_policy(observations: Sequence[LoggedDecisionV1], *, policy_id: str,
         reasons.append("evidence_below_learning_floor")
     if not support:
         reasons.append("common_support_failed")
+    if max_weight > MAX_IMPORTANCE_WEIGHT:
+        reasons.append("importance_weight_exceeds_cap")
     if len(selected) < MIN_LEARNING_SAMPLES or effective < MIN_LEARNING_SAMPLES:
         reasons.append("sample_size_below_floor")
     if not calibration:
