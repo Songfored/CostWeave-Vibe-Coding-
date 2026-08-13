@@ -79,11 +79,13 @@ def public_release_policy() -> dict[str, Any]:
             "EventLog-only projection replay",
             "logical backup verification and restore",
             "default-off external and paid adapters",
+            "default-off local endpoint and capacity admission",
         ],
         "unverified_claims": [
             "real provider answer quality",
             "real cost reduction percentage",
             "real end-to-end latency improvement",
+            "real Ollama/vLLM queue or GPU capacity",
             "production availability and distributed recovery",
             "commercial superiority or world-leading performance",
         ],
@@ -95,6 +97,7 @@ def build_release_status(
     *,
     adapter_policy: Mapping[str, Any] | None = None,
     litellm_policy: Mapping[str, Any] | None = None,
+    local_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only facts that the running installation can verify itself."""
 
@@ -107,6 +110,9 @@ def build_release_status(
     litellm = dict(litellm_policy or {})
     litellm_gateway_enabled = bool(litellm.get("gateway_enabled", False))
     litellm_paid_enabled = bool(litellm.get("paid_calls_enabled", False))
+    local = dict(local_policy or {})
+    local_network_enabled = bool(local.get("network_enabled", False))
+    local_capacity_enabled = bool(local.get("capacity_admission_enabled", False))
     gates = [
         {
             "gate_id": "runtime-schema",
@@ -160,6 +166,18 @@ def build_release_status(
             "gate_id": "litellm-paid-calls-default-off",
             "passed": not litellm_paid_enabled,
             "observed": litellm_paid_enabled,
+            "expected": False,
+        },
+        {
+            "gate_id": "local-endpoint-network-default-off",
+            "passed": not local_network_enabled,
+            "observed": local_network_enabled,
+            "expected": False,
+        },
+        {
+            "gate_id": "local-capacity-admission-default-off",
+            "passed": not local_capacity_enabled,
+            "observed": local_capacity_enabled,
             "expected": False,
         },
     ]

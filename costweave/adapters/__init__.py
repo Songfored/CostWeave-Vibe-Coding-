@@ -68,6 +68,20 @@ from ..gateway_litellm import (
     LITELLM_GATEWAY_REVISION,
     public_litellm_gateway_policy,
 )
+from ..gateway_local import (
+    LOCAL_ENDPOINT_KINDS,
+    LOCAL_ENDPOINT_POLICY_REVISION,
+    LOCAL_ENDPOINT_REVISION,
+    LocalCapacityDecision,
+    LocalCapacityProbe,
+    LocalCapacitySnapshot,
+    LocalEndpointAdmissionError,
+    LocalEndpointAdmissionPolicy,
+    LocalEndpointConfig,
+    LocalOpenAICompatibleGatewayBackend,
+    StaticLocalCapacityProbe,
+    public_local_endpoint_policy,
+)
 
 __all__ = [
     "AdapterCapabilities",
@@ -132,4 +146,16 @@ __all__ = [
     "LITELLM_GATEWAY_POLICY_REVISION",
     "LITELLM_GATEWAY_REVISION",
     "public_litellm_gateway_policy",
+    "LOCAL_ENDPOINT_KINDS",
+    "LOCAL_ENDPOINT_POLICY_REVISION",
+    "LOCAL_ENDPOINT_REVISION",
+    "LocalCapacityDecision",
+    "LocalCapacityProbe",
+    "LocalCapacitySnapshot",
+    "LocalEndpointAdmissionError",
+    "LocalEndpointAdmissionPolicy",
+    "LocalEndpointConfig",
+    "LocalOpenAICompatibleGatewayBackend",
+    "StaticLocalCapacityProbe",
+    "public_local_endpoint_policy",
 ]

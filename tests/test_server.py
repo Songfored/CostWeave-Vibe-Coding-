@@ -76,6 +76,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual("litellm-external-gateway-v1", health["litellm_gateway"]["policy_revision"])
         self.assertFalse(health["litellm_gateway"]["gateway_enabled"])
         self.assertFalse(health["litellm_gateway"]["paid_calls_enabled"])
+        self.assertFalse(health["local_endpoint_gateway"]["network_enabled"])
+        self.assertFalse(health["local_endpoint_gateway"]["capacity_admission_enabled"])
         self.assertTrue(health["features"]["handoff_intelligence"])
         self.assertEqual(
             "v0.5.5",
@@ -585,7 +587,8 @@ class ServerTests(unittest.TestCase):
             "max_concurrency": 4,
         })
         self.assertEqual(202, status)
-        for _ in range(50):
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             _, current = self.fetch_json(f"/api/runs/{run['id']}")
             if current["status"] in {"completed", "failed"}:
                 break

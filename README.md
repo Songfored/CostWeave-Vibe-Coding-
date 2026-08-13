@@ -16,6 +16,17 @@ work package. See docs/CHANGELOG-v0.6.6-wp03.md,
 docs/V0.6.6_WP03_IMPLEMENTATION_SPEC.md and
 docs/ACCEPTANCE-v0.6.6-wp03.md.
 
+## v0.6.6 Gateway/Runtime Interop (WP04)
+
+WP04 adds a capacity-aware local OpenAI-compatible boundary for Ollama- and
+vLLM-style loopback endpoints. It reuses the WP02 wire contract but requires
+both explicit network authority and a fresh caller-injected capacity snapshot
+before the first transport call. Missing, invalid or stale queue/slot/wait
+telemetry fails closed. Network and capacity admission remain disabled by
+default. See docs/CHANGELOG-v0.6.6-wp04.md,
+docs/V0.6.6_WP04_IMPLEMENTATION_SPEC.md and
+docs/ACCEPTANCE-v0.6.6-wp04.md.
+
 ## v0.6.6 Gateway/Runtime Interop (WP02)
 
 The current increment adds an OpenAI-compatible local Gateway Backend on top
@@ -63,7 +74,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP03 extends the interop boundary without enabling network or paid calls.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission without enabling network or paid calls by default.
 
 Quick offline reproduction:
 

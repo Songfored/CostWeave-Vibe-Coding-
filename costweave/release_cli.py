@@ -11,6 +11,7 @@ from pathlib import Path
 from . import __version__
 from .adapters import AdapterRuntimePolicy
 from .gateway_litellm import public_litellm_gateway_policy
+from .gateway_local import public_local_endpoint_policy
 from .catalog_store import CatalogStore
 from .domain import RunMode, RunRequest, RunStatus
 from .engine import RunManager
@@ -51,6 +52,7 @@ def verify_fresh_install(*, timeout_seconds: float = 30.0) -> dict:
             kernel,
             adapter_policy=AdapterRuntimePolicy.from_environment().public(),
             litellm_policy=public_litellm_gateway_policy(),
+            local_policy=public_local_endpoint_policy(),
         )
         maintenance = RuntimeMaintenance(kernel.store.path)
         backup = maintenance.create_backup()

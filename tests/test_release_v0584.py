@@ -24,6 +24,7 @@ from costweave.release_readiness import (
 )
 from costweave.release_store import ReleaseStoreError
 from costweave.server import build_server
+from costweave.gateway_local import public_local_endpoint_policy
 
 
 class StableReleaseContractTests(unittest.TestCase):
@@ -89,6 +90,20 @@ class StableReleaseContractTests(unittest.TestCase):
                 self.kernel,
                 adapter_policy=AdapterRuntimePolicy().public(),
                 litellm_policy=policy,
+            )
+            self.assertFalse(status["engineering_ready"])
+            self.assertEqual("blocked", status["release_status"])
+
+    def test_enabled_local_network_or_capacity_blocks_attestation(self) -> None:
+        for policy in (
+            {"network_enabled": True, "capacity_admission_enabled": False},
+            {"network_enabled": False, "capacity_admission_enabled": True},
+        ):
+            status = build_release_status(
+                self.kernel,
+                adapter_policy=AdapterRuntimePolicy().public(),
+                litellm_policy={"gateway_enabled": False, "paid_calls_enabled": False},
+                local_policy=policy,
             )
             self.assertFalse(status["engineering_ready"])
             self.assertEqual("blocked", status["release_status"])

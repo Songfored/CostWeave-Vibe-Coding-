@@ -511,7 +511,7 @@ CostWeave 鍙湁鍦ㄤ互涓嬩簨瀹炲悓鏃舵垚绔嬪悗锛屾墠鍙�
 10. 浠讳綍鈥滀笘鐣岄《灏栤€濇垨鍥哄畾闄嶆湰姣斾緥閮芥潵鑷彲閲嶅姣旇緝锛岃€屼笉鏄璁℃帹鏂€?# v0.6.0 implementation status
 
 The frozen baseline is `v0.5.8.4`; the current development line is `v0.6.0`. The initial Decision Intelligence contracts, migration 030, benchmark seed, importers, blind policies, metrics, statistics, claim gates, tournament runner, CLI, API, and UI slice are implemented. Real-provider integration and commercial claims remain deliberately out of scope.
-# Current active line: v0.6.6 (V066-WP03 LiteLLM External Gateway Boundary)
+# Current active line: v0.6.6 (V066-WP04 Local Endpoint Capacity Admission)
 
 The next safe-learning increment is deliberately offline first. Before any
 real Shadow or Canary, collect independently validated E2+ traces with
@@ -519,4 +519,10 @@ logging propensities, delayed-label status, cost ledger and Validator
 independence. A candidate must pass blind evaluation, support and quality
 guardrails and retain a rollback pointer. The current implementation cannot
 train or alter a live route.
+
+V066-WP04 adds an E0 local Ollama/vLLM-style OpenAI-compatible boundary. Both
+ network and capacity admission remain default-off. A caller must inject a
+ fresh, complete capacity snapshot; missing, stale, invalid or over-capacity
+ telemetry is rejected before transport. Real metrics scraping, GPU capacity,
+ production concurrency and Shadow remain future work.
 
