@@ -1,31 +1,35 @@
-# v0.6.6 V066-WP02 acceptance
+# v0.6.6 V066-WP03 acceptance
 
 ## Required gates
 
-- Fake Server request and response wire contract passes without a socket.
-- Provider-neutral message schema fields are not leaked to the provider body.
-- Default policy rejects before transport and records zero fake requests.
-- Remote endpoints, credentials, query strings and fragments fail closed.
-- Usage, cached tokens, structured output and provider billing are mapped.
+- LiteLLM is represented as an injected external Gateway, not a copied SDK.
+- Default policy rejects before a transport call.
+- Paid and unknown-cost models require explicit paid-call authority and are
+  rejected before transport when it is absent.
+- Explicitly free models remain callable with paid calls disabled.
+- Editable model aliases map deterministically and do not alter the core
+  request contract.
+- Usage, cached tokens, reasoning tokens, structured output, provider request
+  IDs and optional response cost are mapped.
 - HTTP errors become typed retryable/non-retryable gateway errors.
-- Stream sequences are contiguous and include completion/error semantics.
-- Cancellation never claims provider acceptance when unsupported.
-- Existing v0.6.6 WP01 and prior regression suites remain green.
+- Unexpected transport exceptions are never classified as retryable network
+  failures.
+- Release readiness includes LiteLLM gateway and paid-call default-off gates.
+- Streaming and cancellation are explicitly deferred rather than falsely
+  advertised.
+- Existing WP01/WP02 and prior regression suites remain green.
 
 ## Evidence boundary
 
-This is E0 local/fake-server engineering evidence. It proves contract and
-admission behavior only. It does not prove local model quality, throughput,
-cost reduction, remote-provider compatibility or production readiness.
+This increment is E0 local/fake-gateway engineering evidence. It proves
+contract, mapping and admission behavior only. It does not prove real LiteLLM
+provider quality, throughput, cost reduction or production readiness.
 
 ## Current result
 
-WP02 focused tests cover the fake server, local endpoint admission, payload
-mapping, structured output, usage, billing, streaming, errors and cancellation.
-The WP02 focused suite passed **15/15**. The complete regression suite passed
-**939 tests in 362.676 seconds**. Release CLI engineering gates remain green,
-with runtime v6.5.0, migration 035, WAL and zero external-call attempts.
-The wheel was then installed into a clean target directory; the installed
-package completed a Fake Server request, and its release report remained
-`engineering_ready=true`, `production_ready=false`, with zero external-call
-attempts.
+- Corrected WP03 focused suite: 11/11 passed.
+- Security/cost and gateway/server compatibility suite: 75/75 passed in
+  56.765 seconds.
+- Complete corrected regression suite: 951/951 passed in 331.132 seconds.
+- Clean-target wheel install and release gates are recorded in the independent
+  WP03 acceptance report.

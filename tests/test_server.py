@@ -73,6 +73,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual("local-openai-endpoint-v1", health["openai_gateway"]["policy_revision"])
         self.assertFalse(health["openai_gateway"]["network_enabled"])
         self.assertTrue(health["openai_gateway"]["local_endpoint_only"])
+        self.assertEqual("litellm-external-gateway-v1", health["litellm_gateway"]["policy_revision"])
+        self.assertFalse(health["litellm_gateway"]["gateway_enabled"])
+        self.assertFalse(health["litellm_gateway"]["paid_calls_enabled"])
         self.assertTrue(health["features"]["handoff_intelligence"])
         self.assertEqual(
             "v0.5.5",

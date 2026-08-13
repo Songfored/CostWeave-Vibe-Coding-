@@ -94,6 +94,7 @@ def build_release_status(
     kernel: Any,
     *,
     adapter_policy: Mapping[str, Any] | None = None,
+    litellm_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only facts that the running installation can verify itself."""
 
@@ -103,6 +104,9 @@ def build_release_status(
     adapter = dict(adapter_policy or {})
     experimental_enabled = bool(adapter.get("experimental_calls_enabled", False))
     paid_enabled = bool(adapter.get("paid_calls_enabled", False))
+    litellm = dict(litellm_policy or {})
+    litellm_gateway_enabled = bool(litellm.get("gateway_enabled", False))
+    litellm_paid_enabled = bool(litellm.get("paid_calls_enabled", False))
     gates = [
         {
             "gate_id": "runtime-schema",
@@ -144,6 +148,18 @@ def build_release_status(
             "gate_id": "paid-calls-default-off",
             "passed": not paid_enabled,
             "observed": paid_enabled,
+            "expected": False,
+        },
+        {
+            "gate_id": "litellm-gateway-default-off",
+            "passed": not litellm_gateway_enabled,
+            "observed": litellm_gateway_enabled,
+            "expected": False,
+        },
+        {
+            "gate_id": "litellm-paid-calls-default-off",
+            "passed": not litellm_paid_enabled,
+            "observed": litellm_paid_enabled,
             "expected": False,
         },
     ]

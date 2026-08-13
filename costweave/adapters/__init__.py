@@ -1,4 +1,4 @@
-"""Provider adapters and the v0.6.6 provider-neutral gateway contract."""
+"""Provider adapters and the v0.6.6 provider-neutral gateway contracts."""
 
 from .base import AdapterCapabilities, ProviderAdapter
 from .mock import MockProvider, MockScenario
@@ -53,6 +53,21 @@ from ..gateway_openai import (
     OpenAICompatibleTransportError,
     public_openai_gateway_policy,
 )
+from ..gateway_litellm import (
+    FakeLiteLLMServer,
+    LiteLLMCallTransport,
+    LiteLLMGatewayBackend,
+    LiteLLMGatewayConfig,
+    LiteLLMGatewayError,
+    LiteLLMResponse,
+    LiteLLMRuntimePolicy,
+    LiteLLMTransportError,
+    LITELLM_GATEWAY_DEPLOYMENT,
+    LITELLM_BILLING_MODES,
+    LITELLM_GATEWAY_POLICY_REVISION,
+    LITELLM_GATEWAY_REVISION,
+    public_litellm_gateway_policy,
+)
 
 __all__ = [
     "AdapterCapabilities",
@@ -104,4 +119,17 @@ __all__ = [
     "OpenAICompatibleRuntimePolicy",
     "OpenAICompatibleTransportError",
     "public_openai_gateway_policy",
+    "FakeLiteLLMServer",
+    "LiteLLMCallTransport",
+    "LiteLLMGatewayBackend",
+    "LiteLLMGatewayConfig",
+    "LiteLLMGatewayError",
+    "LiteLLMResponse",
+    "LiteLLMRuntimePolicy",
+    "LiteLLMTransportError",
+    "LITELLM_GATEWAY_DEPLOYMENT",
+    "LITELLM_BILLING_MODES",
+    "LITELLM_GATEWAY_POLICY_REVISION",
+    "LITELLM_GATEWAY_REVISION",
+    "public_litellm_gateway_policy",
 ]

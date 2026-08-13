@@ -1,5 +1,21 @@
 # CostWeave
 
+## v0.6.6 Gateway/Runtime Interop (WP03)
+
+The current increment adds an explicit LiteLLM Gateway boundary. LiteLLM is
+treated as an injected external gateway: CostWeave does not import its SDK,
+store credentials, or enable provider calls by default. The contract maps
+model aliases, usage, provider request IDs, structured output, error classes
+and optional response cost into the same provider-neutral Gateway Backend
+objects. Every alias can be classified as `free`, `paid`, or `unknown`;
+missing classifications fail closed as `unknown`, and both `paid` and
+`unknown` require explicit paid-call authority before transport is invoked.
+Unexpected implementation exceptions are non-retryable, preventing automatic
+retry amplification. Streaming and provider cancellation remain deferred until a later
+work package. See docs/CHANGELOG-v0.6.6-wp03.md,
+docs/V0.6.6_WP03_IMPLEMENTATION_SPEC.md and
+docs/ACCEPTANCE-v0.6.6-wp03.md.
+
 ## v0.6.6 Gateway/Runtime Interop (WP02)
 
 The current increment adds an OpenAI-compatible local Gateway Backend on top
@@ -47,7 +63,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway Backend Contract`; it defines the interop boundary without enabling network or paid calls.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP03 extends the interop boundary without enabling network or paid calls.
 
 Quick offline reproduction:
 

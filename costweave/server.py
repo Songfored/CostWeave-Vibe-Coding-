@@ -52,6 +52,7 @@ from .outcome_dataset import (
 )
 from .adapters import AdapterRuntimePolicy
 from .gateway_openai import public_openai_gateway_policy
+from .gateway_litellm import public_litellm_gateway_policy
 from .experimental_calls import (
     EXPERIMENTAL_CALL_POLICY_REVISION,
     EXPERIMENTAL_CALL_SCHEMA_VERSION,
@@ -263,6 +264,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "resilience": public_resilience_policy(),
                 "stable_release": public_release_policy(),
                 "openai_gateway": public_openai_gateway_policy(),
+                "litellm_gateway": public_litellm_gateway_policy(),
                 "unified_evidence_console": public_evidence_console_policy(),
                 "security_boundary": public_security_policy(
                     runtime_counts=dict(runtime_health.get("security") or {})
@@ -582,6 +584,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                         adapter_policy=(
                             AdapterRuntimePolicy.from_environment().public()
                         ),
+                        litellm_policy=public_litellm_gateway_policy(),
                     ),
                     "project_id": project_id,
                     "attestations": kernel.release_store.list_attestations(
@@ -2310,6 +2313,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             manifest = build_release_status(
                 kernel,
                 adapter_policy=AdapterRuntimePolicy.from_environment().public(),
+                litellm_policy=public_litellm_gateway_policy(),
             )
             if not manifest["engineering_ready"]:
                 raise ValueError(

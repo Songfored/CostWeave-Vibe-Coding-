@@ -80,6 +80,19 @@ class StableReleaseContractTests(unittest.TestCase):
             self.assertFalse(status["engineering_ready"])
             self.assertEqual("blocked", status["release_status"])
 
+    def test_enabled_litellm_or_litellm_paid_calls_block_attestation(self) -> None:
+        for policy in (
+            {"gateway_enabled": True, "paid_calls_enabled": False},
+            {"gateway_enabled": False, "paid_calls_enabled": True},
+        ):
+            status = build_release_status(
+                self.kernel,
+                adapter_policy=AdapterRuntimePolicy().public(),
+                litellm_policy=policy,
+            )
+            self.assertFalse(status["engineering_ready"])
+            self.assertEqual("blocked", status["release_status"])
+
     def test_release_attestation_is_immutable_and_idempotent(self) -> None:
         manifest = build_release_status(
             self.kernel, adapter_policy=AdapterRuntimePolicy().public()

@@ -25,3 +25,7 @@ mapping, structured output, usage, billing, streaming, errors and cancellation.
 The WP02 focused suite passed **15/15**. The complete regression suite passed
 **939 tests in 362.676 seconds**. Release CLI engineering gates remain green,
 with runtime v6.5.0, migration 035, WAL and zero external-call attempts.
+The wheel was then installed into a clean target directory; the installed
+package completed a Fake Server request, and its release report remained
+`engineering_ready=true`, `production_ready=false`, with zero external-call
+attempts.
