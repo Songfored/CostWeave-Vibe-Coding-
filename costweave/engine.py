@@ -1766,7 +1766,31 @@ class RunManager:
         *,
         idempotency_key: str | None = None,
         retry_of: str | None = None,
+        command_metadata: dict[str, Any] | None = None,
     ) -> RunRecord:
+        record, _ = self.create_with_result(
+            request,
+            idempotency_key=idempotency_key,
+            retry_of=retry_of,
+            command_metadata=command_metadata,
+        )
+        return record
+
+    def create_with_result(
+        self,
+        request: RunRequest,
+        *,
+        idempotency_key: str | None = None,
+        retry_of: str | None = None,
+        command_metadata: dict[str, Any] | None = None,
+    ) -> tuple[RunRecord, bool]:
+        """Create a run and expose whether the durable command was replayed.
+
+        The legacy ``create`` API keeps returning only ``RunRecord``.  The
+        runtime backend uses this richer form so clients can distinguish a
+        first submission from an idempotent replay without guessing from
+        status or timestamps.
+        """
         request = request.normalized()
         if self.control_kernel is not None:
             key = idempotency_key or f"legacy-create:{uuid.uuid4().hex}"
@@ -1774,6 +1798,7 @@ class RunManager:
                 request,
                 idempotency_key=key,
                 retry_of=retry_of,
+                command_metadata=command_metadata,
             )
         else:
             run_id = (
@@ -1799,7 +1824,7 @@ class RunManager:
             )
         if should_start:
             self._start(authoritative, resume=False)
-        return authoritative
+        return authoritative, replayed
 
     def _start(self, record: RunRecord, *, resume: bool) -> None:
         with self.lock:
@@ -1832,6 +1857,75 @@ class RunManager:
             idempotency_key=idempotency_key,
             expected_revision=expected_revision,
         )
+
+    def cancel_with_result(
+        self,
+        run_id: str,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+    ) -> tuple[RunRecord, bool]:
+        """Cancel a run and preserve the durable replay bit for adapters."""
+
+        record = self.get(run_id)
+        if record is None:
+            raise KeyError(run_id)
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        result = self.control_kernel.cancel_run(
+            record,
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+            return_replayed=True,
+        )
+        return result
+
+    def checkpoint_with_result(
+        self,
+        run_id: str,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+        checkpoint_id: str,
+        source: str,
+    ) -> tuple[RunRecord, bool]:
+        record = self.get(run_id)
+        if record is None:
+            raise KeyError(run_id)
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        replayed = self.control_kernel.runtime_backend_checkpoint(
+            record,
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+            checkpoint_id=checkpoint_id,
+            source=source,
+        )
+        return record, replayed
+
+    def resume_with_result(
+        self,
+        run_id: str,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+        checkpoint_id: str,
+        source: str,
+    ) -> tuple[RunRecord, bool]:
+        record = self.get(run_id)
+        if record is None:
+            raise KeyError(run_id)
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        replayed = self.control_kernel.runtime_backend_resume(
+            record,
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+            checkpoint_id=checkpoint_id,
+            source=source,
+        )
+        self._start(record, resume=True)
+        return record, replayed
 
     def retry(
         self,

@@ -14,6 +14,20 @@ unsupported and disabled by default. See
 [`docs/V0.6.6_WP05_IMPLEMENTATION_SPEC.md`](docs/V0.6.6_WP05_IMPLEMENTATION_SPEC.md)
 and [`docs/ACCEPTANCE-v0.6.6-wp05.md`](docs/ACCEPTANCE-v0.6.6-wp05.md).
 
+## v0.6.6 Runtime Backend (WP06)
+
+WP06 defines a provider-neutral Runtime Backend around the local persistent
+runtime. It exposes `submit`, `cancel`, `checkpoint`, `resume` and paginated
+`events` operations with strict request/response schemas, optimistic revision
+checks, idempotent replay and project-scoped event access. The HTTP boundary is
+available at `/api/v1/runtime/status`, `/api/v1/runtime/submit` and
+`/api/v1/runtime/<run_id>/{cancel,checkpoint,resume,events}`. Third-party
+runtimes are adapter-only; no runtime SDK, network call or paid provider is
+enabled by default. See
+[`docs/CHANGELOG-v0.6.6-wp06.md`](docs/CHANGELOG-v0.6.6-wp06.md),
+[`docs/V0.6.6_WP06_IMPLEMENTATION_SPEC.md`](docs/V0.6.6_WP06_IMPLEMENTATION_SPEC.md)
+and [`docs/ACCEPTANCE-v0.6.6-wp06.md`](docs/ACCEPTANCE-v0.6.6-wp06.md).
+
 ## v0.6.6 Gateway/Runtime Interop (WP03)
 
 The current increment adds an explicit LiteLLM Gateway boundary. LiteLLM is
@@ -88,7 +102,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission and WP05 adds local-first trace propagation without enabling paid calls or external telemetry by default.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission, WP05 adds local-first trace propagation, and WP06 defines the local Runtime Backend without enabling paid calls or external runtime SDKs by default.
 
 Quick offline reproduction:
 

@@ -13,6 +13,11 @@ from .observability import (
     public_observability_policy,
     sanitize_attributes,
 )
+from .runtime_backend import (
+    RuntimeCapabilitiesV1,
+    RUNTIME_OPERATION_TYPES,
+    public_runtime_backend_policy,
+)
 
 
 RELEASE_SCHEMA_VERSION = "v0.6.6"
@@ -185,6 +190,36 @@ def audit_observability_safety() -> dict[str, Any]:
     }
 
 
+def audit_runtime_backend_contract() -> dict[str, Any]:
+    """Verify the local-first Runtime Backend cannot silently enable calls."""
+
+    capabilities = RuntimeCapabilitiesV1().to_dict()
+    policy = public_runtime_backend_policy()
+    expected_operations = sorted({"submit", "cancel", "checkpoint", "resume"})
+    observed_operations = sorted(policy.get("supported_operations", []))
+    healthy = (
+        capabilities.get("backend_type") == "local"
+        and capabilities.get("persistent") is True
+        and all(capabilities.get(operation) is True for operation in expected_operations)
+        and capabilities.get("external_calls_enabled") is False
+        and policy.get("local_first") is True
+        and policy.get("persistent_runtime_required") is True
+        and policy.get("external_calls_enabled_by_default") is False
+        and policy.get("third_party_runtime_mode") == "adapter-only"
+        and observed_operations == sorted(RUNTIME_OPERATION_TYPES)
+        and policy.get("events_are_project_scoped") is True
+        and policy.get("checkpoint_is_idempotent") is True
+        and policy.get("resume_is_idempotent") is True
+    )
+    return {
+        "healthy": healthy,
+        "capabilities": capabilities,
+        "policy": policy,
+        "expected_operations": expected_operations,
+        "observed_operations": observed_operations,
+    }
+
+
 def public_release_policy() -> dict[str, Any]:
     return {
         "schema_version": RELEASE_SCHEMA_VERSION,
@@ -216,6 +251,7 @@ def public_release_policy() -> dict[str, Any]:
             "default-off local endpoint and capacity admission",
             "bounded OpenTelemetry-compatible local tracing",
             "trace ID propagation through durable runtime events",
+            "local-first Runtime Backend submit/cancel/checkpoint/resume/events contract",
         ],
         "unverified_claims": [
             "real provider answer quality",
@@ -243,6 +279,7 @@ def build_release_status(
     integrity = kernel.resilience_store.integrity_audit()
     replay = audit_event_replay(kernel.store)
     observability_audit = audit_observability_safety()
+    runtime_backend_audit = audit_runtime_backend_contract()
     adapter = dict(adapter_policy or {})
     experimental_enabled = bool(adapter.get("experimental_calls_enabled", False))
     paid_enabled = bool(adapter.get("paid_calls_enabled", False))
@@ -330,6 +367,24 @@ def build_release_status(
             "expected": False,
         },
         {
+            "gate_id": "runtime-backend-contract-self-test",
+            "passed": runtime_backend_audit["healthy"],
+            "observed": {
+                "backend_type": runtime_backend_audit["capabilities"].get("backend_type"),
+                "persistent": runtime_backend_audit["capabilities"].get("persistent"),
+                "external_calls_enabled": runtime_backend_audit["capabilities"].get("external_calls_enabled"),
+                "operations": runtime_backend_audit["observed_operations"],
+                "third_party_runtime_mode": runtime_backend_audit["policy"].get("third_party_runtime_mode"),
+            },
+            "expected": {
+                "backend_type": "local",
+                "persistent": True,
+                "external_calls_enabled": False,
+                "operations": sorted(RUNTIME_OPERATION_TYPES),
+                "third_party_runtime_mode": "adapter-only",
+            },
+        },
+        {
             "gate_id": "otel-prompt-secret-capture-disabled",
             "passed": not telemetry_prompt_enabled and not telemetry_secret_enabled,
             "observed": {
@@ -405,6 +460,7 @@ def build_release_status(
         "replay_audit": replay,
         "observability": telemetry,
         "observability_audit": observability_audit,
+        "runtime_backend_audit": runtime_backend_audit,
     }
     manifest["manifest_hash"] = _sha256(manifest)
     return manifest
@@ -416,6 +472,7 @@ __all__ = [
     "RELEASE_SCHEMA_VERSION",
     "audit_event_replay",
     "audit_observability_safety",
+    "audit_runtime_backend_contract",
     "build_release_status",
     "public_release_policy",
 ]

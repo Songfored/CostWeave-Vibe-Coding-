@@ -184,6 +184,7 @@ class ControlKernel:
         *,
         idempotency_key: str,
         retry_of: str | None = None,
+        command_metadata: dict[str, Any] | None = None,
     ) -> tuple[Any, bool]:
         self.security_store.ensure_project_active(request.project_id)
         create_identity = (
@@ -222,6 +223,7 @@ class ControlKernel:
                     request.recovery_time_limit_seconds
                 ),
                 "retry_of": retry_of,
+                "runtime_metadata": dict(command_metadata or {}),
             },
         )
         replay = self.store.replay_command(
@@ -327,13 +329,59 @@ class ControlKernel:
         )
 
     def checkpoint(self, record: Any, *, source: str) -> None:
-        self._persist(
+        # Keep the revision-derived idempotency key and the write under the
+        # same per-run lock.  Otherwise a public Runtime Backend checkpoint
+        # can advance the stream between key construction and ``_persist``.
+        with record.lock:
+            self._persist(
+                record,
+                kind=CommandKind.CHECKPOINT,
+                event_kind="runtime.checkpointed",
+                source=source,
+                payload={},
+                idempotency_key=f"internal:{record.id}:checkpoint:{record.runtime_revision + 1}",
+            )
+
+    def runtime_backend_checkpoint(
+        self,
+        record: Any,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+        checkpoint_id: str,
+        source: str,
+    ) -> bool:
+        """Persist an adapter-visible, idempotent runtime checkpoint."""
+
+        return self._runtime_backend_event(
             record,
-            kind=CommandKind.CHECKPOINT,
-            event_kind="runtime.checkpointed",
+            event_kind="runtime.backend.checkpointed",
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+            payload={"checkpoint_id": checkpoint_id, "operation": "checkpoint"},
             source=source,
-            payload={},
-            idempotency_key=f"internal:{record.id}:checkpoint:{record.runtime_revision + 1}",
+        )
+
+    def runtime_backend_resume(
+        self,
+        record: Any,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+        checkpoint_id: str,
+        source: str,
+    ) -> bool:
+        """Persist an adapter-visible resume intent before restarting work."""
+
+        return self._runtime_backend_event(
+            record,
+            event_kind="runtime.backend.resumed",
+            idempotency_key=idempotency_key,
+            expected_revision=expected_revision,
+            payload={"checkpoint_id": checkpoint_id, "operation": "resume"},
+            source=source,
+            mark_recovered=True,
+            reject_terminal=True,
         )
 
     def cancel_run(
@@ -342,6 +390,7 @@ class ControlKernel:
         *,
         idempotency_key: str,
         expected_revision: int,
+        return_replayed: bool = False,
     ) -> Any:
         with record.lock:
             command = CommandEnvelope.create(
@@ -353,7 +402,7 @@ class ControlKernel:
                 command, idempotency_key=idempotency_key
             )
             if replay is not None:
-                return record
+                return (record, True) if return_replayed else record
             if int(expected_revision) != record.runtime_revision:
                 from .event_store import RevisionConflictError
 
@@ -391,7 +440,7 @@ class ControlKernel:
                 RunStatus.CANCELLED,
                 source="control_kernel.cancel_finalized",
             )
-            return record
+            return (record, False) if return_replayed else record
 
     def load_records(self) -> list[Any]:
         return [
@@ -1309,6 +1358,88 @@ class ControlKernel:
                 ),
             )
         return approval
+
+    def _runtime_backend_event(
+        self,
+        record: Any,
+        *,
+        event_kind: str,
+        idempotency_key: str,
+        expected_revision: int,
+        payload: dict[str, Any],
+        source: str,
+        mark_recovered: bool = False,
+        reject_terminal: bool = False,
+    ) -> bool:
+        """Commit one public runtime action with replay-before-revision checks."""
+
+        from .event_store import RevisionConflictError
+
+        with record.lock, self._lock:
+            command = CommandEnvelope.create(
+                str(record.id),
+                CommandKind.CHECKPOINT,
+                {**dict(payload), "source": source},
+            )
+            replay = self.store.replay_command(
+                command, idempotency_key=idempotency_key
+            )
+            if replay is not None:
+                # A replay can refer to a command committed before later
+                # events.  Never move the in-memory revision backwards.
+                record.runtime_revision = max(
+                    int(record.runtime_revision),
+                    int(replay.revision),
+                    int(self.store.current_revision(str(record.id))),
+                )
+                return True
+            if reject_terminal and is_terminal(record.status):
+                raise ValueError(
+                    f"terminal run cannot be resumed: {record.status.value}"
+                )
+            if int(expected_revision) != int(record.runtime_revision):
+                raise RevisionConflictError(
+                    int(expected_revision), int(record.runtime_revision)
+                )
+            previous_revision = int(record.runtime_revision)
+            previous_recovered = bool(record.recovered)
+            previous_finished_at = record.finished_at
+            previous_cancel_requested = bool(record.cancel_requested)
+            if mark_recovered:
+                record.recovered = True
+                record.finished_at = None
+                record.cancel_requested = False
+            next_revision = previous_revision + 1
+            projection = record_to_projection(record, revision=next_revision)
+            event = EventEnvelope.create(
+                str(record.id),
+                event_kind,
+                source,
+                {**dict(payload), "trace_id": str(record.trace_id), "projection": projection},
+            )
+            try:
+                committed = self.store.commit(
+                    command,
+                    [event],
+                    idempotency_key=idempotency_key,
+                    expected_revision=previous_revision,
+                    projection_updates=[
+                        ProjectionUpdate("run", str(record.id), projection)
+                    ],
+                    result={
+                        "run_id": str(record.id),
+                        "event_kind": event_kind,
+                        "checkpoint_id": payload.get("checkpoint_id"),
+                    },
+                )
+                record.runtime_revision = committed.revision
+            except Exception:
+                record.runtime_revision = previous_revision
+                record.recovered = previous_recovered
+                record.finished_at = previous_finished_at
+                record.cancel_requested = previous_cancel_requested
+                raise
+            return False
 
     def _persist(
         self,

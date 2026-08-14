@@ -552,7 +552,9 @@ Evidence remains E0. Collector interoperability, distributed propagation,
 production telemetry overhead, real provider quality, real cost reduction and
 commercial superiority are not established.
 
-The next planned package is **V066-WP06 Runtime Backend**: define
+The next completed package is **V066-WP06 Runtime Backend**: define
 submit/cancel/checkpoint/resume/events around the local runtime first, with
-third-party runtimes limited to adapters. WP05's E0 boundaries remain in force
-and must not be promoted into production claims by the next package.
+third-party runtimes limited to adapters. The local-first, project-scoped and
+idempotent contract is now implemented; the next planned package is
+**V066-WP07 Small-Budget Shadow**, which remains advisory-only and must retain
+WP05/WP06's E0 boundaries.

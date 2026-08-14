@@ -47,6 +47,29 @@ Final verification also hardened the HTTP rejection boundary: before returning
 Windows TCP reset reproduced by the old tournament Content-Type test and is
 covered by a 20-consecutive-request regression.
 
+The V066-WP06 Runtime Backend path is:
+
+```text
+RuntimeSubmitRequestV1
+        |
+        v
+LocalRuntimeBackend -> persistent RunManager / ControlKernel
+        |                         |
+        +--> submit              EventStore projection + events
+        +--> cancel              optimistic revision + idempotency
+        +--> checkpoint          project-scoped event page
+        +--> resume
+```
+
+The contract keeps runtime lifecycle control separate from model gateways.
+The local implementation is persistent, project-scoped and fail-closed; a
+third-party runtime can only enter through an adapter implementing the same
+protocol. Runtime actions are replay-safe, checkpoint and resume events are
+durable, and event payloads pass the observability sanitizer before export.
+External runtime SDKs, network calls and paid providers remain disabled by
+default. WP06 is E0 engineering evidence and does not establish distributed
+runtime availability or production throughput.
+
 The v0.6.3 path is:
 
 ```text

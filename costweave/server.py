@@ -117,6 +117,13 @@ from .execution_recovery_store import ExecutionRecoveryStoreError
 from .safe_learning_service import SafeLearningService, SafeLearningServiceError
 from .safe_learning_store import SafeLearningStoreError
 from .observability import public_observability_policy
+from .runtime_backend import (
+    LocalRuntimeBackend,
+    RuntimeBackendContractError,
+    RuntimeBackendUnavailableError,
+    RuntimeSubmitRequestV1,
+    public_runtime_backend_policy,
+)
 
 
 MANAGER: RunManager | None = None
@@ -160,6 +167,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     @property
     def catalog_store(self) -> CatalogStore:
         return getattr(self.server, "catalog_store", CATALOG_STORE)
+
+    @property
+    def runtime_backend(self) -> LocalRuntimeBackend:
+        return LocalRuntimeBackend(self.manager)
 
     def _project_id(self) -> str:
         return normalize_project_id(
@@ -216,7 +227,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
                     "active_development": "v0.6.6",
-                    "active_work_package": "V066-WP05",
+                    "active_work_package": "V066-WP06",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -316,8 +327,48 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "network_calls": 0,
                 },
                 "observability": public_observability_policy(),
+                "runtime_backend": public_runtime_backend_policy(),
             })
             return
+        if path == "/api/v1/runtime/status":
+            self._json({
+                "backend": self.runtime_backend.capabilities.to_dict(),
+                "policy": public_runtime_backend_policy(),
+            })
+            return
+        if path.startswith("/api/v1/runtime/"):
+            suffix = path.removeprefix("/api/v1/runtime/").strip("/")
+            if suffix.endswith("/events"):
+                run_id = unquote(suffix.removesuffix("/events").strip("/"))
+                try:
+                    query = parse_qs(parsed.query)
+                    after = int(query.get("after_revision", ["0"])[0])
+                    limit = int(query.get("limit", ["200"])[0])
+                    page = self.runtime_backend.events(
+                        run_id,
+                        project_id=self._project_id(),
+                        after_revision=after,
+                        limit=limit,
+                    )
+                    self._json(page.to_dict())
+                except KeyError:
+                    self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                except RuntimeBackendUnavailableError as exc:
+                    self._json({"error": "persistent_runtime_disabled", "message": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+                except (RuntimeBackendContractError, TypeError, ValueError) as exc:
+                    self._json({"error": "runtime_events_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if suffix and "/" not in suffix:
+                try:
+                    record = self._get_run(unquote(suffix))
+                    if record is None:
+                        raise KeyError(suffix)
+                    self._json(record.snapshot())
+                except KeyError:
+                    self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                except RuntimeBackendUnavailableError as exc:
+                    self._json({"error": "persistent_runtime_disabled", "message": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
         if path == "/api/v1/meta-controller/status":
             kernel = self.manager.control_kernel
             if kernel is None:
@@ -1364,6 +1415,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/release/attestations":
             self._create_release_attestation()
             return
+        if path == "/api/v1/runtime/submit":
+            self._runtime_submit()
+            return
+        if path.startswith("/api/v1/runtime/"):
+            suffix = path.removeprefix("/api/v1/runtime/").strip("/")
+            parts = [unquote(item) for item in suffix.split("/") if item]
+            if len(parts) == 2 and parts[1] in {"cancel", "checkpoint", "resume"}:
+                self._runtime_action(parts[0], parts[1])
+                return
         if path == "/api/v1/runs":
             self._create_run(v1=True)
             return
@@ -1521,6 +1581,101 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 {"error": "project_revocation_failed", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
+
+    def _runtime_submit(self) -> None:
+        try:
+            payload = dict(self._read_write_json())
+            project = self._project_id()
+            body_project = normalize_project_id(payload.get("project_id", project))
+            if body_project != project:
+                raise RequestError(
+                    "runtime submit project does not match X-CostWeave-Project",
+                    HTTPStatus.FORBIDDEN,
+                    "project_scope_forbidden",
+                )
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "runtime submit requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            if payload.get("idempotency_key") not in {None, key}:
+                raise RequestError(
+                    "body and header idempotency keys must match",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_mismatch",
+                )
+            payload["project_id"] = project
+            payload["data_residency"] = self._data_residency()
+            payload["idempotency_key"] = key
+            request = RuntimeSubmitRequestV1.from_dict(payload)
+            operation = self.runtime_backend.submit(request)
+            self._json(operation.to_dict(), HTTPStatus.ACCEPTED)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (RevisionConflictError, IdempotencyConflictError) as exc:
+            self._runtime_conflict(exc)
+        except RuntimeBackendUnavailableError as exc:
+            self._json(
+                {"error": "persistent_runtime_disabled", "message": str(exc)},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        except (RuntimeBackendContractError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._json({"error": "runtime_submit_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _runtime_action(self, run_id: str, action: str) -> None:
+        try:
+            if self._get_run(run_id) is None:
+                raise KeyError(run_id)
+            payload = self._read_write_json()
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    f"runtime {action} requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            expected = payload.get("expected_revision")
+            if isinstance(expected, bool) or not isinstance(expected, int):
+                raise RequestError(
+                    "expected_revision must be an integer",
+                    HTTPStatus.BAD_REQUEST,
+                    "invalid_expected_revision",
+                )
+            kwargs = {
+                "project_id": self._project_id(),
+                "idempotency_key": key,
+                "expected_revision": expected,
+            }
+            if action == "cancel":
+                operation = self.runtime_backend.cancel(run_id, **kwargs)
+            elif action == "checkpoint":
+                operation = self.runtime_backend.checkpoint(
+                    run_id,
+                    source=str(payload.get("source") or "client"),
+                    **kwargs,
+                )
+            else:
+                operation = self.runtime_backend.resume(
+                    run_id,
+                    source=str(payload.get("source") or "client"),
+                    **kwargs,
+                )
+            self._json(operation.to_dict(), HTTPStatus.ACCEPTED)
+        except KeyError:
+            self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+        except (RevisionConflictError, IdempotencyConflictError) as exc:
+            self._runtime_conflict(exc)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except RuntimeBackendUnavailableError as exc:
+            self._json(
+                {"error": "persistent_runtime_disabled", "message": str(exc)},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        except (RuntimeBackendContractError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._json({"error": f"runtime_{action}_invalid", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def _create_run(self, *, v1: bool = False) -> None:
         try:

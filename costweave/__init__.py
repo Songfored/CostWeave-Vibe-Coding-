@@ -1,1 +1,3 @@
-"""Bundled SQLite migrations for the v0.4 runtime."""
+"""CostWeave: a local-first orchestration runtime prototype."""
+
+__version__ = "0.6.6"
