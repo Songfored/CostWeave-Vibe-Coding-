@@ -16,6 +16,7 @@ from .domain import (
     TaskContract,
     TaskStatus,
 )
+from .observability import trace_id_for_run
 
 
 PROJECTION_SCHEMA_VERSION = "v5.6"
@@ -46,6 +47,7 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
         projection = {
             "projection_schema_version": PROJECTION_SCHEMA_VERSION,
             "id": str(record.id),
+            "trace_id": str(record.trace_id or trace_id_for_run(record.id)),
             "request": {
                 "goal": record.request.goal,
                 "project_id": record.request.project_id,
@@ -186,6 +188,7 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     planning = dict(snapshot.get("planning") or {})
     return {
         "id": str(snapshot["id"]),
+        "trace_id": str(snapshot.get("trace_id") or trace_id_for_run(str(snapshot["id"]))),
         "request": request,
         "status": RunStatus(snapshot.get("status", RunStatus.CREATED)),
         "plan": _plan_from_dict(snapshot.get("plan")),
@@ -230,12 +233,18 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def record_from_snapshot(snapshot: Mapping[str, Any], *, control_kernel: Any = None) -> Any:
+def record_from_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    control_kernel: Any = None,
+    register_telemetry: bool = True,
+) -> Any:
     from .engine import RunRecord
 
     values = hydrate_run_data(snapshot)
     if values["created_at"] is None:
         values.pop("created_at")
+    values["register_telemetry_on_init"] = bool(register_telemetry)
     record = RunRecord(**values)
     record.control_kernel = control_kernel
     return record

@@ -6,6 +6,14 @@ import hashlib
 import json
 from typing import Any, Mapping
 
+from .observability import (
+    ObservabilityError,
+    TraceRecorder,
+    TraceSpanV1,
+    public_observability_policy,
+    sanitize_attributes,
+)
+
 
 RELEASE_SCHEMA_VERSION = "v0.6.6"
 EXPECTED_RUNTIME_SCHEMA = "v6.5.0"
@@ -51,6 +59,132 @@ def audit_event_replay(store: Any) -> dict[str, Any]:
     }
 
 
+def audit_observability_safety() -> dict[str, Any]:
+    """Exercise the security invariants claimed by the WP05 release gate."""
+
+    sentinels = {
+        "auth": "Basic cWEtdXNlcjpxYS1wYXNzd29yZA==",
+        "pass": "qa-pass-value",
+        "pwd": "qa-password-value",
+        "jwt": "eyJhbGciOiJIUzI1NiJ9.cWEtcGF5bG9hZA.cWEtc2lnbmF0dXJl",
+        "session_id": "qa-session-value",
+        "access_key": "AKIAIOSFODNN7EXAMPLE",
+        "database_url": "postgresql://qa-user:qa-db-password@db.internal/app",
+        "dsn": "mysql://root:qa-mysql-password@db.internal/app",
+        "oauth": "qa-oauth-credential",
+        "connection_string": "Server=db;Password=qa-connection-password",
+        "provider_endpoint": "redis://:qa-redis-password@cache.internal/0",
+        "max_tokens": "qa-token-shaped-secret",
+        "api.key": "qa-dotted-api-key",
+        "access:key": "qa-colon-access-key",
+        "database.url": "qa-dotted-database-url",
+        "connection:string": "qa-colon-connection-string",
+        "api..key": "qa-repeated-api-key",
+        "connection::string": "qa-repeated-connection-string",
+    }
+    redacted = sanitize_attributes({
+        "nested": {"items": [sentinels]},
+        "input_tokens": 7,
+    })
+    encoded = _canonical_json(redacted)
+    leaked_values = [
+        key for key, value in sentinels.items() if value in encoded
+    ]
+    digest_retained = "sha256" in encoded.lower()
+    numeric_token_metric_preserved = redacted.get("input_tokens") == 7
+
+    sanitizer_rejected_nonfinite = False
+    try:
+        sanitize_attributes({"latency_ms": float("nan")})
+    except ObservabilityError:
+        sanitizer_rejected_nonfinite = True
+    serializer_rejected_nonfinite = False
+    try:
+        _canonical_json({"latency_ms": float("inf")})
+    except ValueError:
+        serializer_rejected_nonfinite = True
+    finite_numbers_rejected = (
+        sanitizer_rejected_nonfinite and serializer_rejected_nonfinite
+    )
+
+    event_secret = "qa-event-extra-secret"
+    secret_span_name = "sk-qa-span-secret-12345678"
+    span = TraceSpanV1(
+        trace_id="a" * 32,
+        span_id="b" * 16,
+        parent_span_id=None,
+        name="costweave.release.audit",
+        stage="validation",
+        start_time="2026-08-14T00:00:00Z",
+        end_time="2026-08-14T00:00:01Z",
+        attributes={"nested": {"safe_count": 1}},
+        events=(
+            {
+                "name": "release.audit",
+                "timestamp": "2026-08-14T00:00:00Z",
+                "attributes": {},
+                "secret": event_secret,
+            },
+        ),
+    )
+    event_extra_leaked = event_secret in _canonical_json(span.to_dict())
+    secret_name_span = TraceSpanV1(
+        trace_id="c" * 32,
+        span_id="d" * 16,
+        parent_span_id=None,
+        name=secret_span_name,
+        stage="validation",
+        start_time="2026-08-14T00:00:00Z",
+    )
+    span_name_leaked = secret_span_name in _canonical_json(
+        secret_name_span.to_dict()
+    )
+    secret_event_name = "Basic cWEtZXZlbnQ6cWEtcGFzc3dvcmQ="
+    name_recorder = TraceRecorder(trace_id="e" * 32)
+    secret_event_span = name_recorder.record_event(secret_event_name)
+    event_name_export = _canonical_json(name_recorder.export()).lower()
+    event_name_leaked = (
+        secret_event_span is None
+        or secret_event_span.name != "costweave.redacted.event"
+        or secret_event_name.split(" ", 1)[1].lower() in event_name_export
+    )
+    deeply_immutable = True
+    try:
+        span.attributes["nested"]["safe_count"] = 2
+    except TypeError:
+        pass
+    else:
+        deeply_immutable = False
+    exported = span.to_dict()
+    exported["attributes"]["nested"]["safe_count"] = 3
+    export_isolated = (
+        span.to_dict()["attributes"]["nested"]["safe_count"] == 1
+    )
+    deeply_immutable = deeply_immutable and export_isolated
+
+    return {
+        "healthy": (
+            not leaked_values
+            and not digest_retained
+            and numeric_token_metric_preserved
+            and finite_numbers_rejected
+            and not event_extra_leaked
+            and not span_name_leaked
+            and not event_name_leaked
+            and deeply_immutable
+        ),
+        "leaked_values": leaked_values,
+        "digest_retained": digest_retained,
+        "numeric_token_metric_preserved": numeric_token_metric_preserved,
+        "finite_numbers_rejected": finite_numbers_rejected,
+        "event_extra_leaked": event_extra_leaked,
+        "span_name_leaked": span_name_leaked,
+        "event_name_leaked": event_name_leaked,
+        "deeply_immutable": deeply_immutable,
+        "export_isolated": export_isolated,
+    }
+
+
 def public_release_policy() -> dict[str, Any]:
     return {
         "schema_version": RELEASE_SCHEMA_VERSION,
@@ -80,6 +214,8 @@ def public_release_policy() -> dict[str, Any]:
             "logical backup verification and restore",
             "default-off external and paid adapters",
             "default-off local endpoint and capacity admission",
+            "bounded OpenTelemetry-compatible local tracing",
+            "trace ID propagation through durable runtime events",
         ],
         "unverified_claims": [
             "real provider answer quality",
@@ -87,6 +223,7 @@ def public_release_policy() -> dict[str, Any]:
             "real end-to-end latency improvement",
             "real Ollama/vLLM queue or GPU capacity",
             "production availability and distributed recovery",
+            "external OpenTelemetry collector delivery and production telemetry cost",
             "commercial superiority or world-leading performance",
         ],
     }
@@ -98,12 +235,14 @@ def build_release_status(
     adapter_policy: Mapping[str, Any] | None = None,
     litellm_policy: Mapping[str, Any] | None = None,
     local_policy: Mapping[str, Any] | None = None,
+    telemetry_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only facts that the running installation can verify itself."""
 
     runtime = kernel.health()
     integrity = kernel.resilience_store.integrity_audit()
     replay = audit_event_replay(kernel.store)
+    observability_audit = audit_observability_safety()
     adapter = dict(adapter_policy or {})
     experimental_enabled = bool(adapter.get("experimental_calls_enabled", False))
     paid_enabled = bool(adapter.get("paid_calls_enabled", False))
@@ -113,6 +252,10 @@ def build_release_status(
     local = dict(local_policy or {})
     local_network_enabled = bool(local.get("network_enabled", False))
     local_capacity_enabled = bool(local.get("capacity_admission_enabled", False))
+    telemetry = dict(telemetry_policy or public_observability_policy())
+    telemetry_external_enabled = bool(telemetry.get("external_export_enabled", False))
+    telemetry_prompt_enabled = bool(telemetry.get("prompt_capture_enabled", False))
+    telemetry_secret_enabled = bool(telemetry.get("secret_capture_enabled", False))
     gates = [
         {
             "gate_id": "runtime-schema",
@@ -180,6 +323,69 @@ def build_release_status(
             "observed": local_capacity_enabled,
             "expected": False,
         },
+        {
+            "gate_id": "otel-external-export-default-off",
+            "passed": not telemetry_external_enabled,
+            "observed": telemetry_external_enabled,
+            "expected": False,
+        },
+        {
+            "gate_id": "otel-prompt-secret-capture-disabled",
+            "passed": not telemetry_prompt_enabled and not telemetry_secret_enabled,
+            "observed": {
+                "prompt_capture_enabled": telemetry_prompt_enabled,
+                "secret_capture_enabled": telemetry_secret_enabled,
+            },
+            "expected": {
+                "prompt_capture_enabled": False,
+                "secret_capture_enabled": False,
+            },
+        },
+        {
+            "gate_id": "otel-redaction-self-test",
+            "passed": not observability_audit["leaked_values"]
+            and not observability_audit["event_extra_leaked"]
+            and not observability_audit["span_name_leaked"]
+            and not observability_audit["event_name_leaked"]
+            and not observability_audit["digest_retained"]
+            and observability_audit["numeric_token_metric_preserved"],
+            "observed": {
+                "leaked_values": observability_audit["leaked_values"],
+                "event_extra_leaked": observability_audit[
+                    "event_extra_leaked"
+                ],
+                "span_name_leaked": observability_audit[
+                    "span_name_leaked"
+                ],
+                "event_name_leaked": observability_audit[
+                    "event_name_leaked"
+                ],
+                "digest_retained": observability_audit["digest_retained"],
+                "numeric_token_metric_preserved": observability_audit[
+                    "numeric_token_metric_preserved"
+                ],
+            },
+            "expected": {
+                "leaked_values": [],
+                "event_extra_leaked": False,
+                "span_name_leaked": False,
+                "event_name_leaked": False,
+                "digest_retained": False,
+                "numeric_token_metric_preserved": True,
+            },
+        },
+        {
+            "gate_id": "otel-strict-json-self-test",
+            "passed": observability_audit["finite_numbers_rejected"],
+            "observed": observability_audit["finite_numbers_rejected"],
+            "expected": True,
+        },
+        {
+            "gate_id": "otel-deep-immutability-self-test",
+            "passed": observability_audit["deeply_immutable"],
+            "observed": observability_audit["deeply_immutable"],
+            "expected": True,
+        },
     ]
     engineering_ready = all(bool(item["passed"]) for item in gates)
     manifest = {
@@ -197,6 +403,8 @@ def build_release_status(
         "gates": gates,
         "integrity": integrity,
         "replay_audit": replay,
+        "observability": telemetry,
+        "observability_audit": observability_audit,
     }
     manifest["manifest_hash"] = _sha256(manifest)
     return manifest
@@ -207,6 +415,7 @@ __all__ = [
     "EXPECTED_RUNTIME_SCHEMA",
     "RELEASE_SCHEMA_VERSION",
     "audit_event_replay",
+    "audit_observability_safety",
     "build_release_status",
     "public_release_policy",
 ]

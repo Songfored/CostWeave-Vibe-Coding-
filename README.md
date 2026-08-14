@@ -1,5 +1,19 @@
 # CostWeave
 
+## v0.6.6 Gateway/Runtime Interop (WP05)
+
+WP05 adds a bounded, local-first OpenTelemetry-compatible trace contract.
+Each run receives a stable Trace ID that is propagated through the durable
+run projection and EventStore events. Goal, Plan, Task, Provider Call,
+Validation and Recovery spans can be inspected through
+`GET /api/v1/runs/<run_id>/trace` or serialized as offline OTLP-shaped JSON.
+Prompt-like values, credentials and token-shaped values are redacted; raw
+prompt and secret capture are rejected. External exporter delivery remains
+unsupported and disabled by default. See
+[`docs/CHANGELOG-v0.6.6-wp05.md`](docs/CHANGELOG-v0.6.6-wp05.md),
+[`docs/V0.6.6_WP05_IMPLEMENTATION_SPEC.md`](docs/V0.6.6_WP05_IMPLEMENTATION_SPEC.md)
+and [`docs/ACCEPTANCE-v0.6.6-wp05.md`](docs/ACCEPTANCE-v0.6.6-wp05.md).
+
 ## v0.6.6 Gateway/Runtime Interop (WP03)
 
 The current increment adds an explicit LiteLLM Gateway boundary. LiteLLM is
@@ -74,7 +88,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission without enabling network or paid calls by default.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission and WP05 adds local-first trace propagation without enabling paid calls or external telemetry by default.
 
 Quick offline reproduction:
 

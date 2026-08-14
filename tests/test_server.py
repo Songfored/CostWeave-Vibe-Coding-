@@ -571,6 +571,24 @@ class ServerTests(unittest.TestCase):
         )
         self.assertIn(status, {403, 415})
 
+    def test_rejected_content_type_returns_json_without_aborting_connection(self):
+        headers = {
+            "Content-Type": "text/plain",
+            "Idempotency-Key": "server-rejected-body-drain",
+        }
+        for index in range(20):
+            status, payload = self.request_json(
+                "/api/v1/tournaments/offline",
+                {
+                    "confirm": "RUN_OFFLINE_TOURNAMENT",
+                    "bootstrap_samples": 100,
+                    "attempt": index,
+                },
+                headers,
+            )
+            self.assertEqual(415, status)
+            self.assertEqual("unsupported_media_type", payload["error"])
+
     def test_unknown_api_is_json_404(self):
         status, body = self.request_json("/api/does-not-exist")
         self.assertEqual(404, status)

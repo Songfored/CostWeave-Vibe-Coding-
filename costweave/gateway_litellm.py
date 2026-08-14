@@ -31,6 +31,7 @@ from .gateway_backend import (
     GatewayUsageV1,
 )
 from .gateway_openai import _error_category, _response_format_output
+from .observability import provider_call_span
 
 
 LITELLM_GATEWAY_REVISION = "litellm-gateway-v1"
@@ -441,26 +442,42 @@ class LiteLLMGatewayBackend:
             raise LiteLLMGatewayError("streaming request must use stream()")
         if request.request_id in self._cancelled:
             return self._failure(request, category="cancelled", retryable=False, message="request was cancelled before LiteLLM call")
-        try:
-            return self._completed(request, transport.complete(payload=self._payload(request)))
-        except GatewayBackendDisabledError:
-            raise
-        except LiteLLMTransportError:
-            return self._failure(request, category="network", retryable=True, message="LiteLLM transport failed")
-        except (LiteLLMGatewayError, GatewayBackendContractError):
-            return self._failure(
-                request,
-                category="protocol",
-                retryable=False,
-                message="LiteLLM request or response violated the gateway contract",
-            )
-        except Exception:
-            return self._failure(
-                request,
-                category="unknown",
-                retryable=False,
-                message="LiteLLM transport failed without a retry-safe classification",
-            )
+        with provider_call_span(
+            request.trace_id,
+            backend_id=self.config.backend_id,
+            provider="litellm",
+            model=request.model,
+            request_id=request.request_id,
+        ) as trace_span:
+            try:
+                response = self._completed(request, transport.complete(payload=self._payload(request)))
+                if trace_span is not None:
+                    trace_span.set_status("ok" if response.status == "completed" else "error")
+                return response
+            except GatewayBackendDisabledError:
+                raise
+            except LiteLLMTransportError:
+                if trace_span is not None:
+                    trace_span.set_status("error")
+                return self._failure(request, category="network", retryable=True, message="LiteLLM transport failed")
+            except (LiteLLMGatewayError, GatewayBackendContractError):
+                if trace_span is not None:
+                    trace_span.set_status("error")
+                return self._failure(
+                    request,
+                    category="protocol",
+                    retryable=False,
+                    message="LiteLLM request or response violated the gateway contract",
+                )
+            except Exception:
+                if trace_span is not None:
+                    trace_span.set_status("error")
+                return self._failure(
+                    request,
+                    category="unknown",
+                    retryable=False,
+                    message="LiteLLM transport failed without a retry-safe classification",
+                )
 
     def stream(self, request: GatewayRequestV1):
         self._admit(request)

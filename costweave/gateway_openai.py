@@ -34,6 +34,7 @@ from .gateway_backend import (
     GatewayUsageV1,
 )
 from .security_boundary import validate_endpoint
+from .observability import provider_call_span
 
 
 OPENAI_GATEWAY_REVISION = "openai-compatible-gateway-v1"
@@ -608,17 +609,29 @@ class OpenAICompatibleGatewayBackend:
         self._admit()
         if request.stream:
             raise OpenAICompatibleGatewayError("streaming request must use stream()")
-        try:
-            return self._completed(request, self._post(request))
-        except GatewayBackendDisabledError:
-            raise
-        except OpenAICompatibleTransportError:
-            return self._failure(
-                request,
-                category="network",
-                retryable=True,
-                message="local OpenAI-compatible transport failed",
-            )
+        with provider_call_span(
+            request.trace_id,
+            backend_id=self.config.backend_id,
+            provider="openai-compatible",
+            model=request.model,
+            request_id=request.request_id,
+        ) as trace_span:
+            try:
+                response = self._completed(request, self._post(request))
+                if trace_span is not None:
+                    trace_span.set_status("ok" if response.status == "completed" else "error")
+                return response
+            except GatewayBackendDisabledError:
+                raise
+            except OpenAICompatibleTransportError:
+                if trace_span is not None:
+                    trace_span.set_status("error")
+                return self._failure(
+                    request,
+                    category="network",
+                    retryable=True,
+                    message="local OpenAI-compatible transport failed",
+                )
 
     def _stream_events(self, request: GatewayRequestV1, response: GatewayHTTPResponse) -> tuple[GatewayStreamEventV1, ...]:
         events: list[GatewayStreamEventV1] = [
@@ -763,18 +776,32 @@ class OpenAICompatibleGatewayBackend:
                 payload={"reason": "cancelled before provider request"},
             )
             return
-        try:
-            response = self._post(request)
-        except OpenAICompatibleTransportError:
-            yield GatewayStreamEventV1(
-                request_id=request.request_id,
-                sequence=0,
-                event_type="error",
-                payload={"category": "network", "message": "local transport failed"},
-            )
-            return
-        for event in self._stream_events(request, response):
-            yield event
+        with provider_call_span(
+            request.trace_id,
+            backend_id=self.config.backend_id,
+            provider="openai-compatible",
+            model=request.model,
+            request_id=request.request_id,
+        ) as trace_span:
+            try:
+                response = self._post(request)
+            except OpenAICompatibleTransportError:
+                if trace_span is not None:
+                    trace_span.set_status("error")
+                yield GatewayStreamEventV1(
+                    request_id=request.request_id,
+                    sequence=0,
+                    event_type="error",
+                    payload={"category": "network", "message": "local transport failed"},
+                )
+                return
+            failed = False
+            for event in self._stream_events(request, response):
+                if event.event_type in {"error", "cancelled"}:
+                    failed = True
+                yield event
+            if trace_span is not None:
+                trace_span.set_status("error" if failed else "ok")
 
     def cancel(self, request_id: str, *, reason: str) -> GatewayCancellationV1:
         if not isinstance(request_id, str) or _IDENTIFIER_RE.fullmatch(request_id) is None:

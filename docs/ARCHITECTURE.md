@@ -2,6 +2,51 @@
 
 `v0.5.8.4` remains the frozen stable control-plane baseline. `v0.6.0` and `v0.6.1` are historical Decision Intelligence lines. `v0.6.2` adds the immutable Capability Evidence Graph; `v0.6.3` adds provider-free joint strategy search; `v0.6.4` adds provider-free execution-time belief updates and economic recovery beside both layers. None of these lab lines silently changes the stable routing contract.
 
+The v0.6.6 WP05 observability path is:
+
+```text
+Run / Gateway request
+        |
+        v
+stable Trace ID (32-hex, run-derived)
+        |
+Goal -> Plan -> Task -> Provider Call -> Validation -> Recovery
+        |
+bounded redaction + local in-memory spans
+        |
+EventStore trace_id propagation + read-only trace endpoint
+        |
+offline OTLP-shaped export (external exporter disabled)
+```
+
+The trace layer is an observation contract, not a second decision plane. A
+trace error cannot retry a provider, change a route, or block execution.
+Recognized prompt/secret patterns are replaced by metadata-only markers before
+a span is retained. Markers contain classification, value type and optional
+length, with no source-value digest or preview. Integrations must still pass
+allowlisted metadata: pattern redaction is not proof that arbitrary attributes
+are credential-free. Non-finite values are rejected and published span data is
+deeply immutable.
+
+EventStore persists the Trace ID and existing runtime events, not the span
+store. Event-derived lifecycle spans can be reconstructed after restart;
+provider-call spans are process-local in WP05. Recorder discovery uses a
+thread-safe `WeakValueDictionary`: it does not own recorder lifetime or claim a
+fixed registry capacity, while each recorder retains explicit span/event/byte
+bounds. External collectors, cross-process propagation and production
+telemetry remain outside this E0 architecture boundary.
+
+The `fixed-final` WP05 architecture passed 25/25 focused/adversarial, 94/94
+compatibility, 147/147 affected, 995/995 ordinary full and 995/995 isolated
+tests, plus 16/16 `fixed-final` wheel release-readiness gates with zero external
+calls.
+`engineering_ready=true`; `production_ready=false`.
+
+Final verification also hardened the HTTP rejection boundary: before returning
+415, the server performs a bounded 100 ms request-body drain. This prevents the
+Windows TCP reset reproduced by the old tournament Content-Type test and is
+covered by a 20-consecutive-request regression.
+
 The v0.6.3 path is:
 
 ```text

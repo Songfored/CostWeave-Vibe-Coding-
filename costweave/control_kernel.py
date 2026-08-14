@@ -231,7 +231,11 @@ class ControlKernel:
             snapshot = self.store.get_projection(run_id)
             if snapshot is None:
                 raise RuntimeError("idempotent create result has no run projection")
-            return record_from_snapshot(snapshot, control_kernel=self), True
+            return record_from_snapshot(
+                snapshot,
+                control_kernel=self,
+                register_telemetry=False,
+            ), True
 
         from .engine import RunRecord
 
@@ -242,7 +246,7 @@ class ControlKernel:
             run_id,
             "run.created",
             "control_kernel.create_run",
-            {"projection": projection},
+            {"trace_id": record.trace_id, "projection": projection},
         )
         result = self.store.commit(
             command,
@@ -1321,6 +1325,7 @@ class ControlKernel:
         # Runtime event writers already hold record.lock; the opposite order
         # here could deadlock with concurrent approval resolution.
         with record.lock, self._lock:
+            payload = {**dict(payload), "trace_id": str(record.trace_id)}
             previous_revision = int(record.runtime_revision)
             next_revision = previous_revision + 1
             record.runtime_revision = next_revision

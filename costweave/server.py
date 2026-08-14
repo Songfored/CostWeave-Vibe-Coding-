@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import mimetypes
 import posixpath
 import socket
@@ -115,6 +116,7 @@ from .execution_recovery_service import (
 from .execution_recovery_store import ExecutionRecoveryStoreError
 from .safe_learning_service import SafeLearningService, SafeLearningServiceError
 from .safe_learning_store import SafeLearningStoreError
+from .observability import public_observability_policy
 
 
 MANAGER: RunManager | None = None
@@ -214,6 +216,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
                     "active_development": "v0.6.6",
+                    "active_work_package": "V066-WP05",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -312,6 +315,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "provider_calls": 0,
                     "network_calls": 0,
                 },
+                "observability": public_observability_policy(),
             })
             return
         if path == "/api/v1/meta-controller/status":
@@ -1244,6 +1248,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     }
                 )
                 return
+            if suffix.endswith("/trace"):
+                run_id = suffix.removesuffix("/trace").strip("/")
+                trace = self.manager.trace(run_id)
+                if trace is None:
+                    self._json({"error": "run_not_found"}, HTTPStatus.NOT_FOUND)
+                    return
+                self._json(trace)
+                return
             if suffix.endswith("/events"):
                 run_id = suffix.removesuffix("/events").strip("/")
                 record = self._get_run(run_id)
@@ -2049,11 +2061,53 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._json({"error": code, "message": str(exc)}, status)
 
     def _read_write_json(self, *, max_bytes: int = 256_000) -> dict:
-        self._validate_write_headers(require_json=True)
+        try:
+            self._validate_write_headers(require_json=True)
+        except RequestError:
+            # On Windows, closing a socket with an unread request body can
+            # replace the intended JSON 4xx response with WSAECONNABORTED at
+            # the client.  Drain only a bounded, already-sent body before the
+            # handler writes the rejection; partial/oversized bodies remain
+            # fail-closed and force the connection to close.
+            self._drain_rejected_body(max_bytes=max_bytes)
+            raise
         payload = self._read_json(max_bytes=max_bytes)
         if not isinstance(payload, dict):
             raise ValueError("请求体必须是JSON对象")
         return payload
+
+    def _drain_rejected_body(self, *, max_bytes: int) -> None:
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length or 0)
+        except (TypeError, ValueError):
+            self.close_connection = True
+            return
+        if length <= 0:
+            return
+        if length > max(0, int(max_bytes)):
+            self.close_connection = True
+            return
+        connection = getattr(self, "connection", None)
+        previous_timeout = connection.gettimeout() if connection is not None else None
+        try:
+            if connection is not None:
+                connection.settimeout(0.1)
+            remaining = length
+            while remaining:
+                chunk = self.rfile.read(min(remaining, 65_536))
+                if not chunk:
+                    self.close_connection = True
+                    break
+                remaining -= len(chunk)
+        except (OSError, TimeoutError, socket.timeout):
+            self.close_connection = True
+        finally:
+            if connection is not None:
+                connection.settimeout(previous_timeout)
 
     def _validate_write_headers(self, *, require_json: bool) -> None:
         if require_json:
@@ -2139,6 +2193,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 stack.extend((item, depth + 1) for item in current.values())
             elif isinstance(current, list):
                 stack.extend((item, depth + 1) for item in current)
+            elif isinstance(current, float) and not math.isfinite(current):
+                raise ValueError("JSON numbers must be finite")
 
     def _normalise_api_path(self, path: str) -> str:
         self._legacy_api = (
@@ -2172,7 +2228,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         status: HTTPStatus = HTTPStatus.OK,
     ) -> None:
         body = json.dumps(
-            redact_structure(payload), ensure_ascii=False
+            redact_structure(payload),
+            ensure_ascii=False,
+            allow_nan=False,
         ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

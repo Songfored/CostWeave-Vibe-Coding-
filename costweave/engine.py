@@ -58,12 +58,19 @@ from .dag_simulation import DagMonteCarlo
 from .deliberation import DeliberationSimulator
 from .multiplanner import MultiPlannerEngine, PlanCompiler
 from .planning_governor import PlanningGovernor
+from .observability import (
+    TraceRecorder,
+    register_trace_recorder,
+    trace_id_for_run,
+    unregister_trace_recorder,
+)
 
 
 @dataclass
 class RunRecord:
     id: str
     request: RunRequest
+    trace_id: str | None = None
     status: RunStatus = RunStatus.CREATED
     plan: Plan | None = None
     events: list[Event] = field(default_factory=list)
@@ -93,7 +100,58 @@ class RunRecord:
     policy_snapshot: dict[str, Any] | None = None
     worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
     control_kernel: Any = field(default=None, repr=False)
+    register_telemetry_on_init: bool = field(
+        default=True,
+        repr=False,
+        compare=False,
+    )
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    telemetry: TraceRecorder = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.trace_id = self.trace_id or trace_id_for_run(self.id)
+        timeline: list[tuple[datetime, str]] = []
+        for timestamp in [
+            self.created_at,
+            self.finished_at,
+            *(event.at for event in self.events),
+        ]:
+            if not timestamp:
+                continue
+            try:
+                parsed = datetime.fromisoformat(
+                    str(timestamp).replace("Z", "+00:00")
+                )
+                if parsed.utcoffset() is None:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            timeline.append((parsed, str(timestamp)))
+        root_start_time = (
+            min(timeline, key=lambda item: item[0])[1]
+            if timeline
+            else self.created_at
+        )
+        terminal = self.status in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+        root_end_time = (
+            max(timeline, key=lambda item: item[0])[1]
+            if terminal and timeline
+            else None
+        )
+        self.telemetry = TraceRecorder(
+            trace_id=self.trace_id,
+            root_start_time=root_start_time,
+            root_end_time=root_end_time,
+        )
+        self.telemetry.replay_events(self.events)
+        if terminal:
+            self.telemetry.finish_root("error" if self.status == RunStatus.FAILED else "ok")
+        if self.register_telemetry_on_init:
+            register_trace_recorder(self.telemetry)
 
     def snapshot(self, *, include_internal: bool = False) -> dict[str, Any]:
         with self.lock:
@@ -104,6 +162,7 @@ class RunRecord:
                 duration_ms = round((datetime.fromisoformat(end.replace("Z", "+00:00")) - datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))).total_seconds() * 1000)
             snapshot = {
                 "id": self.id,
+                "trace_id": self.trace_id,
                 "request": {
                     "goal": self.request.goal,
                     "project_id": self.request.project_id,
@@ -179,6 +238,7 @@ class RunRecord:
                     "proposals": list(self.planning_proposals),
                     "deliberation": self.planning_deliberation,
                 },
+                "observability": self.telemetry.summary(),
                 "forecast": (
                     self.control_kernel.forecast(str(self.id))
                     if self.control_kernel is not None
@@ -1608,9 +1668,21 @@ class OrchestrationEngine:
         with record.lock:
             event = Event(utc_now(), kind, message, task_id, detail or {})
             record.events.append(event)
+            try:
+                record.telemetry.record_event(
+                    kind,
+                    task_id=task_id,
+                    occurred_at=event.at,
+                    attributes=detail or {},
+                )
+            except Exception:
+                # Observability is deliberately non-blocking for the runtime.
+                pass
             kernel = record.control_kernel
             if kernel is not None:
                 kernel.record_runtime_event(record, event, source=f"engine.event.{kind}")
+            if kind in {"completed", "failed", "cancelled"}:
+                record.telemetry.finish_root("error" if kind == "failed" else "ok")
 
     def _resource_availability(
         self,
@@ -1712,12 +1784,22 @@ class RunManager:
             record = RunRecord(id=run_id, request=request, retry_of=retry_of)
             replayed = False
         with self.lock:
-            if replayed and record.id in self.records:
-                return self.records[record.id]
-            self.records[record.id] = record
-        if not replayed and record.status == RunStatus.CREATED:
-            self._start(record, resume=False)
-        return record
+            # The first record admitted by this manager is authoritative even
+            # when concurrent create calls reach the lock in replay order.
+            # Selecting that object and publishing its recorder must be one
+            # operation; otherwise a losing hydrated record can own the global
+            # trace registry while ``records`` points at a different object.
+            authoritative = self.records.get(record.id)
+            if authoritative is None:
+                authoritative = record
+                self.records[record.id] = authoritative
+            register_trace_recorder(authoritative.telemetry)
+            should_start = (
+                not replayed and authoritative.status == RunStatus.CREATED
+            )
+        if should_start:
+            self._start(authoritative, resume=False)
+        return authoritative
 
     def _start(self, record: RunRecord, *, resume: bool) -> None:
         with self.lock:
@@ -1827,6 +1909,13 @@ class RunManager:
             after_revision=after_revision,
             limit=limit,
         )
+
+    def trace(self, run_id: str) -> dict[str, Any] | None:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        with record.lock:
+            return record.telemetry.export()
 
     def health(self) -> dict[str, Any]:
         if self.control_kernel is None:
@@ -2086,3 +2175,6 @@ class RunManager:
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
+        with self.lock:
+            for record in self.records.values():
+                unregister_trace_recorder(record.trace_id or trace_id_for_run(record.id))

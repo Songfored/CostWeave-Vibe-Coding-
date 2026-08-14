@@ -508,21 +508,51 @@ CostWeave 鍙湁鍦ㄤ互涓嬩簨瀹炲悓鏃舵垚绔嬪悗锛屾墠鍙�
 1. 瀵圭収鍩虹嚎銆佷换鍔￠泦鍜岄獙鏀舵爣鍑嗗叕寮€涓斿浐瀹氾紱
 2. 鏁版嵁鏉ヨ嚜鐪熷疄妯″瀷鍜岀湡瀹炶处鍗曪紝骞朵笌妯℃嫙鏁版嵁涓ユ牸鍖哄垎锛?3. 缁撴灉缁忚繃鐙珛楠屾敹锛岃缁冨拰娴嬭瘯娌℃湁椤圭洰绾ф硠婕忥紱
 4. 鎴愬姛鐜囥€佹垚鏈拰鏃跺欢棰勬祴瀹屾垚鏍″噯锛?5. 鏂扮瓥鐣ュ厛閫氳繃鍥炴斁鍜?Shadow锛屽啀杩涜浣庨闄?Canary锛?6. 楂橀闄╀换鍔℃帰绱㈢巼涓?0锛?7. 鍦ㄦ垚鍔熺巼闈炲姡鐨勫墠鎻愪笅锛孋PS 鏀瑰杽鍏锋湁缁熻缃俊锛?8. 鎵€鏈夌瓥鐣ュ彲浠ヨВ閲娿€侀噸鏀俱€佸喕缁撳拰鍥炴粴锛?9. 澶辫触鏁版嵁涓庢垚鍔熸暟鎹悓绛夎繘鍏ユ姤鍛婏紱
-10. 浠讳綍鈥滀笘鐣岄《灏栤€濇垨鍥哄畾闄嶆湰姣斾緥閮芥潵鑷彲閲嶅姣旇緝锛岃€屼笉鏄璁℃帹鏂€?# v0.6.0 implementation status
+10. Any "world-leading" claim or fixed cost-reduction ratio must come from a
+    reproducible comparison, not from design inference.
 
-The frozen baseline is `v0.5.8.4`; the current development line is `v0.6.0`. The initial Decision Intelligence contracts, migration 030, benchmark seed, importers, blind policies, metrics, statistics, claim gates, tournament runner, CLI, API, and UI slice are implemented. Real-provider integration and commercial claims remain deliberately out of scope.
-# Current active line: v0.6.6 (V066-WP04 Local Endpoint Capacity Admission)
+The frozen baseline is `v0.5.8.4`. The v0.6.0 Decision Intelligence contracts,
+migration 030, benchmark seed, importers, blind policies, metrics, statistics,
+claim gates, tournament runner, CLI, API and UI slice are historical lab work.
+Real-provider effects and commercial claims remain deliberately unverified.
+# Current active line: v0.6.6 (V066-WP05 Local Observability)
 
-The next safe-learning increment is deliberately offline first. Before any
-real Shadow or Canary, collect independently validated E2+ traces with
-logging propensities, delayed-label status, cost ledger and Validator
-independence. A candidate must pass blind evaluation, support and quality
-guardrails and retain a rollback pointer. The current implementation cannot
-train or alter a live route.
+`v0.5.8.4` remains the frozen stable engineering baseline. V066-WP04 added an
+E0 local Ollama/vLLM-style OpenAI-compatible boundary with network and capacity
+admission disabled by default. Real metrics scraping, GPU capacity, production
+concurrency, Shadow traffic and commercial effects remain unverified.
 
-V066-WP04 adds an E0 local Ollama/vLLM-style OpenAI-compatible boundary. Both
- network and capacity admission remain default-off. A caller must inject a
- fresh, complete capacity snapshot; missing, stale, invalid or over-capacity
- telemetry is rejected before transport. Real metrics scraping, GPU capacity,
- production concurrency and Shadow remain future work.
+## V066-WP05 final engineering verification (2026-08-14)
 
+WP05 introduces a stable per-run Trace ID, propagation through projections and
+durable events, bounded local Goal/Plan/Task/Provider Call/Validation/Recovery
+spans, a read-only trace endpoint and an offline OTLP-shaped serialization.
+External exporter delivery remains unsupported and disabled.
+
+The corrected implementation passed the WP05 focused/adversarial suite 25/25,
+the compatibility subset 94/94, the affected combination 147/147, the ordinary
+full suite 995/995 and the process-isolated full suite 995/995. The
+`fixed-final` wheel passed 16/16 release-readiness gates with zero external
+calls.
+`engineering_ready=true`; `production_ready=false`.
+
+During final verification, the ordinary full suite twice exposed an existing
+Windows `ConnectionAbortedError` in the tournament HTTP 415 path. The server
+returned 415 before reliably consuming the request body, which could cause a
+TCP reset. The path now performs a bounded 100 ms body drain and passed a
+20-consecutive-request regression plus both final full suites.
+
+Recognized sensitive values are replaced by metadata-only markers containing
+kind, value type and optional length; no value digest or preview is retained.
+The recorder registry uses weak references rather than a fixed-capacity owner
+registry. Event-derived lifecycle spans can be reconstructed after restart,
+but provider-call spans remain in-memory only.
+
+Evidence remains E0. Collector interoperability, distributed propagation,
+production telemetry overhead, real provider quality, real cost reduction and
+commercial superiority are not established.
+
+The next planned package is **V066-WP06 Runtime Backend**: define
+submit/cancel/checkpoint/resume/events around the local runtime first, with
+third-party runtimes limited to adapters. WP05's E0 boundaries remain in force
+and must not be promoted into production claims by the next package.
