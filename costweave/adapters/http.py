@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
+import socket
+import ssl
 import time
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from ..evaluation_protocol import canonical_json
@@ -25,8 +28,12 @@ from ..experimental_calls import (
     ExternalCallsDisabledError,
 )
 from ..planning_contracts import ResultEnvelope, WorkOrder
+from ..external_call_authority import (
+    ExternalCallAuthorityError,
+    ExternalCallAuthorityV1,
+    ExternalTransportCapabilityV1,
+)
 from ..security_boundary import (
-    DEFAULT_ADAPTER_REGISTRY,
     DEFAULT_DATA_RESIDENCY,
     DEFAULT_PROJECT_ID,
     MAX_RESPONSE_BYTES,
@@ -35,15 +42,12 @@ from ..security_boundary import (
     SecretLease,
     SecretLeaseError,
     SecretReference,
-    assess_prompt_security,
     normalize_data_residency,
     normalize_project_id,
-    require_prompt_admission,
     redact_text,
     validate_endpoint,
     validate_remote_resolution,
 )
-from ..security_store import SecurityStore
 
 
 HTTP_ADAPTER_SCHEMA_VERSION = "v0.5.8.2"
@@ -218,14 +222,110 @@ class HTTPTransport(Protocol):
         ...
 
 
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a pre-approved IP while preserving TLS hostname checks."""
+
+    def __init__(
+        self,
+        hostname: str,
+        port: int,
+        approved_addresses: tuple[str, ...],
+        *,
+        timeout: float,
+        context: ssl.SSLContext,
+    ) -> None:
+        super().__init__(hostname, port, timeout=timeout, context=context)
+        self._approved_addresses = frozenset(approved_addresses)
+        self._pinned_context = context
+
+    def connect(self) -> None:
+        last_error: OSError | None = None
+        for address in sorted(self._approved_addresses):
+            raw_socket = None
+            try:
+                raw_socket = socket.create_connection(
+                    (address, self.port), timeout=self.timeout
+                )
+                wrapped = self._pinned_context.wrap_socket(
+                    raw_socket, server_hostname=self.host
+                )
+                peer = str(wrapped.getpeername()[0]).split("%", 1)[0]
+                if peer not in self._approved_addresses:
+                    wrapped.close()
+                    raise OSError("connected peer is outside the approved DNS set")
+                self.sock = wrapped
+                return
+            except OSError as error:
+                last_error = error
+                if raw_socket is not None:
+                    try:
+                        raw_socket.close()
+                    except OSError:
+                        pass
+        raise OSError("no approved remote address could be connected") from last_error
+
+
 class UrllibHTTPTransport:
     """Minimal synchronous transport; never used without policy admission."""
 
     evidence_level = REAL_UNVALIDATED_EVIDENCE
 
+    def __init__(
+        self,
+        *,
+        resolver: Callable[..., list[tuple[Any, ...]]] = socket.getaddrinfo,
+        ssl_context_factory: Callable[[], ssl.SSLContext] = ssl.create_default_context,
+        pinned_connection_class: type[_PinnedHTTPSConnection] = _PinnedHTTPSConnection,
+    ) -> None:
+        self._resolver = resolver
+        self._ssl_context_factory = ssl_context_factory
+        self._pinned_connection_class = pinned_connection_class
+
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
+
+    def _post_remote_pinned(
+        self,
+        *,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes,
+        timeout_seconds: float,
+    ) -> HTTPResponse:
+        parsed = urlparse(url)
+        addresses = validate_remote_resolution(url, resolver=self._resolver)
+        connection = self._pinned_connection_class(
+            str(parsed.hostname),
+            int(parsed.port or 443),
+            addresses,
+            timeout=timeout_seconds,
+            context=self._ssl_context_factory(),
+        )
+        started = time.monotonic()
+        try:
+            connection.request(
+                "POST",
+                parsed.path or "/",
+                body=body,
+                headers=dict(headers),
+            )
+            response = connection.getresponse()
+            payload = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(payload) > MAX_RESPONSE_BYTES:
+                raise AdapterTransportError("response_too_large")
+            return HTTPResponse(
+                status_code=int(response.status),
+                body=payload,
+                headers=dict(response.getheaders()),
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+            )
+        except AdapterTransportError:
+            raise
+        except Exception as error:
+            raise AdapterTransportError("transport_error") from error
+        finally:
+            connection.close()
 
     def post(
         self,
@@ -239,7 +339,12 @@ class UrllibHTTPTransport:
         if hostname in {"127.0.0.1", "localhost", "::1"}:
             validate_endpoint(url, deployment="local")
         else:
-            validate_remote_resolution(url)
+            return self._post_remote_pinned(
+                url=url,
+                headers=headers,
+                body=body,
+                timeout_seconds=timeout_seconds,
+            )
         request = urllib.request.Request(
             url,
             data=body,
@@ -351,6 +456,8 @@ class ExternalCallReceipt:
 def _safe_error_code(error: BaseException) -> str:
     if isinstance(error, AdapterTransportError):
         return "transport_error"
+    if isinstance(error, SecretLeaseError):
+        return "secret_exposure_detected"
     if isinstance(error, json.JSONDecodeError):
         return "invalid_json"
     if isinstance(error, ExperimentalCallError):
@@ -383,8 +490,15 @@ class BaseExperimentalHTTPAdapter(ABC):
         self.store = store
         self.policy = policy or AdapterRuntimePolicy.from_environment()
         self.transport = transport or UrllibHTTPTransport()
-        self.secret_broker = secret_broker or SecretBroker()
-        self.security_store = SecurityStore(store.path)
+        self.authority = ExternalCallAuthorityV1(
+            store,
+            secret_broker=secret_broker,
+        )
+        # Compatibility aliases remain read-only ownership references; all
+        # external lifecycle mutations go through ``self.authority``.
+        self.secret_broker = self.authority.secret_broker
+        self.security_store = self.authority.security_store
+        self.approval_store = self.authority.approval_store
 
     @abstractmethod
     def build_payload(
@@ -401,47 +515,28 @@ class BaseExperimentalHTTPAdapter(ABC):
     def _admit(
         self, request: ExternalExecutionRequest
     ) -> tuple[SecretLease | None, Mapping[str, Any], AdapterPluginManifest]:
-        if not self.policy.experimental_calls_enabled:
-            raise ExternalCallsDisabledError(
-                "experimental adapters are disabled"
-            )
-        if self.config.paid and not self.policy.paid_calls_enabled:
-            raise ExternalCallsDisabledError("paid calls are disabled")
-        if request.work_order.allowed_tools:
-            raise ExperimentalCallError(
-                "v0.5.8.2 HTTP adapters are text-only and tool-free"
-            )
-        if request.work_order.cost_limit < 0:
-            raise ExperimentalCallError("WorkOrder cost limit is invalid")
-        project = self.security_store.ensure_project_active(request.project_id)
-        normalize_data_residency(request.data_residency)
-        manifest = DEFAULT_ADAPTER_REGISTRY.require(
-            self.PLUGIN_ID,
+        admission = self.authority.admit(
+            plugin_id=self.PLUGIN_ID,
+            adapter_id=self.config.adapter_id,
             adapter_revision=self.config.adapter_revision,
             deployment=self.config.deployment,
-            secret_required=bool(self.config.secret_env),
+            endpoint=self.config.endpoint,
+            secret_env=self.config.secret_env,
+            paid=self.config.paid,
+            experimental_calls_enabled=self.policy.experimental_calls_enabled,
+            paid_calls_enabled=self.policy.paid_calls_enabled,
+            project_id=request.project_id,
+            data_residency=request.data_residency,
+            run_id=request.run_id,
+            task_id=request.task_id,
+            work_order=request.work_order,
+            security_approval_id=request.security_approval_id,
         )
-        validate_endpoint(self.config.endpoint, deployment=self.config.deployment)
-        assessment = assess_prompt_security(
-            request.work_order.objective,
-            *request.work_order.assumptions,
+        return (
+            admission.secret_lease,
+            admission.prompt_security,
+            admission.manifest,
         )
-        require_prompt_admission(
-            assessment,
-            approval_id=request.security_approval_id,
-        )
-        secret_lease = None
-        if self.config.secret_env:
-            try:
-                secret_lease = self.secret_broker.lease(
-                    adapter_id=self.config.adapter_id,
-                    reference=SecretReference(self.config.secret_env),
-                )
-            except SecretLeaseError as error:
-                raise ExternalCallsDisabledError(
-                    "adapter secret is unavailable"
-                ) from error
-        return secret_lease, assessment.to_dict(), manifest
 
     def _headers(
         self,
@@ -451,7 +546,7 @@ class BaseExperimentalHTTPAdapter(ABC):
     ) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "CostWeave/0.5.8.2-experimental",
+            "User-Agent": "CostWeave/0.6.7-experimental",
             "Idempotency-Key": idempotency_key,
         }
         if secret_lease is not None:
@@ -522,6 +617,66 @@ class BaseExperimentalHTTPAdapter(ABC):
             if secret_lease is not None:
                 secret_lease.close()
 
+    def _replay_completed_side_effect(
+        self,
+        *,
+        reservation: Any,
+        side_effect_id: str,
+    ) -> ExternalCallReceipt | None:
+        state = self.security_store.side_effect(side_effect_id) or {}
+        completed = next(
+            (
+                item
+                for item in reversed(state.get("events", []))
+                if item.get("status") == "completed"
+            ),
+            None,
+        )
+        if completed is None:
+            return None
+        source_call_id = str(completed.get("detail", {}).get("external_call_id") or "")
+        source_call = self.store.call(source_call_id) if source_call_id else None
+        source_result = source_call.get("result") if source_call is not None else None
+        if not isinstance(source_result, Mapping):
+            return None
+        prior = ExternalCallReceipt.from_dict(source_result, replayed=True)
+        replayed_result = ResultEnvelope(
+            work_order_id=prior.result.work_order_id,
+            status=prior.result.status,
+            output=prior.result.output,
+            evidence=prior.result.evidence,
+            acceptance_results=prior.result.acceptance_results,
+            assumptions_used=prior.result.assumptions_used,
+            unresolved_risks=prior.result.unresolved_risks,
+            actual_cost=0.0,
+            actual_latency_ms=0,
+            confidence=prior.result.confidence,
+            escalation_requested=prior.result.escalation_requested,
+            escalation_reason=prior.result.escalation_reason,
+            schema_version=prior.result.schema_version,
+        )
+        telemetry = {
+            **dict(prior.telemetry),
+            "external_call_id": reservation.external_call_id,
+            "actual_cost_usd": 0.0,
+            "attempt_count": 0,
+            "global_side_effect_replayed": True,
+            "replay_source_external_call_id": source_call_id,
+        }
+        receipt = ExternalCallReceipt(
+            external_call_id=reservation.external_call_id,
+            result=replayed_result,
+            telemetry=telemetry,
+            replayed=True,
+        )
+        self.store.finalize(
+            reservation.external_call_id,
+            status="completed",
+            result=receipt.to_dict(),
+            telemetry=telemetry,
+        )
+        return receipt
+
     def _execute_admitted(
         self,
         request: ExternalExecutionRequest,
@@ -564,21 +719,32 @@ class BaseExperimentalHTTPAdapter(ABC):
             "max_output_tokens": request.max_output_tokens,
             "payload_hash": hashlib.sha256(payload_raw).hexdigest(),
         }
-        reservation = self.store.reserve(
-            experiment_id=request.experiment_id,
-            run_id=request.run_id,
-            task_id=request.task_id,
-            deployment_id=self.config.deployment_id,
-            provider=self.config.provider,
-            model_id=self.config.model_id,
-            adapter_revision=self.config.adapter_revision,
-            reasoning_effort=self.config.reasoning_effort,
-            idempotency_key=request.idempotency_key,
-            request_fingerprint=fingerprint,
-            worst_case_cost_per_attempt_usd=worst_per_attempt,
+        payload_hash = hashlib.sha256(payload_raw).hexdigest()
+        authority_reservation = self.authority.reserve(
+            logical_values={
+                "experiment_id": request.experiment_id,
+                "run_id": request.run_id,
+                "task_id": request.task_id,
+                "deployment_id": self.config.deployment_id,
+                "provider": self.config.provider,
+                "model_id": self.config.model_id,
+                "adapter_revision": self.config.adapter_revision,
+                "reasoning_effort": self.config.reasoning_effort,
+                "idempotency_key": request.idempotency_key,
+                "request_fingerprint": fingerprint,
+                "worst_case_cost_per_attempt_usd": worst_per_attempt,
+                "max_attempts": self.config.max_retries + 1,
+            },
+            project_id=request.project_id,
+            adapter_id=self.config.adapter_id,
+            endpoint=self.config.endpoint,
+            operation="model_inference",
+            provider_idempotency_key=provider_idempotency_key,
+            request_hash=payload_hash,
             max_attempts=self.config.max_retries + 1,
         )
-        if reservation.replayed:
+        reservation = authority_reservation.logical
+        if authority_reservation.mode == "logical_replay":
             if reservation.status == "completed" and reservation.result:
                 return ExternalCallReceipt.from_dict(
                     reservation.result, replayed=True
@@ -591,16 +757,33 @@ class BaseExperimentalHTTPAdapter(ABC):
                 f"logical external call already ended: {reservation.error_code}"
             )
 
-        side_effect, _ = self.security_store.reserve_side_effect(
-            project_id=request.project_id,
-            adapter_id=self.config.adapter_id,
-            operation="model_inference",
-            idempotency_key=provider_idempotency_key,
-            request_hash=hashlib.sha256(payload_raw).hexdigest(),
-            provider_idempotency_key=provider_idempotency_key,
-            compensation_strategy="not_required_idempotent",
-        )
-        side_effect_id = str(side_effect["side_effect_id"])
+        side_effect_id = str(authority_reservation.side_effect_id)
+        if authority_reservation.mode == "global_side_effect_replay":
+            replay = self._replay_completed_side_effect(
+                reservation=reservation,
+                side_effect_id=side_effect_id,
+            )
+            if replay is not None:
+                return replay
+            self.store.finalize(
+                reservation.external_call_id,
+                status="failed",
+                result=None,
+                telemetry={
+                    "global_side_effect_replayed": True,
+                    "transport_called": False,
+                    "actual_cost_usd": 0.0,
+                },
+                error_code="global_side_effect_replay_blocked",
+            )
+            raise ExternalCallInProgressError(
+                "global external side effect is reserved, failed or ambiguous"
+            )
+        capability = authority_reservation.capability
+        if not isinstance(capability, ExternalTransportCapabilityV1):
+            raise ExternalCallAuthorityError(
+                "transport authorization did not issue a capability"
+            )
 
         attempts: list[ExternalAttempt] = []
         billing_sources: list[str] = []
@@ -614,15 +797,29 @@ class BaseExperimentalHTTPAdapter(ABC):
         result: ResultEnvelope | None = None
         last_error = "external_call_failed"
         for ordinal in range(1, self.config.max_retries + 2):
+            transport_called = False
             try:
+                request_headers = self._headers(
+                    secret_lease,
+                    idempotency_key=provider_idempotency_key,
+                )
+                self.authority.consume_for_transport(
+                    capability,
+                    ordinal=ordinal,
+                    endpoint=self.config.endpoint,
+                    request_body=payload_raw,
+                )
+                transport_called = True
                 response = self.transport.post(
                     url=self.config.endpoint,
-                    headers=self._headers(
-                        secret_lease,
-                        idempotency_key=provider_idempotency_key,
-                    ),
+                    headers=request_headers,
                     body=payload_raw,
                     timeout_seconds=self.config.timeout_seconds,
+                )
+                self.authority.guard_response(
+                    capability,
+                    secret_lease=secret_lease,
+                    response_body=response.body,
                 )
                 queue_ms = 0
                 for key, value in response.headers.items():
@@ -644,6 +841,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                         status_code=response.status_code,
                         request_latency_ms=response.elapsed_ms,
                         queue_latency_ms=queue_ms,
+                        actual_cost_usd=worst_per_attempt,
                         rate_limited=True,
                         error_code=last_error,
                         response_hash=response_hash,
@@ -663,6 +861,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                         status_code=response.status_code,
                         request_latency_ms=response.elapsed_ms,
                         queue_latency_ms=queue_ms,
+                        actual_cost_usd=worst_per_attempt,
                         error_code=last_error,
                         response_hash=response_hash,
                     )
@@ -739,15 +938,16 @@ class BaseExperimentalHTTPAdapter(ABC):
                 attempt = ExternalAttempt(
                     ordinal=ordinal,
                     status="failed",
+                    actual_cost_usd=(worst_per_attempt if transport_called else 0.0),
                     error_code=last_error,
                 )
                 self.store.record_attempt(
                     reservation.external_call_id, attempt
                 )
                 attempts.append(attempt)
-                if isinstance(error, AdapterTransportError):
-                    self.security_store.record_side_effect_event(
-                        side_effect_id,
+                if transport_called:
+                    self.authority.record_side_effect(
+                        capability,
                         status="ambiguous",
                         detail={
                             "transport_called": True,
@@ -800,6 +1000,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             "adapter_plugin_id": manifest.plugin_id,
             "prompt_security": dict(prompt_assessment),
             "side_effect_id": side_effect_id,
+            "external_call_authority": "v0.6.7",
+            "one_shot_transport_capability": True,
             "provider_idempotency_forwarded": True,
             "secret_lease_version": (
                 secret_lease.version if secret_lease is not None else None
@@ -812,8 +1014,8 @@ class BaseExperimentalHTTPAdapter(ABC):
                 item.get("status") == "ambiguous"
                 for item in current.get("events", [])
             ):
-                self.security_store.record_side_effect_event(
-                    side_effect_id,
+                self.authority.record_side_effect(
+                    capability,
                     status="failed",
                     detail={"error_code": last_error},
                 )
@@ -824,6 +1026,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                 telemetry=telemetry,
                 error_code=last_error,
             )
+            self.authority.close_capability(capability)
             raise ExperimentalCallError(
                 f"external call failed: {last_error}"
             )
@@ -838,14 +1041,15 @@ class BaseExperimentalHTTPAdapter(ABC):
             result=receipt.to_dict(),
             telemetry=telemetry,
         )
-        self.security_store.record_side_effect_event(
-            side_effect_id,
+        self.authority.record_side_effect(
+            capability,
             status="completed",
             detail={
                 "external_call_id": reservation.external_call_id,
                 "transport_called": True,
             },
         )
+        self.authority.close_capability(capability)
         return receipt
 
 

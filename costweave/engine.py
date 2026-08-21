@@ -1950,7 +1950,11 @@ class RunManager:
         )
 
     def get(
-        self, run_id: str, *, project_id: str | None = None
+        self,
+        run_id: str,
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> RunRecord | None:
         with self.lock:
             record = self.records.get(run_id)
@@ -1961,13 +1965,24 @@ class RunManager:
         project = normalize_project_id(project_id)
         if record.request.project_id != project:
             return None
+        if data_residency is not None:
+            from .security_boundary import normalize_data_residency
+
+            residency = normalize_data_residency(data_residency)
+            if record.request.data_residency != residency:
+                return None
         if self.control_kernel is not None:
             status = self.control_kernel.project_status(project)
             if status["logical_access_revoked"]:
                 return None
         return record
 
-    def list(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
+    def list(
+        self,
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
+    ) -> list[dict[str, Any]]:
         with self.lock:
             records = list(self.records.values())
         if project_id is not None:
@@ -1985,6 +2000,15 @@ class RunManager:
                 record
                 for record in records
                 if record.request.project_id == project
+            ]
+        if data_residency is not None:
+            from .security_boundary import normalize_data_residency
+
+            residency = normalize_data_residency(data_residency)
+            records = [
+                record
+                for record in records
+                if record.request.data_residency == residency
             ]
         return [record.snapshot() for record in reversed(records[-20:])]
 

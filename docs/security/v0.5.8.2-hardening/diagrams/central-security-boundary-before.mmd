@@ -1,8 +1,0 @@
-flowchart LR
-  U["Local API caller"] --> S["HTTP server"]
-  S --> R["Global RunManager data"]
-  S --> X["Evidence export local redactor"]
-  W["WorkOrder with untrusted objective"] --> A["HTTP Adapter"]
-  A --> E["Ambient environment secret"]
-  A --> N["Outbound network"]
-  A --> C["External-call reservation"]

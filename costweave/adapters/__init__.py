@@ -1,4 +1,4 @@
-"""Provider adapters and the v0.6.6 provider-neutral gateway contracts."""
+"""Provider adapters and the v0.6.7 secured provider-neutral gateway contracts."""
 
 from .base import AdapterCapabilities, ProviderAdapter
 from .mock import MockProvider, MockScenario

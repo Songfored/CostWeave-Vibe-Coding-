@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import math
 import mimetypes
 import posixpath
+import secrets
 import socket
+import threading
 from dataclasses import fields
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
@@ -85,6 +91,7 @@ from .evidence_console_store import EvidenceConsoleStoreError
 from .security_boundary import (
     DEFAULT_DATA_RESIDENCY,
     DEFAULT_PROJECT_ID,
+    RequestSecurityContextV1,
     normalize_data_residency,
     normalize_project_id,
     public_security_policy,
@@ -137,6 +144,47 @@ from .small_budget_shadow import (
 
 MANAGER: RunManager | None = None
 WEB_ROOT = files("costweave").joinpath("web")
+LOCAL_SESSION_HEADER = "X-CostWeave-Session"
+DEFAULT_MAX_ACTIVE_REQUESTS = 32
+
+
+def resolve_static_target(
+    request_path: str,
+    *,
+    web_root: object = WEB_ROOT,
+) -> tuple[Path, str]:
+    """Resolve a public asset while proving final containment on every OS."""
+
+    decoded = unquote(str(request_path), errors="strict")
+    if (
+        not decoded.startswith("/")
+        or "\x00" in decoded
+        or "\\" in decoded
+        or decoded.startswith("//")
+    ):
+        raise ValueError("invalid static path")
+    relative = decoded.lstrip("/")
+    windows_path = PureWindowsPath(relative)
+    posix_path = PurePosixPath(relative)
+    if windows_path.drive or ".." in posix_path.parts:
+        raise ValueError("invalid static path")
+    clean = posixpath.normpath(relative)
+    if clean in {"", "."}:
+        clean = "index.html"
+    if clean.startswith("../") or clean == "..":
+        raise ValueError("invalid static path")
+
+    root = Path(str(web_root)).resolve(strict=True)
+    target = (root / clean).resolve(strict=False)
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise ValueError("static path escaped the web root") from error
+    if not target.is_file():
+        target = (root / "index.html").resolve(strict=True)
+        target.relative_to(root)
+        clean = "index.html"
+    return target, clean
 
 
 class RequestError(ValueError):
@@ -151,6 +199,81 @@ class CostWeaveServer(ThreadingHTTPServer):
     block_on_close = False
     request_queue_size = 64
 
+    def __init__(
+        self,
+        server_address,
+        request_handler_class,
+        *,
+        max_active_requests: int = DEFAULT_MAX_ACTIVE_REQUESTS,
+        bind_and_activate: bool = True,
+    ) -> None:
+        if isinstance(max_active_requests, bool) or not 1 <= int(max_active_requests) <= 256:
+            raise ValueError("max_active_requests must be between 1 and 256")
+        self.max_active_requests = int(max_active_requests)
+        self._request_slots = threading.BoundedSemaphore(self.max_active_requests)
+        self._request_count_lock = threading.Lock()
+        self._active_requests = 0
+        self._rejected_requests = 0
+        super().__init__(
+            server_address,
+            request_handler_class,
+            bind_and_activate=bind_and_activate,
+        )
+
+    def process_request(self, request, client_address) -> None:
+        if not self._request_slots.acquire(blocking=False):
+            with self._request_count_lock:
+                self._rejected_requests += 1
+            try:
+                body = b'{"error":"server_busy"}'
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Content-Type: application/json; charset=utf-8\r\n"
+                    b"Cache-Control: no-store\r\n"
+                    b"Connection: close\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+                    + body
+                )
+                # Windows may discard the response with an RST when a socket
+                # is closed while the client's request bytes remain unread.
+                # Drain only bytes that are already available; never let an
+                # overload response consume another worker or block intake.
+                request.settimeout(0.02)
+                while request.recv(4096):
+                    pass
+            except (TimeoutError, socket.timeout):
+                pass
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        with self._request_count_lock:
+            self._active_requests += 1
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            with self._request_count_lock:
+                self._active_requests -= 1
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._request_count_lock:
+                self._active_requests -= 1
+            self._request_slots.release()
+
+    def request_capacity(self) -> dict[str, int]:
+        with self._request_count_lock:
+            return {
+                "active": self._active_requests,
+                "limit": self.max_active_requests,
+                "rejected": self._rejected_requests,
+            }
+
     def server_close(self) -> None:
         manager = getattr(self, "manager", None)
         if manager is not None:
@@ -159,12 +282,14 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.6.6"
+    server_version = "CostWeave/0.6.7"
 
     def setup(self) -> None:
         super().setup()
         self.connection.settimeout(10.0)
         self._legacy_api = False
+        self._request_security_context: RequestSecurityContextV1 | None = None
+        self._authorized_path: str | None = None
 
     @property
     def manager(self) -> RunManager:
@@ -210,22 +335,162 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         }
 
     def _project_id(self) -> str:
+        if self._request_security_context is not None:
+            return self._request_security_context.project_id
         return normalize_project_id(
             self.headers.get("X-CostWeave-Project", DEFAULT_PROJECT_ID)
         )
 
     def _data_residency(self) -> str:
+        if self._request_security_context is not None:
+            return self._request_security_context.data_residency
         return normalize_data_residency(
             self.headers.get(
                 "X-CostWeave-Data-Residency", DEFAULT_DATA_RESIDENCY
             )
         )
 
+    def _validate_request_headers(self, *, require_json: bool) -> None:
+        if require_json:
+            content_type = (
+                self.headers.get("Content-Type", "")
+                .split(";", 1)[0]
+                .strip()
+                .lower()
+            )
+            if content_type != "application/json":
+                raise RequestError(
+                    "Content-Type 必须是 application/json",
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_media_type",
+                )
+
+        raw_host = self.headers.get("Host", "").strip()
+        try:
+            parsed_host = urlparse("//" + raw_host)
+        except ValueError as error:
+            raise RequestError(
+                "invalid local Host header",
+                HTTPStatus.FORBIDDEN,
+                "host_forbidden",
+            ) from error
+        hostname = (parsed_host.hostname or "").rstrip(".").lower()
+        if (
+            not raw_host
+            or parsed_host.username is not None
+            or parsed_host.password is not None
+            or hostname not in {"127.0.0.1", "localhost", "::1"}
+        ):
+            raise RequestError(
+                "invalid local Host header",
+                HTTPStatus.FORBIDDEN,
+                "host_forbidden",
+            )
+
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed_origin = urlparse(origin)
+            origin_host = (parsed_origin.hostname or "").rstrip(".").lower()
+            if (
+                parsed_origin.scheme not in {"http", "https"}
+                or origin_host not in {"127.0.0.1", "localhost", "::1"}
+            ):
+                raise RequestError(
+                    "只允许本地页面发起请求",
+                    HTTPStatus.FORBIDDEN,
+                    "cross_origin_forbidden",
+                )
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            raise RequestError(
+                "cross-site requests are forbidden",
+                HTTPStatus.FORBIDDEN,
+                "cross_origin_forbidden",
+            )
+
+    def _session_token(self) -> str:
+        header_token = self.headers.get(LOCAL_SESSION_HEADER, "").strip()
+        authorization = self.headers.get("Authorization", "").strip()
+        bearer_token = (
+            authorization[7:].strip()
+            if authorization.lower().startswith("bearer ")
+            else ""
+        )
+        if header_token and bearer_token and not hmac.compare_digest(
+            header_token, bearer_token
+        ):
+            return ""
+        return header_token or bearer_token
+
+    @staticmethod
+    def _project_scope_required(path: str) -> bool:
+        if path in {
+            "/api/health",
+            "/api/v1/security/policy",
+            "/api/v1/system/diagnostics",
+            "/api/v1/release/status",
+            "/api/v1/resources",
+        }:
+            return False
+        return not path.startswith(("/api/catalog", "/api/v1/catalog"))
+
+    def _authorize_request(self, path: str, *, require_json: bool = False) -> None:
+        self._validate_request_headers(require_json=require_json)
+        self._authorized_path = path
+        self._request_security_context = None
+        if not path.startswith("/api/"):
+            return
+        supplied = self._session_token()
+        expected = str(getattr(self.server, "session_token", ""))
+        if not supplied or not expected or not hmac.compare_digest(supplied, expected):
+            raise RequestError(
+                "a valid local session token is required",
+                HTTPStatus.UNAUTHORIZED,
+                "session_auth_required",
+            )
+        project = normalize_project_id(
+            self.headers.get("X-CostWeave-Project", DEFAULT_PROJECT_ID)
+        )
+        residency = normalize_data_residency(
+            self.headers.get(
+                "X-CostWeave-Data-Residency", DEFAULT_DATA_RESIDENCY
+            )
+        )
+        revocation_request = (
+            path.startswith("/api/v1/projects/") and path.endswith("/revoke")
+        )
+        if self._project_scope_required(path) and not revocation_request:
+            kernel = self.manager.control_kernel
+            if kernel is not None:
+                try:
+                    kernel.security_store.ensure_project_active(project)
+                except ProjectRevokedError as error:
+                    raise RequestError(
+                        "project access has been revoked",
+                        HTTPStatus.FORBIDDEN,
+                        "project_revoked",
+                    ) from error
+        raw_request_id = self.headers.get("X-CostWeave-Request-ID", "").strip()
+        request_id = raw_request_id or "http_" + secrets.token_hex(16)
+        self._request_security_context = RequestSecurityContextV1(
+            principal_id=str(getattr(self.server, "session_principal", "local-session")),
+            project_id=project,
+            data_residency=residency,
+            operation_scope=f"{self.command}:{path}",
+            request_id=request_id,
+        )
+
     def _get_run(self, run_id: str):
-        return self.manager.get(run_id, project_id=self._project_id())
+        return self.manager.get(
+            run_id,
+            project_id=self._project_id(),
+            data_residency=self._data_residency(),
+        )
 
     def _shot_visible(self, shot_id: str) -> bool:
-        for run in self.manager.list(project_id=self._project_id()):
+        for run in self.manager.list(
+            project_id=self._project_id(),
+            data_residency=self._data_residency(),
+        ):
             if any(
                 str(item.get("shot_id")) == shot_id
                 for item in self.manager.media_shots(str(run.get("id")))
@@ -234,17 +499,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = self._normalise_api_path(parsed.path)
         try:
-            self._project_id()
-            self._data_residency()
+            self._authorize_request(path)
+        except RequestError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+            return
         except ValueError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
             self._json(
                 {"error": "invalid_project_scope", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
             return
-        parsed = urlparse(self.path)
-        path = self._normalise_api_path(parsed.path)
         if path == "/api/health":
             runtime_health = self.manager.health()
             adapter_policy = AdapterRuntimePolicy.from_environment()
@@ -257,14 +526,14 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
                 # Keep the released v0.5.8.4 compatibility label while
-                # Expose the active v0.6.6 development line explicitly.
+                # Expose the active v0.6.7 development line explicitly.
                 "version": "0.5.8.4",
                 "development_version": __version__,
                 "version_line": {
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.6",
-                    "active_work_package": "V066-WP07",
+                    "active_development": "v0.6.7",
+                    "active_work_package": "Security Foundation Recovery",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -322,6 +591,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "security_boundary": public_security_policy(
                     runtime_counts=dict(runtime_health.get("security") or {})
                 ),
+                "http_security": {
+                    "loopback_only": True,
+                    "local_session_required": True,
+                    "session_token_exposed_by_api": False,
+                    "request_capacity": self.server.request_capacity(),
+                },
                 **contracts,
                 "control_kernel": runtime_health,
                 "meta_controller": {
@@ -1058,7 +1333,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             })
             return
         if path in {"/api/runs", "/api/v1/runs"}:
-            self._json({"runs": self.manager.list(project_id=self._project_id())})
+            self._json({
+                "runs": self.manager.list(
+                    project_id=self._project_id(),
+                    data_residency=self._data_residency(),
+                )
+            })
             return
         if path == "/api/v1/resources/ledger":
             run_id = parse_qs(parsed.query).get("run_id", [None])[0]
@@ -1437,16 +1717,20 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        path = self._normalise_api_path(urlparse(self.path).path)
         try:
-            self._project_id()
-            self._data_residency()
+            self._authorize_request(path)
+        except RequestError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+            return
         except ValueError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
             self._json(
                 {"error": "invalid_project_scope", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
             return
-        path = self._normalise_api_path(urlparse(self.path).path)
         if path.startswith("/api/v1/projects/") and path.endswith("/revoke"):
             self._revoke_project(
                 unquote(
@@ -1575,6 +1859,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:  # noqa: N802
         path = self._normalise_api_path(urlparse(self.path).path)
+        try:
+            self._authorize_request(path)
+        except RequestError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+            return
+        except ValueError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json(
+                {"error": "invalid_project_scope", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         prefix = "/api/catalog/models/"
         if not path.startswith(prefix):
             self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -1607,6 +1904,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         parsed = parsed._replace(path=self._normalise_api_path(parsed.path))
+        try:
+            self._authorize_request(parsed.path)
+        except RequestError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+            return
+        except ValueError as exc:
+            self._drain_rejected_body(max_bytes=256_000)
+            self._json(
+                {"error": "invalid_project_scope", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         prefix = "/api/catalog/models/"
         if not parsed.path.startswith(prefix):
             self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -2489,44 +2799,16 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 connection.settimeout(previous_timeout)
 
     def _validate_write_headers(self, *, require_json: bool) -> None:
-        if require_json:
-            content_type = (
-                self.headers.get("Content-Type", "")
-                .split(";", 1)[0]
-                .strip()
-                .lower()
-            )
-            if content_type != "application/json":
+        self._validate_request_headers(require_json=require_json)
+        if self._authorized_path and self._authorized_path.startswith("/api/"):
+            expected = str(getattr(self.server, "session_token", ""))
+            supplied = self._session_token()
+            if not supplied or not hmac.compare_digest(supplied, expected):
                 raise RequestError(
-                    "Content-Type 必须是 application/json",
-                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-                    "unsupported_media_type",
+                    "a valid local session token is required",
+                    HTTPStatus.UNAUTHORIZED,
+                    "session_auth_required",
                 )
-        origin = self.headers.get("Origin")
-        if origin:
-            parsed = urlparse(origin)
-            if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
-                "127.0.0.1", "localhost", "::1",
-            }:
-                raise RequestError(
-                    "只允许本地页面发起写请求",
-                    HTTPStatus.FORBIDDEN,
-                    "cross_origin_forbidden",
-                )
-
-        if self.headers.get("Sec-Fetch-Site") == "cross-site":
-            raise RequestError(
-                "cross-site write requests are forbidden",
-                HTTPStatus.FORBIDDEN,
-                "cross_origin_forbidden",
-            )
-        host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
-        if host and host not in {"127.0.0.1", "localhost", "::1"}:
-            raise RequestError(
-                "invalid local Host header",
-                HTTPStatus.FORBIDDEN,
-                "host_forbidden",
-            )
 
     def _read_json(self, *, max_bytes: int = 64_000) -> object:
         if self.headers.get("Transfer-Encoding"):
@@ -2617,7 +2899,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self._security_headers()
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
+
+    def _write_body(self, body: bytes) -> None:
+        """Treat an early client disconnect as a completed local response."""
+
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
 
     def _text(self, text: str, content_type: str, filename: str) -> None:
         body = redact_text(text).encode("utf-8")
@@ -2631,7 +2921,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self._security_headers()
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def _create_runtime_backup(self) -> None:
         try:
@@ -2833,16 +3123,11 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             )
 
     def _static(self, request_path: str) -> None:
-        if "\\" in request_path or ".." in request_path.split("/"):
+        try:
+            target, clean = resolve_static_target(request_path)
+        except (OSError, UnicodeError, ValueError):
             self._json({"error": "invalid_path"}, HTTPStatus.BAD_REQUEST)
             return
-        clean = posixpath.normpath(request_path).lstrip("/") or "index.html"
-        if clean.startswith("..") or "/../" in clean:
-            self._json({"error": "invalid_path"}, HTTPStatus.BAD_REQUEST)
-            return
-        target = WEB_ROOT.joinpath(clean)
-        if not target.is_file():
-            target = WEB_ROOT.joinpath("index.html")
         data = target.read_bytes()
         mime, _ = mimetypes.guess_type(str(target))
         self.send_response(HTTPStatus.OK)
@@ -2857,7 +3142,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         )
         self._security_headers()
         self.end_headers()
-        self.wfile.write(data)
+        self._write_body(data)
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(
@@ -2875,13 +3160,31 @@ def build_server(
     catalog_store: CatalogStore | None = None,
     runtime_db_path: str | None = None,
     small_budget_shadow: SmallBudgetShadowRuntime | None = None,
-) -> ThreadingHTTPServer:
+    session_token: str | None = None,
+    max_active_requests: int = DEFAULT_MAX_ACTIVE_REQUESTS,
+) -> CostWeaveServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError(
             "离线原型仅允许绑定本机回环地址；公开监听需要先实现身份认证"
         )
     store = catalog_store or CATALOG_STORE
-    server = CostWeaveServer((host, port), CostWeaveHandler)
+    token = str(session_token or secrets.token_urlsafe(32))
+    if (
+        len(token.encode("utf-8")) < 32
+        or len(token) > 512
+        or any(char.isspace() for char in token)
+    ):
+        raise ValueError("local session token must contain at least 32 non-space bytes")
+    server = CostWeaveServer(
+        (host, port),
+        CostWeaveHandler,
+        max_active_requests=max_active_requests,
+    )
+    server.session_token = token  # type: ignore[attr-defined]
+    server.session_principal = (  # type: ignore[attr-defined]
+        "local-session:"
+        + hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+    )
     server.catalog_store = store  # type: ignore[attr-defined]
     if runtime_db_path is None and store is not CATALOG_STORE:
         runtime_db_path = str(store.path.with_name("runtime-v4.sqlite3"))
@@ -2902,13 +3205,18 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.5.8.4 stable engineering control plane"
+        description="Run the CostWeave v0.6.7 local security-recovery control plane"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     args = parser.parse_args()
     server = build_server(args.host, args.port)
-    print(f"CostWeave running at http://{args.host}:{args.port}")
+    display_host = "[::1]" if args.host == "::1" else args.host
+    print(
+        "CostWeave secure local session: "
+        f"http://{display_host}:{server.server_address[1]}/"
+        f"#session={server.session_token}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

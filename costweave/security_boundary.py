@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -13,13 +15,14 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterable, Mapping
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 SECURITY_SCHEMA_VERSION = "v0.5.8.2"
 SECURITY_POLICY_REVISION = "central-security-boundary-1"
 DEFAULT_PROJECT_ID = "local-default"
 DEFAULT_DATA_RESIDENCY = "local"
+SECURITY_PROMPT_APPROVAL_KIND = "security-prompt-admission"
 MAX_SECRET_BYTES = 8_192
 MAX_RESPONSE_BYTES = 4_000_000
 
@@ -126,6 +129,60 @@ def normalize_data_residency(value: str | None) -> str:
     if not _RESIDENCY_RE.fullmatch(residency):
         raise ProjectScopeError("data residency identifier is invalid")
     return residency
+
+
+@dataclass(frozen=True, slots=True)
+class RequestSecurityContextV1:
+    """Authenticated, immutable scope established before protected work."""
+
+    principal_id: str
+    project_id: str
+    data_residency: str
+    operation_scope: str
+    request_id: str
+    approval_scope: tuple[str, ...] = ()
+    project_owned: bool = True
+    project_active: bool = True
+    schema_version: str = SECURITY_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        principal = str(self.principal_id).strip()
+        request_id = str(self.request_id).strip()
+        operation = str(self.operation_scope).strip()
+        if not principal or len(principal) > 128 or any(ord(char) < 32 for char in principal):
+            raise ProjectScopeError("authenticated principal identity is invalid")
+        if not request_id or len(request_id) > 128 or any(ord(char) < 32 for char in request_id):
+            raise ProjectScopeError("request identity is invalid")
+        if not operation or len(operation) > 512 or any(ord(char) < 32 for char in operation):
+            raise ProjectScopeError("operation scope is invalid")
+        if not self.project_owned or not self.project_active:
+            raise ProjectScopeError("request security context is not authorized")
+        approvals = tuple(str(item).strip() for item in self.approval_scope)
+        if any(not item or len(item) > 128 for item in approvals):
+            raise ProjectScopeError("approval scope is invalid")
+        object.__setattr__(self, "principal_id", principal)
+        object.__setattr__(self, "project_id", normalize_project_id(self.project_id))
+        object.__setattr__(
+            self,
+            "data_residency",
+            normalize_data_residency(self.data_residency),
+        )
+        object.__setattr__(self, "operation_scope", operation)
+        object.__setattr__(self, "request_id", request_id)
+        object.__setattr__(self, "approval_scope", approvals)
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "principal_id": self.principal_id,
+            "project_id": self.project_id,
+            "data_residency": self.data_residency,
+            "operation_scope": self.operation_scope,
+            "request_id": self.request_id,
+            "approval_scope": list(self.approval_scope),
+            "project_owned": self.project_owned,
+            "project_active": self.project_active,
+            "schema_version": self.schema_version,
+        }
 
 
 def _sensitive_key(key: object) -> bool:
@@ -236,6 +293,7 @@ def require_prompt_admission(
     assessment: PromptSecurityAssessment,
     *,
     approval_id: str | None,
+    approval_validator: Callable[[str], bool] | None = None,
 ) -> None:
     if "secret_material" in assessment.markers:
         raise PromptInjectionError(
@@ -243,10 +301,55 @@ def require_prompt_admission(
         )
     if not assessment.approval_required:
         return
-    if not approval_id or not re.fullmatch(r"approval_[A-Za-z0-9._:-]{8,120}", approval_id):
+    if (
+        not approval_id
+        or not re.fullmatch(r"approval_[A-Za-z0-9._:-]{8,120}", approval_id)
+        or approval_validator is None
+    ):
         raise PromptInjectionError(
             "untrusted prompt override or exfiltration pattern requires a separate security approval"
         )
+    try:
+        approved = bool(approval_validator(approval_id))
+    except Exception:
+        approved = False
+    if not approved:
+        raise PromptInjectionError(
+            "prompt security approval is missing, unresolved or outside the admitted intent"
+        )
+
+
+def prompt_approval_binding(
+    assessment: PromptSecurityAssessment,
+    *,
+    project_id: str,
+    run_id: str,
+    task_id: str,
+    intent_fingerprint: str,
+) -> tuple[str, str]:
+    """Return a non-secret approval kind/reason bound to one prompt intent."""
+
+    identity = {
+        "project_id": normalize_project_id(project_id),
+        "run_id": str(run_id),
+        "task_id": str(task_id),
+        "intent_fingerprint": str(intent_fingerprint),
+        "risk": assessment.risk,
+        "markers": list(assessment.markers),
+        "schema_version": SECURITY_SCHEMA_VERSION,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return (
+        f"{SECURITY_PROMPT_APPROVAL_KIND}:{digest[:20]}",
+        f"security_prompt_intent:{digest}",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +411,47 @@ class SecretLease:
             self.close()
             raise SecretLeaseError("secret lease is closed or expired")
         return bytes(self._secret).decode("utf-8")
+
+    def _exposure_variants(self) -> tuple[bytes, ...]:
+        if self._closed:
+            raise SecretLeaseError("secret lease is closed")
+        raw = bytes(self._secret)
+        text = raw.decode("utf-8")
+        variants = {
+            raw,
+            base64.b64encode(raw),
+            base64.urlsafe_b64encode(raw),
+            quote(text, safe="").encode("ascii"),
+            json.dumps(text, ensure_ascii=False)[1:-1].encode("utf-8"),
+            json.dumps(text, ensure_ascii=True)[1:-1].encode("ascii"),
+        }
+        return tuple(
+            sorted((item for item in variants if item), key=len, reverse=True)
+        )
+
+    def reject_if_exposed(self, value: Any) -> None:
+        """Fail closed if provider-controlled output contains this lease value."""
+
+        if isinstance(value, bytes):
+            payload = value
+        elif isinstance(value, str):
+            payload = value.encode("utf-8")
+        else:
+            try:
+                payload = json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            except (TypeError, ValueError) as error:
+                raise SecretLeaseError(
+                    "provider response could not be checked for secret exposure"
+                ) from error
+        if any(variant in payload for variant in self._exposure_variants()):
+            raise SecretLeaseError(
+                "provider response contained current leased secret material"
+            )
 
     def public(self) -> dict[str, Any]:
         return {
@@ -546,16 +690,27 @@ def public_security_policy(
         "secret_values_persisted": False,
         "secret_values_publicly_exposed": False,
         "secret_rotation_observable_without_value": True,
+        "exact_active_secret_output_rejected": True,
+        "active_secret_encoding_variants_rejected": True,
         "shared_structural_redaction": True,
+        "request_security_context": "RequestSecurityContextV1",
+        "authenticated_project_selector_required": True,
         "project_scope_persisted": True,
+        "data_residency_enforced_on_run_reads": True,
         "cross_project_not_found_semantics": True,
         "logical_project_revocation_supported": True,
         "physical_project_erasure_supported": False,
         "prompt_untrusted_fields": ["objective", "assumptions"],
         "prompt_override_requires_separate_approval": True,
+        "prompt_approval_authoritative_and_intent_bound": True,
         "http_adapter_tool_capabilities": [],
+        "external_call_authority": "ExternalCallAuthorityV1",
+        "one_shot_transport_capability": True,
         "provider_idempotency_required": True,
+        "global_side_effect_replay_honored": True,
         "ambiguous_side_effect_auto_replay": False,
+        "ambiguous_cost_conservatively_frozen": True,
+        "remote_dns_addresses_pinned_to_tls_peer": True,
         "runtime_counts": dict(runtime_counts or {}),
     }
 
@@ -571,7 +726,9 @@ __all__ = [
     "PromptInjectionError",
     "PromptSecurityAssessment",
     "ProjectScopeError",
+    "RequestSecurityContextV1",
     "SECURITY_POLICY_REVISION",
+    "SECURITY_PROMPT_APPROVAL_KIND",
     "SECURITY_SCHEMA_VERSION",
     "SecretBroker",
     "SecretLease",
@@ -582,6 +739,7 @@ __all__ = [
     "contains_secret_material",
     "normalize_data_residency",
     "normalize_project_id",
+    "prompt_approval_binding",
     "public_security_policy",
     "redact_structure",
     "redact_text",

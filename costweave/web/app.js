@@ -1,3 +1,17 @@
+const nativeFetch = window.fetch.bind(window);
+const sessionParams = new URLSearchParams(window.location.hash.slice(1));
+const fragmentSession = sessionParams.get("session");
+if (fragmentSession) {
+  window.sessionStorage.setItem("costweave.localSession", fragmentSession);
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+}
+const localSessionToken = window.sessionStorage.getItem("costweave.localSession") || "";
+window.fetch = (input, init = {}) => {
+  const headers = new Headers(init.headers || {});
+  if (localSessionToken) headers.set("X-CostWeave-Session", localSessionToken);
+  return nativeFetch(input, { ...init, headers, credentials: "same-origin" });
+};
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -2021,8 +2035,19 @@ $("#import-models").addEventListener("click", () => {
   $("#import-errors").textContent = "";
   $("#import-dialog").showModal();
 });
-$("#export-models").addEventListener("click", () => { location.href = "/api/v1/catalog/export?format=json"; });
-$("#export-models-csv").addEventListener("click", () => { location.href = "/api/v1/catalog/export?format=csv"; });
+async function downloadCatalog(format) {
+  const response = await fetch(`/api/v1/catalog/export?format=${encodeURIComponent(format)}`);
+  if (!response.ok) throw new Error(`目录导出失败：HTTP ${response.status}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `costweave-model-catalog.${format}`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+$("#export-models").addEventListener("click", () => { downloadCatalog("json").catch(console.error); });
+$("#export-models-csv").addEventListener("click", () => { downloadCatalog("csv").catch(console.error); });
 $("#reset-catalog").addEventListener("click", resetCatalog);
 $("#model-form").addEventListener("submit", saveModel);
 $("#delete-model").addEventListener("click", deleteEditingModel);

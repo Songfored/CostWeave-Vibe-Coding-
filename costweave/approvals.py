@@ -62,6 +62,15 @@ class ApprovalStore:
                     (approval_id,),
                 ).fetchone()
                 if row is not None:
+                    if (
+                        row["run_id"] != run_id
+                        or row["task_id"] != canonical_task
+                        or row["approval_kind"] != kind
+                        or row["reason"] != reason
+                    ):
+                        raise ApprovalConflictError(
+                            "approval identity was reused for a different intent"
+                        )
                     connection.rollback()
                     return dict(row), True
                 connection.execute(
@@ -92,6 +101,28 @@ class ApprovalStore:
                 (approval_id,),
             ).fetchone()
         return dict(row) if row is not None else None
+
+    def is_approved_for(
+        self,
+        approval_id: str,
+        *,
+        run_id: str,
+        task_id: str,
+        kind: str,
+        reason: str,
+    ) -> bool:
+        """Verify a resolved approval against its complete admitted intent."""
+
+        canonical_task = canonical_identifier("task", f"{run_id}:{task_id}")
+        row = self.get(str(approval_id))
+        return bool(
+            row is not None
+            and row.get("run_id") == run_id
+            and row.get("task_id") == canonical_task
+            and row.get("approval_kind") == kind
+            and row.get("reason") == reason
+            and row.get("status") == "approved"
+        )
 
     def list(
         self,

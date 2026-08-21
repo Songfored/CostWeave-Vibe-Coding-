@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from .adapters.http import AdapterRuntimePolicy
+from .approvals import ApprovalStore
 from .contracts_v4 import utc_now
 from .evaluation_protocol import canonical_json
 from .experimental_calls import (
@@ -39,6 +40,7 @@ from .security_boundary import (
     contains_secret_material,
     normalize_data_residency,
     normalize_project_id,
+    prompt_approval_binding,
     require_prompt_admission,
 )
 
@@ -904,6 +906,7 @@ class SmallBudgetShadowRuntime:
         adapter_policy: AdapterRuntimePolicy | None = None,
     ) -> None:
         self.store = store
+        self.approval_store = ApprovalStore(store.path)
         self.executor = executor
         self.adapter_policy = adapter_policy or AdapterRuntimePolicy.from_environment()
         self._configs: dict[str, ShadowExperimentConfigV1] = {}
@@ -1059,10 +1062,24 @@ class SmallBudgetShadowRuntime:
             ),
             *request.work_order.acceptance_tests,
         )
+        approval_kind, approval_reason = prompt_approval_binding(
+            assessment,
+            project_id=request.project_id,
+            run_id=request.work_order.work_order_id,
+            task_id=request.work_order.task_id,
+            intent_fingerprint=request.fingerprint,
+        )
         try:
             require_prompt_admission(
                 assessment,
                 approval_id=request.security_approval_id,
+                approval_validator=lambda approval_id: self.approval_store.is_approved_for(
+                    approval_id,
+                    run_id=request.work_order.work_order_id,
+                    task_id=request.work_order.task_id,
+                    kind=approval_kind,
+                    reason=approval_reason,
+                ),
             )
         except PromptInjectionError as exc:
             raise SmallBudgetShadowError(str(exc)) from exc

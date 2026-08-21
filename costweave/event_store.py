@@ -1,4 +1,4 @@
-"""SQLite event store and deterministic projections for CostWeave v0.6.6."""
+"""SQLite event store and deterministic projections for CostWeave v0.6.7."""
 
 from __future__ import annotations
 
