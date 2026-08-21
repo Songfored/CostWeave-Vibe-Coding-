@@ -1,5 +1,19 @@
 # CostWeave
 
+## v0.6.6 Small-Budget Shadow (WP07)
+
+WP07 adds an explicitly armed, project-scoped Shadow boundary with atomic
+pre-call budget reservation. A session must declare its Provider, model, data
+scope, expiry, hard USD/call/token ceilings and consent. Remote execution also
+requires a secret environment reference and layered network/paid authority.
+The default build has no Shadow executor and both live-call switches are off,
+so it makes zero external calls. Shadow results are metrics-only (optionally
+including an output hash), never change the baseline route and cannot promote a
+policy or support a commercial claim. See
+[`docs/CHANGELOG-v0.6.6-wp07.md`](docs/CHANGELOG-v0.6.6-wp07.md),
+[`docs/V0.6.6_WP07_IMPLEMENTATION_SPEC.md`](docs/V0.6.6_WP07_IMPLEMENTATION_SPEC.md)
+and [`docs/ACCEPTANCE-v0.6.6-wp07.md`](docs/ACCEPTANCE-v0.6.6-wp07.md).
+
 ## v0.6.6 Gateway/Runtime Interop (WP05)
 
 WP05 adds a bounded, local-first OpenTelemetry-compatible trace contract.
@@ -102,7 +116,7 @@ docs/ACCEPTANCE-v0.6.5.md.
 
 ## Version line (important)
 
-`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission, WP05 adds local-first trace propagation, and WP06 defines the local Runtime Backend without enabling paid calls or external runtime SDKs by default.
+`v0.5.8.4` is the frozen stable engineering baseline. `v0.6.0 Decision Intelligence Lab`, `v0.6.1 Rational MetaController`, `v0.6.2 Capability Evidence Graph & Calibrated Router`, `v0.6.3 Joint Plan–Route–Schedule Search`, `v0.6.4 Execution-Time Belief Update & Economic Recovery` and `v0.6.5 Safe Learning` remain provider-free decision-intelligence lines. The active development release is `v0.6.6 Gateway/Runtime Interop`; WP04 extends the local boundary with fail-closed capacity admission, WP05 adds local-first trace propagation, WP06 defines the local Runtime Backend, and WP07 adds explicitly armed, hard-budgeted Shadow observation while keeping external calls disabled by default.
 
 Quick offline reproduction:
 

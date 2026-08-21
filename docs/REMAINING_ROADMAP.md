@@ -515,7 +515,7 @@ The frozen baseline is `v0.5.8.4`. The v0.6.0 Decision Intelligence contracts,
 migration 030, benchmark seed, importers, blind policies, metrics, statistics,
 claim gates, tournament runner, CLI, API and UI slice are historical lab work.
 Real-provider effects and commercial claims remain deliberately unverified.
-# Current active line: v0.6.6 (V066-WP05 Local Observability)
+# Current active line: v0.6.6 (V066-WP07 Small-Budget Shadow)
 
 `v0.5.8.4` remains the frozen stable engineering baseline. V066-WP04 added an
 E0 local Ollama/vLLM-style OpenAI-compatible boundary with network and capacity
@@ -552,9 +552,18 @@ Evidence remains E0. Collector interoperability, distributed propagation,
 production telemetry overhead, real provider quality, real cost reduction and
 commercial superiority are not established.
 
-The next completed package is **V066-WP06 Runtime Backend**: define
-submit/cancel/checkpoint/resume/events around the local runtime first, with
-third-party runtimes limited to adapters. The local-first, project-scoped and
-idempotent contract is now implemented; the next planned package is
-**V066-WP07 Small-Budget Shadow**, which remains advisory-only and must retain
-WP05/WP06's E0 boundaries.
+**V066-WP06 Runtime Backend** is complete: submit/cancel/checkpoint/resume/events
+are implemented around the local runtime with third-party runtimes limited to
+adapters. **V066-WP07 Small-Budget Shadow** is also implemented: admission is
+explicit and disabled by default, budgets are reserved atomically, data
+retention is metrics-only, failures are isolated and the baseline route remains
+unchanged. Evidence remains E0 and no real Provider call was made by the
+release fixtures. The next planned package is **V066-WP08 Real
+Reconciliation**: reconcile Provider usage, invoices, caches, retries, P50/P95
+latency and independently judged outcomes before admitting any real sample to a
+commercial conclusion.
+
+WP07 final local evidence: 9/9 focused tests, 59/59 compatibility tests,
+1011/1011 complete discovery tests and 18/18 release-readiness gates passed.
+The run made zero real Provider/network calls. These counts establish only the
+E0 engineering contract, not real-world effectiveness.

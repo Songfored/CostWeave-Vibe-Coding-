@@ -58,6 +58,7 @@ from .gateway_local import public_local_endpoint_policy
 from .experimental_calls import (
     EXPERIMENTAL_CALL_POLICY_REVISION,
     EXPERIMENTAL_CALL_SCHEMA_VERSION,
+    ExternalIdempotencyError,
 )
 from .shadow_router import SHADOW_POLICY_REVISION, SHADOW_SCHEMA_VERSION
 from .predictor_admission import public_predictor_policy
@@ -124,6 +125,14 @@ from .runtime_backend import (
     RuntimeSubmitRequestV1,
     public_runtime_backend_policy,
 )
+from .small_budget_shadow import (
+    ShadowExperimentConfigV1,
+    ShadowProbeRequestV1,
+    SmallBudgetShadowError,
+    SmallBudgetShadowNotFoundError,
+    SmallBudgetShadowRuntime,
+    public_small_budget_shadow_policy,
+)
 
 
 MANAGER: RunManager | None = None
@@ -171,6 +180,34 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     @property
     def runtime_backend(self) -> LocalRuntimeBackend:
         return LocalRuntimeBackend(self.manager)
+
+    @property
+    def small_budget_shadow(self) -> SmallBudgetShadowRuntime:
+        runtime = getattr(self.server, "small_budget_shadow", None)
+        if runtime is None:
+            raise RuntimeError("small-budget shadow runtime is unavailable")
+        return runtime
+
+    def _small_budget_shadow_state(self) -> dict[str, Any]:
+        runtime = getattr(self.server, "small_budget_shadow", None)
+        if runtime is None:
+            return {
+                "runtime_available": False,
+                "adapter_policy": AdapterRuntimePolicy.from_environment().public(),
+                "runtime_counts": {
+                    "configured_sessions": 0,
+                    "armed_sessions": 0,
+                    "external_calls": 0,
+                    "external_attempts": 0,
+                    "route_interventions": 0,
+                    "production_promotions": 0,
+                },
+            }
+        return {
+            "runtime_available": True,
+            "adapter_policy": runtime.adapter_policy.public(),
+            "runtime_counts": runtime.counts(),
+        }
 
     def _project_id(self) -> str:
         return normalize_project_id(
@@ -227,7 +264,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "stable_baseline": "v0.5.8.4",
                     "previous_lab": "v0.6.0",
                     "active_development": "v0.6.6",
-                    "active_work_package": "V066-WP06",
+                    "active_work_package": "V066-WP07",
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -328,8 +365,54 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 },
                 "observability": public_observability_policy(),
                 "runtime_backend": public_runtime_backend_policy(),
+                "small_budget_shadow": {
+                    **public_small_budget_shadow_policy(),
+                    **self._small_budget_shadow_state(),
+                },
             })
             return
+        if path == "/api/v1/runtime/shadow/status":
+            self._json({
+                "policy": public_small_budget_shadow_policy(),
+                **self._small_budget_shadow_state(),
+            })
+            return
+        if path.startswith("/api/v1/runtime/shadow/experiments/"):
+            experiment_id = unquote(
+                path.removeprefix(
+                    "/api/v1/runtime/shadow/experiments/"
+                ).strip("/")
+            )
+            if experiment_id and "/" not in experiment_id:
+                try:
+                    self._json(
+                        self.small_budget_shadow.summary(
+                            experiment_id,
+                            project_id=self._project_id(),
+                        )
+                    )
+                except SmallBudgetShadowNotFoundError:
+                    self._json(
+                        {"error": "shadow_experiment_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                except RuntimeError as exc:
+                    self._json(
+                        {
+                            "error": "shadow_runtime_unavailable",
+                            "message": str(exc),
+                        },
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                except (SmallBudgetShadowError, ValueError, TypeError) as exc:
+                    self._json(
+                        {
+                            "error": "shadow_experiment_invalid",
+                            "message": str(exc),
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                return
         if path == "/api/v1/runtime/status":
             self._json({
                 "backend": self.runtime_backend.capabilities.to_dict(),
@@ -1415,6 +1498,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/release/attestations":
             self._create_release_attestation()
             return
+        if path == "/api/v1/runtime/shadow/experiments":
+            self._configure_small_budget_shadow()
+            return
+        if (
+            path.startswith("/api/v1/runtime/shadow/experiments/")
+            and path.endswith("/probes")
+        ):
+            experiment_id = unquote(
+                path.removeprefix(
+                    "/api/v1/runtime/shadow/experiments/"
+                ).removesuffix("/probes").strip("/")
+            )
+            if experiment_id and "/" not in experiment_id:
+                self._run_small_budget_shadow_probe(experiment_id)
+                return
         if path == "/api/v1/runtime/submit":
             self._runtime_submit()
             return
@@ -1579,6 +1677,132 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except (SecurityStoreError, ValueError, TypeError, json.JSONDecodeError) as exc:
             self._json(
                 {"error": "project_revocation_failed", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _configure_small_budget_shadow(self) -> None:
+        try:
+            payload = dict(self._read_write_json(max_bytes=64_000))
+            project = self._project_id()
+            body_project = normalize_project_id(
+                payload.get("project_id", project)
+            )
+            if body_project != project:
+                raise RequestError(
+                    "shadow project does not match X-CostWeave-Project",
+                    HTTPStatus.FORBIDDEN,
+                    "project_scope_forbidden",
+                )
+            residency = self._data_residency()
+            body_residency = normalize_data_residency(
+                payload.get("data_residency", residency)
+            )
+            if body_residency != residency:
+                raise RequestError(
+                    "shadow data residency does not match the request header",
+                    HTTPStatus.FORBIDDEN,
+                    "data_residency_forbidden",
+                )
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "shadow configuration requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            if payload.get("idempotency_key") not in {None, key}:
+                raise RequestError(
+                    "body and header idempotency keys must match",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_mismatch",
+                )
+            payload["project_id"] = project
+            payload["data_residency"] = residency
+            payload["idempotency_key"] = key
+            session = self.small_budget_shadow.configure(
+                ShadowExperimentConfigV1.from_dict(payload)
+            )
+            self._json(
+                session.to_dict(),
+                HTTPStatus.OK if session.replayed else HTTPStatus.CREATED,
+            )
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except ExternalIdempotencyError as exc:
+            self._json(
+                {"error": "shadow_idempotency_conflict", "message": str(exc)},
+                HTTPStatus.CONFLICT,
+            )
+        except RuntimeError as exc:
+            self._json(
+                {"error": "shadow_runtime_unavailable", "message": str(exc)},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        except (SmallBudgetShadowError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "shadow_configuration_invalid", "message": str(exc)},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    def _run_small_budget_shadow_probe(self, experiment_id: str) -> None:
+        try:
+            payload = dict(self._read_write_json(max_bytes=128_000))
+            project = self._project_id()
+            body_project = normalize_project_id(
+                payload.get("project_id", project)
+            )
+            if body_project != project:
+                raise RequestError(
+                    "shadow probe project does not match X-CostWeave-Project",
+                    HTTPStatus.FORBIDDEN,
+                    "project_scope_forbidden",
+                )
+            if payload.get("experiment_id") not in {None, experiment_id}:
+                raise RequestError(
+                    "path and body shadow experiment ids must match",
+                    HTTPStatus.BAD_REQUEST,
+                    "shadow_experiment_mismatch",
+                )
+            key = self.headers.get("Idempotency-Key")
+            if not key:
+                raise RequestError(
+                    "shadow probe requires Idempotency-Key",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_required",
+                )
+            if payload.get("idempotency_key") not in {None, key}:
+                raise RequestError(
+                    "body and header idempotency keys must match",
+                    HTTPStatus.BAD_REQUEST,
+                    "idempotency_key_mismatch",
+                )
+            payload["experiment_id"] = experiment_id
+            payload["project_id"] = project
+            payload["idempotency_key"] = key
+            receipt = self.small_budget_shadow.probe(
+                ShadowProbeRequestV1.from_dict(payload)
+            )
+            self._json(receipt.to_dict(), HTTPStatus.OK)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except SmallBudgetShadowNotFoundError:
+            self._json(
+                {"error": "shadow_experiment_not_found"},
+                HTTPStatus.NOT_FOUND,
+            )
+        except ExternalIdempotencyError as exc:
+            self._json(
+                {"error": "shadow_idempotency_conflict", "message": str(exc)},
+                HTTPStatus.CONFLICT,
+            )
+        except RuntimeError as exc:
+            self._json(
+                {"error": "shadow_runtime_unavailable", "message": str(exc)},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        except (SmallBudgetShadowError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json(
+                {"error": "shadow_probe_invalid", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
 
@@ -2650,6 +2874,7 @@ def build_server(
     manager: RunManager | None = None,
     catalog_store: CatalogStore | None = None,
     runtime_db_path: str | None = None,
+    small_budget_shadow: SmallBudgetShadowRuntime | None = None,
 ) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError(
@@ -2660,10 +2885,18 @@ def build_server(
     server.catalog_store = store  # type: ignore[attr-defined]
     if runtime_db_path is None and store is not CATALOG_STORE:
         runtime_db_path = str(store.path.with_name("runtime-v4.sqlite3"))
-    server.manager = manager or RunManager(  # type: ignore[attr-defined]
+    run_manager = manager or RunManager(
         store,
         runtime_db_path=runtime_db_path,
     )
+    server.manager = run_manager  # type: ignore[attr-defined]
+    if small_budget_shadow is None:
+        kernel = run_manager.control_kernel
+        if kernel is not None:
+            small_budget_shadow = SmallBudgetShadowRuntime(
+                kernel.experimental_call_store
+            )
+    server.small_budget_shadow = small_budget_shadow  # type: ignore[attr-defined]
     return server
 
 

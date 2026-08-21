@@ -70,6 +70,35 @@ External runtime SDKs, network calls and paid providers remain disabled by
 default. WP06 is E0 engineering evidence and does not establish distributed
 runtime availability or production throughput.
 
+The V066-WP07 Small-Budget Shadow path is:
+
+```text
+explicit experiment configuration + project scope + consent
+        |
+        v
+disabled-by-default admission (global switches + injected executor)
+        |
+strict WorkOrder / secret / prompt-security / token validation
+        |
+atomic worst-case USD reservation in ExperimentalCallStore
+        |
+caller-supplied ShadowProbeExecutor (at most one attempt)
+        |
+bounded metrics [+ optional output hash] -> durable ledger
+        |
+advisory receipt; baseline route continues unchanged
+```
+
+The control plane owns admission and accounting; it does not implement a
+Provider transport. Remote experiments require explicit Provider/model/data
+scope, network and paid consent, a secret environment reference and a currently
+available referenced value. The default server has neither an executor nor
+enabled live-call switches. Active consent/configuration is process-local and
+must be re-armed after restart, while the budget ledger remains durable. Raw
+prompts, outputs and secrets are not persisted. WP07 is E0 contract/fixture
+evidence; real bill, retry/cache, latency and outcome reconciliation is deferred
+to WP08.
+
 The v0.6.3 path is:
 
 ```text

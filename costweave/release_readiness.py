@@ -18,6 +18,16 @@ from .runtime_backend import (
     RUNTIME_OPERATION_TYPES,
     public_runtime_backend_policy,
 )
+from .small_budget_shadow import (
+    MAX_SHADOW_ATTEMPTS_PER_PROBE,
+    MAX_SHADOW_LIFETIME_SECONDS,
+    MAX_SHADOW_LOGICAL_CALLS,
+    MAX_SHADOW_OUTPUT_TOKENS,
+    MAX_SMALL_BUDGET_USD,
+    SHADOW_DATA_SCOPES,
+    SHADOW_EVIDENCE_LEVELS,
+    public_small_budget_shadow_policy,
+)
 
 
 RELEASE_SCHEMA_VERSION = "v0.6.6"
@@ -220,6 +230,50 @@ def audit_runtime_backend_contract() -> dict[str, Any]:
     }
 
 
+def audit_small_budget_shadow_contract() -> dict[str, Any]:
+    """Verify WP07 remains bounded, advisory-only and disabled by default."""
+
+    policy = public_small_budget_shadow_policy()
+    limits = dict(policy.get("limits") or {})
+    healthy = (
+        policy.get("advisory_only") is True
+        and policy.get("routing_authority") is False
+        and policy.get("actual_route_changed") is False
+        and policy.get("baseline_execution_continues") is True
+        and policy.get("live_calls_enabled_by_default") is False
+        and policy.get("paid_calls_enabled_by_default") is False
+        and policy.get("executor_available_by_default") is False
+        and policy.get("explicit_provider_required") is True
+        and policy.get("explicit_secret_reference_required_for_remote") is True
+        and policy.get("explicit_data_scope_required") is True
+        and policy.get("hard_budget_required") is True
+        and policy.get("atomic_budget_reservation") is True
+        and policy.get("secrets_persisted") is False
+        and policy.get("raw_prompts_persisted") is False
+        and policy.get("raw_outputs_persisted") is False
+        and sorted(policy.get("data_scopes") or [])
+        == sorted(SHADOW_DATA_SCOPES)
+        and sorted(policy.get("evidence_levels") or [])
+        == sorted(SHADOW_EVIDENCE_LEVELS)
+        and limits.get("maximum_total_budget_usd")
+        == MAX_SMALL_BUDGET_USD
+        and limits.get("maximum_logical_calls")
+        == MAX_SHADOW_LOGICAL_CALLS
+        and limits.get("maximum_attempts_per_probe")
+        == MAX_SHADOW_ATTEMPTS_PER_PROBE
+        and limits.get("maximum_output_tokens_per_probe")
+        == MAX_SHADOW_OUTPUT_TOKENS
+        and limits.get("maximum_lifetime_seconds")
+        == MAX_SHADOW_LIFETIME_SECONDS
+        and policy.get("project_scoped") is True
+        and policy.get("idempotent") is True
+        and policy.get("failure_isolated") is True
+        and policy.get("policy_promotion_allowed") is False
+        and policy.get("commercial_claims_allowed") is False
+    )
+    return {"healthy": healthy, "policy": policy, "limits": limits}
+
+
 def public_release_policy() -> dict[str, Any]:
     return {
         "schema_version": RELEASE_SCHEMA_VERSION,
@@ -252,6 +306,7 @@ def public_release_policy() -> dict[str, Any]:
             "bounded OpenTelemetry-compatible local tracing",
             "trace ID propagation through durable runtime events",
             "local-first Runtime Backend submit/cancel/checkpoint/resume/events contract",
+            "bounded advisory-only small-budget Shadow Runtime contract",
         ],
         "unverified_claims": [
             "real provider answer quality",
@@ -261,6 +316,7 @@ def public_release_policy() -> dict[str, Any]:
             "production availability and distributed recovery",
             "external OpenTelemetry collector delivery and production telemetry cost",
             "commercial superiority or world-leading performance",
+            "real small-budget Shadow provider effectiveness or savings",
         ],
     }
 
@@ -280,6 +336,7 @@ def build_release_status(
     replay = audit_event_replay(kernel.store)
     observability_audit = audit_observability_safety()
     runtime_backend_audit = audit_runtime_backend_contract()
+    small_budget_shadow_audit = audit_small_budget_shadow_contract()
     adapter = dict(adapter_policy or {})
     experimental_enabled = bool(adapter.get("experimental_calls_enabled", False))
     paid_enabled = bool(adapter.get("paid_calls_enabled", False))
@@ -385,6 +442,34 @@ def build_release_status(
             },
         },
         {
+            "gate_id": "small-budget-shadow-contract-self-test",
+            "passed": small_budget_shadow_audit["healthy"],
+            "observed": {
+                "advisory_only": small_budget_shadow_audit["policy"].get(
+                    "advisory_only"
+                ),
+                "routing_authority": small_budget_shadow_audit["policy"].get(
+                    "routing_authority"
+                ),
+                "live_calls_enabled_by_default": small_budget_shadow_audit[
+                    "policy"
+                ].get("live_calls_enabled_by_default"),
+                "secrets_persisted": small_budget_shadow_audit["policy"].get(
+                    "secrets_persisted"
+                ),
+                "maximum_total_budget_usd": small_budget_shadow_audit[
+                    "limits"
+                ].get("maximum_total_budget_usd"),
+            },
+            "expected": {
+                "advisory_only": True,
+                "routing_authority": False,
+                "live_calls_enabled_by_default": False,
+                "secrets_persisted": False,
+                "maximum_total_budget_usd": MAX_SMALL_BUDGET_USD,
+            },
+        },
+        {
             "gate_id": "otel-prompt-secret-capture-disabled",
             "passed": not telemetry_prompt_enabled and not telemetry_secret_enabled,
             "observed": {
@@ -461,6 +546,7 @@ def build_release_status(
         "observability": telemetry,
         "observability_audit": observability_audit,
         "runtime_backend_audit": runtime_backend_audit,
+        "small_budget_shadow_audit": small_budget_shadow_audit,
     }
     manifest["manifest_hash"] = _sha256(manifest)
     return manifest
@@ -473,6 +559,7 @@ __all__ = [
     "audit_event_replay",
     "audit_observability_safety",
     "audit_runtime_backend_contract",
+    "audit_small_budget_shadow_contract",
     "build_release_status",
     "public_release_policy",
 ]
