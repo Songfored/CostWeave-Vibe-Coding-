@@ -1,3 +1,5 @@
 """CostWeave: a local-first orchestration runtime prototype."""
 
-__version__ = "0.6.7"
+from .version import __version__
+
+__all__ = ["__version__"]

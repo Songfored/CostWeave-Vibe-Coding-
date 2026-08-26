@@ -63,7 +63,7 @@ class MediaProjectBuilder:
         )
         shot_prefix = hashlib.sha256(
             run_id.encode("utf-8")
-        ).hexdigest()[:8]
+        ).hexdigest()[:24]
         shots = []
         previous_end = "scene-established"
         for index in range(1, count + 1):

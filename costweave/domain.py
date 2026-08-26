@@ -46,7 +46,7 @@ class ValidationLevel(StrEnum):
     SENIOR = "L3-senior"
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class RunRequest:
     goal: str
     mode: RunMode = RunMode.BALANCED

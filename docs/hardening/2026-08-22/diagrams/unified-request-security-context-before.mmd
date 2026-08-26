@@ -1,0 +1,11 @@
+flowchart LR
+    C[Browser / local process] --> H[HTTP handler]
+    H --> W[Optional write-only Host guard]
+    H --> P[project_id string]
+    H --> R[data_residency string]
+    P --> OLD[RunManager checks]
+    P --> NEW[v0.6 advisory services]
+    H --> FS[Static path join/read]
+    H --> T[Unbounded handler thread]
+    OLD --> DB[(SQLite)]
+    NEW --> DB

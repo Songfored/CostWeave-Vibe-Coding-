@@ -18,7 +18,7 @@ from .intelligence.capability_graph import (
     detect_drift,
 )
 from .intelligence.common import stable_digest, stable_id
-from .security_boundary import normalize_project_id
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class CapabilityGraphServiceError(ValueError):
@@ -43,6 +43,7 @@ class CapabilityGraphService:
             "policy_version": CAPABILITY_GRAPH_POLICY_REVISION,
             "calibration_revision": "decayed-beta-conformal-v1",
             "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "node_types": ["TaskFamily", "ModelRevision", "ReasoningTier", "Tool", "Modality", "ProviderDeployment", "Validator"],
             "evidence_levels": levels,
             "calibration_status": "calibrated" if any(item.calibration_status == "calibrated" for item in posteriors) else "prior",
@@ -53,7 +54,7 @@ class CapabilityGraphService:
             "network_calls": 0,
             "commercial_claims_allowed": False,
             "training_allowed": False,
-            "counts": self.store.counts(),
+            "counts": self.store.counts(project_id=project),
             "evidence_sample_count": sum(item.sample_count for item in evidence),
             "posteriors_with_real_evidence": sum(item.sample_count > 0 for item in posteriors),
         }

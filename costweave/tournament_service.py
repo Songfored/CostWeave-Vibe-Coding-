@@ -11,6 +11,7 @@ from .benchmarks.policies import DeterministicRandomPolicy, FixedModelPolicy
 from .benchmarks.tournament import TournamentError, TournamentRunner, TournamentSpecV1
 from .decision_intelligence_store import DecisionIntelligenceStore
 from .intelligence.common import DECISION_INTELLIGENCE_SCHEMA_VERSION, bounded_text
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class TournamentServiceError(ValueError):
@@ -38,11 +39,14 @@ class OfflineTournamentService:
             raise TypeError("store must be DecisionIntelligenceStore")
         self.store = store
 
-    def status(self) -> dict[str, Any]:
+    def status(self, *, project_id: str = "local-default") -> dict[str, Any]:
+        project = normalize_project_id(project_id)
         records, manifest = bundled_seed()
         return {
             "schema_version": DECISION_INTELLIGENCE_SCHEMA_VERSION,
             "mode": "offline_seed_tournament",
+            "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "dataset_id": manifest.dataset_id,
             "case_count": manifest.case_count,
             "record_count": manifest.record_count,
@@ -57,7 +61,7 @@ class OfflineTournamentService:
                 "bootstrap_samples": 2000,
                 "seed": 600,
             },
-            "runtime_counts": self.store.counts(),
+            "runtime_counts": self.store.counts(project_id=project),
         }
 
     def run(

@@ -1,0 +1,11 @@
+flowchart LR
+  U["Project-scoped local caller"] --> S["HTTP server + security boundary"]
+  S --> R["Project-scoped data"]
+  S --> I["Versioned capability IPC"]
+  subgraph G["Isolated Adapter Gateway"]
+    I --> A["Registered plugin"]
+    A --> L["Secret broker"]
+    A --> N["Restricted outbound network"]
+    A --> C["Side-effect ledger"]
+  end
+  N --> P["Provider"]

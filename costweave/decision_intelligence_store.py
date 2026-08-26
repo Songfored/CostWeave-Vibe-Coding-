@@ -305,10 +305,17 @@ class DecisionIntelligenceStore:
             ).fetchall()
         return [self._row_tournament(row) for row in rows]
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
-            objects = connection.execute("SELECT COUNT(*) FROM decision_objects_v060").fetchone()[0]
-            tournaments = connection.execute("SELECT COUNT(*) FROM tournament_runs_v060").fetchone()[0]
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
+            objects = connection.execute(
+                "SELECT COUNT(*) FROM decision_objects_v060" + suffix, params
+            ).fetchone()[0]
+            tournaments = connection.execute(
+                "SELECT COUNT(*) FROM tournament_runs_v060" + suffix, params
+            ).fetchone()[0]
         return {
             "decision_objects_v060": int(objects),
             "tournament_runs_v060": int(tournaments),

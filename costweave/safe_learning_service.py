@@ -21,7 +21,7 @@ from .intelligence.safe_learning import (
     estimate_policy,
 )
 from .safe_learning_store import SafeLearningStore, SafeLearningStoreError
-from .security_boundary import normalize_project_id
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class SafeLearningServiceError(ValueError):
@@ -41,6 +41,7 @@ class SafeLearningService:
             "schema_version": SAFE_LEARNING_SCHEMA_VERSION,
             "policy_version": SAFE_LEARNING_POLICY_REVISION,
             "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "components": list(CREDIT_COMPONENTS),
             "credit_methods": ["deterministic", "counterfactual_replay", "hierarchical_estimate", "ips", "dr"],
             "learning_stages": ["offline", "shadow", "canary"],
@@ -53,7 +54,7 @@ class SafeLearningService:
             "network_calls": 0,
             "external_calls": 0,
             "evidence_levels": list(EVIDENCE_LEVELS),
-            "counts": self.store.counts(),
+            "counts": self.store.counts(project_id=project),
         }
 
     @staticmethod

@@ -64,6 +64,7 @@ from .observability import (
     trace_id_for_run,
     unregister_trace_recorder,
 )
+from .security_store import ProjectRevokedError, SecurityStateConflictError
 
 
 @dataclass
@@ -107,6 +108,11 @@ class RunRecord:
     )
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     telemetry: TraceRecorder = field(init=False, repr=False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "request" and "request" in self.__dict__:
+            raise AttributeError("run request identity is immutable")
+        super().__setattr__(name, value)
 
     def __post_init__(self) -> None:
         self.trace_id = self.trace_id or trace_id_for_run(self.id)
@@ -348,13 +354,20 @@ class OrchestrationEngine:
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
-        self._raise_if_cancelled(record)
-        set_run_status(
-            record,
-            RunStatus.PLANNING,
-            source="engine.run.planning",
-        )
-        self._event(record, "planning", "本地总指挥正在判断难度并生成任务图")
+        try:
+            self._raise_if_cancelled(record)
+            set_run_status(
+                record,
+                RunStatus.PLANNING,
+                source="engine.run.planning",
+            )
+            self._event(record, "planning", "本地总指挥正在判断难度并生成任务图")
+        except (RunCancelled, ProjectRevokedError):
+            record.cancel_requested = True
+            record.status = RunStatus.CANCELLED
+            record.error = "项目已撤销，运行已取消"
+            record.finished_at = utc_now()
+            return
         try:
             run_router = self.router.freeze()
             record.worker_snapshot = [worker.to_dict() for worker in run_router.workers]
@@ -530,7 +543,7 @@ class OrchestrationEngine:
                         for task in plan.tasks
                     },
                 )
-                record.control_kernel.record_forecast(forecast)
+                record.control_kernel.record_forecast(record, forecast)
             if (
                 media_workflow_enabled()
                 and record.control_kernel is not None
@@ -590,9 +603,16 @@ class OrchestrationEngine:
                 raise RuntimeError("执行结束时仍有未处理节点")
         except RunCancelled:
             record.error = "运行已取消"
-            self._event(record, "cancelled", "运行已取消；未启动新的任务节点")
+            if self._project_revoked(record):
+                record.status = RunStatus.CANCELLED
+            else:
+                self._event(record, "cancelled", "运行已取消；未启动新的任务节点")
         except Exception as exc:  # final safety boundary for background runs
-            if record.status != RunStatus.CANCELLED:
+            if self._project_revoked(record):
+                record.cancel_requested = True
+                record.status = RunStatus.CANCELLED
+                record.error = "项目已撤销，运行已取消"
+            elif record.status != RunStatus.CANCELLED:
                 # Publish the diagnostic before the terminal state.  Readers
                 # must never observe `failed` with a transiently empty error.
                 record.error = str(exc)
@@ -603,9 +623,16 @@ class OrchestrationEngine:
                 )
                 self._event(record, "failed", f"运行失败：{exc}")
         finally:
-            record.finished_at = utc_now()
+            self._finalize_run(record)
+
+    def _finalize_run(self, record: RunRecord) -> None:
+        """Finish a background run without leaking a revocation race."""
+
+        record.finished_at = utc_now()
+        try:
             if (
-                outcome_forecast_enabled()
+                not self._project_revoked(record)
+                and outcome_forecast_enabled()
                 and record.control_kernel is not None
                 and record.plan is not None
                 and record.status in {
@@ -615,10 +642,26 @@ class OrchestrationEngine:
                 }
             ):
                 record.control_kernel.record_outcome(record)
-            self._checkpoint(record, "engine.run.finished")
+            if not self._project_revoked(record):
+                self._checkpoint(record, "engine.run.finished")
+        except ProjectRevokedError:
+            # Revocation may win after the status check but before either
+            # guarded write acquires the project operation lock.  The rejected
+            # write is expected; turn it into a controlled terminal state
+            # instead of leaking an exception from the daemon thread.
+            record.cancel_requested = True
+            record.status = RunStatus.CANCELLED
+            record.error = "项目已撤销，运行已取消"
 
     async def resume(self, record: RunRecord) -> None:
         """Resume a persisted non-terminal run without redoing validated work."""
+
+        if self._project_revoked(record):
+            record.cancel_requested = True
+            record.status = RunStatus.CANCELLED
+            record.error = "项目已撤销，运行已取消"
+            record.finished_at = utc_now()
+            return
 
         if record.status in {RunStatus.CREATED, RunStatus.PLANNING}:
             await self.run(record)
@@ -707,15 +750,24 @@ class OrchestrationEngine:
                 raise RuntimeError("恢复执行结束时仍有未处理节点")
         except RunCancelled:
             record.error = "运行已取消"
-            self._event(record, "cancelled", "恢复运行已取消")
+            if self._project_revoked(record):
+                record.status = RunStatus.CANCELLED
+            else:
+                self._event(record, "cancelled", "恢复运行已取消")
         except Exception as exc:
-            if record.status != RunStatus.CANCELLED:
+            if self._project_revoked(record):
+                record.cancel_requested = True
+                record.status = RunStatus.CANCELLED
+                record.error = "项目已撤销，运行已取消"
+            elif record.status != RunStatus.CANCELLED:
                 record.error = str(exc)
                 set_run_status(record, RunStatus.FAILED, source="engine.recovery.failed")
                 self._event(record, "failed", f"恢复运行失败：{exc}")
         finally:
             record.finished_at = utc_now()
             if (
+                not self._project_revoked(record)
+                and
                 outcome_forecast_enabled()
                 and record.control_kernel is not None
                 and record.plan is not None
@@ -726,7 +778,8 @@ class OrchestrationEngine:
                 }
             ):
                 record.control_kernel.record_outcome(record)
-            self._checkpoint(record, "engine.recovery.finished")
+            if not self._project_revoked(record):
+                self._checkpoint(record, "engine.recovery.finished")
 
     async def _execute_dag(
         self,
@@ -780,8 +833,11 @@ class OrchestrationEngine:
                         parallel_runtime_enabled()
                         and self.scheduler is not None
                     ):
-                        decision = self.scheduler.start_decision(
-                            record, task, worker
+                        decision = record.control_kernel.admit_scheduled_task(
+                            record,
+                            self.scheduler,
+                            task,
+                            worker,
                         )
                         if decision.state != "admitted":
                             if (
@@ -859,7 +915,8 @@ class OrchestrationEngine:
                             ]
                     except HandoffPreflightError as exc:
                         if reservation is not None:
-                            record.control_kernel.reservations.release(
+                            record.control_kernel.release_reservation(
+                                record,
                                 reservation.reservation_id,
                                 reason="handoff-preflight-rejected",
                                 actual_cost=0.0,
@@ -935,7 +992,8 @@ class OrchestrationEngine:
                         break
                     except Exception:
                         if reservation is not None:
-                            record.control_kernel.reservations.release(
+                            record.control_kernel.release_reservation(
+                                record,
                                 reservation.reservation_id,
                                 reason="start-failed",
                             )
@@ -950,13 +1008,28 @@ class OrchestrationEngine:
                     execute = lambda task=task, worker=worker, dependency_results=dependency_results, should_inject=should_inject: self.executor.execute(
                         task, worker, dependency_results, should_inject
                     )
+                    def fund_retry(
+                        attempts,
+                        *,
+                        task=task,
+                        reservation=reservation,
+                    ):
+                        if reservation is None:
+                            raise RuntimeError(
+                                "transient retry requires a durable cost reservation"
+                            )
+                        record.control_kernel.extend_task_reservation(
+                            record,
+                            reservation.reservation_id,
+                            additional_cost=task.estimated_cost,
+                        )
+                        task.transient_retries = attempts
+
                     coroutine = (
                         self.scheduler.execute_with_retry(
                             execute,
                             provider=worker.provider,
-                            on_retry=lambda attempts, task=task: setattr(
-                                task, "transient_retries", attempts
-                            ),
+                            on_retry=fund_retry,
                         )
                         if parallel_runtime_enabled()
                         and self.scheduler is not None
@@ -997,12 +1070,29 @@ class OrchestrationEngine:
                     try:
                         result = future.result()
                     except Exception as exc:
+                        execution_cost = task.estimated_cost * (
+                            task.transient_retries + 1
+                        )
                         if reservation is not None:
-                            record.control_kernel.reservations.release(
+                            record.control_kernel.settle_task_reservation(
+                                record,
+                                task,
                                 reservation.reservation_id,
                                 reason="execution-failed",
-                                actual_cost=0.0,
+                                actual_cost=execution_cost,
+                                record_placement=placement_v4_enabled(),
                             )
+                        else:
+                            record.spent += execution_cost
+                            if (
+                                placement_v4_enabled()
+                                and record.control_kernel is not None
+                            ):
+                                record.control_kernel.record_actual_cost(
+                                    record,
+                                    task,
+                                    actual_total=execution_cost,
+                                )
                         task.reservation_id = None
                         task.queue_state = "rejected"
                         task.blocked_reason = str(exc)
@@ -1034,15 +1124,6 @@ class OrchestrationEngine:
                             "false_positive_risk": 0.01,
                             "false_negative_risk": 0.25,
                         }
-                        if (
-                            placement_v4_enabled()
-                            and record.control_kernel is not None
-                        ):
-                            record.control_kernel.placement_store.record_actual(
-                                run_id=str(record.id),
-                                task=task,
-                                actual_total=0.0,
-                            )
                         self._recalculate_probability(record)
                         self._record_completion_checkpoint(
                             record,
@@ -1059,12 +1140,29 @@ class OrchestrationEngine:
                         )
                         continue
 
+                    execution_cost = task.estimated_cost * (
+                        task.transient_retries + 1
+                    )
                     if reservation is not None:
-                        record.control_kernel.reservations.release(
+                        record.control_kernel.settle_task_reservation(
+                            record,
+                            task,
                             reservation.reservation_id,
                             reason="execution-finished",
-                            actual_cost=task.estimated_cost,
+                            actual_cost=execution_cost,
+                            record_placement=placement_v4_enabled(),
                         )
+                    else:
+                        record.spent += execution_cost
+                        if (
+                            placement_v4_enabled()
+                            and record.control_kernel is not None
+                        ):
+                            record.control_kernel.record_actual_cost(
+                                record,
+                                task,
+                                actual_total=execution_cost,
+                            )
                     task.reservation_id = None
                     task.result = result
                     task.finished_at = utc_now()
@@ -1076,15 +1174,6 @@ class OrchestrationEngine:
                         record.control_kernel.record_validation(
                             record, task
                         )
-                    record.spent += task.estimated_cost
-                    if (
-                        placement_v4_enabled()
-                        and record.control_kernel is not None
-                    ):
-                        record.control_kernel.record_actual_cost(
-                            record, task
-                        )
-
                     if artifact_dag_enabled() and record.control_kernel is not None:
                         record.control_kernel.publish_task_artifacts(
                             record,
@@ -1139,12 +1228,32 @@ class OrchestrationEngine:
                 await asyncio.gather(*active, return_exceptions=True)
                 for future, task in active.items():
                     reservation = reservations.get(future)
+                    execution_cost = task.estimated_cost * (
+                        task.transient_retries + 1
+                    )
                     if reservation is not None:
-                        record.control_kernel.reservations.release(
+                        record.control_kernel.settle_task_reservation(
+                            record,
+                            task,
                             reservation.reservation_id,
                             reason="runtime-cancelled",
-                            actual_cost=0.0,
+                            # The executor was already admitted and started;
+                            # without provider usage evidence, cancellation is
+                            # charged conservatively at the reserved estimate.
+                            actual_cost=execution_cost,
+                            record_placement=placement_v4_enabled(),
                         )
+                    else:
+                        record.spent += execution_cost
+                        if (
+                            placement_v4_enabled()
+                            and record.control_kernel is not None
+                        ):
+                            record.control_kernel.record_actual_cost(
+                                record,
+                                task,
+                                actual_total=execution_cost,
+                            )
                     task.reservation_id = None
                     if task.status == TaskStatus.RUNNING:
                         set_task_status(
@@ -1632,7 +1741,24 @@ class OrchestrationEngine:
         return checkpoint.to_dict()
 
     @staticmethod
-    def _raise_if_cancelled(record: RunRecord) -> None:
+    def _project_revoked(record: RunRecord) -> bool:
+        kernel = record.control_kernel
+        if kernel is None:
+            return False
+        try:
+            return bool(
+                kernel.record_project_status(record)[
+                    "logical_access_revoked"
+                ]
+            )
+        except SecurityStateConflictError:
+            return True
+
+    @classmethod
+    def _raise_if_cancelled(cls, record: RunRecord) -> None:
+        if cls._project_revoked(record):
+            record.cancel_requested = True
+            raise RunCancelled("project access was revoked")
         if record.cancel_requested or record.status == RunStatus.CANCELLED:
             raise RunCancelled("run cancellation requested")
 
@@ -1844,10 +1970,16 @@ class RunManager:
         self,
         run_id: str,
         *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
         idempotency_key: str,
         expected_revision: int,
     ) -> RunRecord:
-        record = self.get(run_id)
+        record = self.get(
+            run_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        )
         if record is None:
             raise KeyError(run_id)
         if self.control_kernel is None:
@@ -1862,12 +1994,18 @@ class RunManager:
         self,
         run_id: str,
         *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
         idempotency_key: str,
         expected_revision: int,
     ) -> tuple[RunRecord, bool]:
         """Cancel a run and preserve the durable replay bit for adapters."""
 
-        record = self.get(run_id)
+        record = self.get(
+            run_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        )
         if record is None:
             raise KeyError(run_id)
         if self.control_kernel is None:
@@ -1879,6 +2017,37 @@ class RunManager:
             return_replayed=True,
         )
         return result
+
+    def revoke_project(
+        self,
+        project_id: str,
+        *,
+        idempotency_key: str,
+        reason: str = "user_requested",
+    ) -> tuple[dict[str, Any], bool]:
+        if self.control_kernel is None:
+            raise RuntimeError("persistent runtime is disabled")
+        tombstone, replayed = self.control_kernel.revoke_project(
+            project_id,
+            idempotency_key=idempotency_key,
+            reason=reason,
+        )
+        with self.lock:
+            records = list(self.records.values())
+        affected = []
+        for record in records:
+            scope = self._record_scope(record)
+            if scope is not None and scope[0] == tombstone["project_id"]:
+                affected.append(record)
+        for record in affected:
+            with record.lock:
+                if record.status not in {
+                    RunStatus.COMPLETED,
+                    RunStatus.FAILED,
+                    RunStatus.CANCELLED,
+                }:
+                    record.cancel_requested = True
+        return tombstone, replayed
 
     def checkpoint_with_result(
         self,
@@ -1958,18 +2127,24 @@ class RunManager:
     ) -> RunRecord | None:
         with self.lock:
             record = self.records.get(run_id)
-        if record is None or project_id is None:
+        if record is None:
+            return None
+        scope = self._record_scope(record)
+        if scope is None:
+            return None
+        authoritative_project, authoritative_residency = scope
+        if project_id is None:
             return record
         from .security_boundary import normalize_project_id
 
         project = normalize_project_id(project_id)
-        if record.request.project_id != project:
+        if authoritative_project != project:
             return None
         if data_residency is not None:
             from .security_boundary import normalize_data_residency
 
             residency = normalize_data_residency(data_residency)
-            if record.request.data_residency != residency:
+            if authoritative_residency != residency:
                 return None
         if self.control_kernel is not None:
             status = self.control_kernel.project_status(project)
@@ -1985,6 +2160,11 @@ class RunManager:
     ) -> list[dict[str, Any]]:
         with self.lock:
             records = list(self.records.values())
+        scoped_records: list[tuple[RunRecord, str, str]] = []
+        for record in records:
+            scope = self._record_scope(record)
+            if scope is not None:
+                scoped_records.append((record, scope[0], scope[1]))
         if project_id is not None:
             from .security_boundary import normalize_project_id
 
@@ -1996,21 +2176,35 @@ class RunManager:
                 ]
             ):
                 return []
-            records = [
-                record
-                for record in records
-                if record.request.project_id == project
+            scoped_records = [
+                item
+                for item in scoped_records
+                if item[1] == project
             ]
         if data_residency is not None:
             from .security_boundary import normalize_data_residency
 
             residency = normalize_data_residency(data_residency)
-            records = [
-                record
-                for record in records
-                if record.request.data_residency == residency
+            scoped_records = [
+                item
+                for item in scoped_records
+                if item[2] == residency
             ]
+        records = [item[0] for item in scoped_records]
         return [record.snapshot() for record in reversed(records[-20:])]
+
+    def _record_scope(self, record: RunRecord) -> tuple[str, str] | None:
+        if self.control_kernel is not None:
+            try:
+                return self.control_kernel.record_scope(record)
+            except SecurityStateConflictError:
+                return None
+        from .security_boundary import normalize_data_residency, normalize_project_id
+
+        return (
+            normalize_project_id(record.request.project_id),
+            normalize_data_residency(record.request.data_residency),
+        )
 
     def events(
         self,
@@ -2143,14 +2337,19 @@ class RunManager:
         *,
         run_id: str | None = None,
         project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
         entries = self.control_kernel.ledger(run_id=run_id)
-        if project_id is None:
+        if project_id is None and data_residency is None:
             return entries
         visible_run_ids = {
-            item["id"] for item in self.list(project_id=project_id)
+            item["id"]
+            for item in self.list(
+                project_id=project_id,
+                data_residency=data_residency,
+            )
         }
         return [
             item
@@ -2191,21 +2390,33 @@ class RunManager:
         return self.control_kernel.evaluations()
 
     def record_evidence_export(
-        self, package: dict[str, Any], *, project_id: str | None = None
+        self,
+        package: dict[str, Any],
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
         return self.control_kernel.record_evidence_export(
-            package, project_id=project_id
+            package,
+            project_id=project_id,
+            data_residency=data_residency,
         )
 
     def evidence_exports(
-        self, *, limit: int = 100, project_id: str | None = None
+        self,
+        *,
+        limit: int = 100,
+        project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
         return self.control_kernel.evidence_exports(
-            limit=limit, project_id=project_id
+            limit=limit,
+            project_id=project_id,
+            data_residency=data_residency,
         )
 
     def media_project(self, run_id: str) -> dict[str, Any] | None:
@@ -2219,23 +2430,49 @@ class RunManager:
         return self.control_kernel.media_shots(run_id)
 
     def approve_media_shot(
-        self, shot_id: str, *, idempotency_key: str | None = None
+        self,
+        run_id: str,
+        shot_id: str,
+        *,
+        project_id: str,
+        data_residency: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        if self.get(
+            run_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        ) is None:
+            raise KeyError(run_id)
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
         return self.control_kernel.approve_media_shot(
-            shot_id, idempotency_key=idempotency_key
+            run_id,
+            shot_id,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
         )
 
     def approve_media_project(
-        self, run_id: str, *, idempotency_key: str | None = None
+        self,
+        run_id: str,
+        *,
+        project_id: str,
+        data_residency: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        if self.get(run_id) is None:
+        if self.get(
+            run_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        ) is None:
             raise KeyError(run_id)
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
         return self.control_kernel.approve_media_project(
-            run_id, idempotency_key=idempotency_key
+            run_id,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
         )
 
     def approvals(
@@ -2243,17 +2480,24 @@ class RunManager:
         *,
         status: str | None = None,
         project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.control_kernel is None:
             return []
         items = self.control_kernel.approvals(status=status)
-        if project_id is None:
+        if project_id is None and data_residency is None:
             return items
+        visible_run_ids = {
+            str(item.get("id") or "")
+            for item in self.list(
+                project_id=project_id,
+                data_residency=data_residency,
+            )
+        }
         return [
             item
             for item in items
-            if self.get(str(item.get("run_id") or ""), project_id=project_id)
-            is not None
+            if str(item.get("run_id") or "") in visible_run_ids
         ]
 
     def resolve_approval(
@@ -2264,13 +2508,19 @@ class RunManager:
         note: str,
         expected_revision: int,
         idempotency_key: str,
+        project_id: str,
+        data_residency: str,
     ) -> dict[str, Any]:
         if self.control_kernel is None:
             raise RuntimeError("persistent runtime is disabled")
         approval = self.control_kernel.approval_store.get(approval_id)
         if approval is None:
             raise KeyError(approval_id)
-        record = self.get(str(approval["run_id"]))
+        record = self.get(
+            str(approval["run_id"]),
+            project_id=project_id,
+            data_residency=data_residency,
+        )
         if record is None:
             raise KeyError(str(approval["run_id"]))
         return self.control_kernel.resolve_approval(

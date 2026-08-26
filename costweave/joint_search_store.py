@@ -191,14 +191,17 @@ class JointSearchStore:
             rows = connection.execute("SELECT * FROM joint_search_decisions_v063 WHERE project_id=? ORDER BY created_at DESC,decision_id DESC LIMIT ?", (project, limit)).fetchall()
         return [self._decision_row(row) for row in rows]
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
             tables = {
                 "joint_search_candidates_v063": "joint_search_candidates_v063",
                 "joint_search_decisions_v063": "joint_search_decisions_v063",
                 "joint_search_idempotency_v063": "joint_search_idempotency_v063",
             }
-            return {key: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in tables.items()}
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
+            return {key: int(connection.execute(f"SELECT COUNT(*) FROM {table}{suffix}", params).fetchone()[0]) for key, table in tables.items()}
 
 
 __all__ = ["JointSearchStore", "JointSearchStoreError"]

@@ -454,16 +454,16 @@ class RuntimeBackend(Protocol):
     def submit(self, request: RuntimeSubmitRequestV1) -> RuntimeOperationV1:
         ...
 
-    def cancel(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int) -> RuntimeOperationV1:
+    def cancel(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int) -> RuntimeOperationV1:
         ...
 
-    def checkpoint(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
+    def checkpoint(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
         ...
 
-    def resume(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
+    def resume(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
         ...
 
-    def events(self, run_id: str, *, project_id: str, after_revision: int = 0, limit: int = 200) -> RuntimeEventPageV1:
+    def events(self, run_id: str, *, project_id: str, data_residency: str, after_revision: int = 0, limit: int = 200) -> RuntimeEventPageV1:
         ...
 
 
@@ -490,13 +490,23 @@ class LocalRuntimeBackend:
         if getattr(self.manager, "control_kernel", None) is None:
             raise RuntimeBackendUnavailableError("local runtime requires persistent runtime v4")
 
-    def _record(self, run_id: str, project_id: str) -> Any:
+    def _record(
+        self,
+        run_id: str,
+        project_id: str,
+        data_residency: str,
+    ) -> Any:
         self._require_persistent()
         try:
             project = normalize_project_id(project_id)
+            residency = normalize_data_residency(data_residency)
         except (TypeError, ValueError) as exc:
             raise RuntimeBackendContractError(str(exc)) from exc
-        record = self.manager.get(_identifier(run_id, "run_id"), project_id=project)
+        record = self.manager.get(
+            _identifier(run_id, "run_id"),
+            project_id=project,
+            data_residency=residency,
+        )
         if record is None:
             raise KeyError(run_id)
         return record
@@ -529,15 +539,19 @@ class LocalRuntimeBackend:
         )
         return self._operation("submit", record, replayed=replayed)
 
-    def cancel(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int) -> RuntimeOperationV1:
-        record = self._record(run_id, project_id)
+    def cancel(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int) -> RuntimeOperationV1:
+        record = self._record(run_id, project_id, data_residency)
         try:
             validate_idempotency_key(idempotency_key)
         except (TypeError, ValueError) as exc:
             raise RuntimeBackendContractError(str(exc)) from exc
         expected = _integer(expected_revision, "expected_revision")
         record, replayed = self.manager.cancel_with_result(
-            str(record.id), idempotency_key=idempotency_key, expected_revision=expected
+            str(record.id),
+            project_id=project_id,
+            data_residency=data_residency,
+            idempotency_key=idempotency_key,
+            expected_revision=expected,
         )
         return self._operation("cancel", record, replayed=replayed)
 
@@ -562,8 +576,8 @@ class LocalRuntimeBackend:
             },
         )
 
-    def checkpoint(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
-        record = self._record(run_id, project_id)
+    def checkpoint(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
+        record = self._record(run_id, project_id, data_residency)
         try:
             validate_idempotency_key(idempotency_key)
         except (TypeError, ValueError) as exc:
@@ -579,8 +593,8 @@ class LocalRuntimeBackend:
         )
         return self._operation("checkpoint", record, replayed=replayed, checkpoint_id=checkpoint_id)
 
-    def resume(self, run_id: str, *, project_id: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
-        record = self._record(run_id, project_id)
+    def resume(self, run_id: str, *, project_id: str, data_residency: str, idempotency_key: str, expected_revision: int, source: str = "client") -> RuntimeOperationV1:
+        record = self._record(run_id, project_id, data_residency)
         try:
             validate_idempotency_key(idempotency_key)
         except (TypeError, ValueError) as exc:
@@ -596,8 +610,8 @@ class LocalRuntimeBackend:
         )
         return self._operation("resume", record, replayed=replayed, checkpoint_id=checkpoint_id)
 
-    def events(self, run_id: str, *, project_id: str, after_revision: int = 0, limit: int = 200) -> RuntimeEventPageV1:
-        record = self._record(run_id, project_id)
+    def events(self, run_id: str, *, project_id: str, data_residency: str, after_revision: int = 0, limit: int = 200) -> RuntimeEventPageV1:
+        record = self._record(run_id, project_id, data_residency)
         after = _integer(after_revision, "after_revision")
         page_limit = _integer(limit, "limit", minimum=1, maximum=1000)
         raw_events = self.manager.events(str(record.id), after_revision=after, limit=min(1000, page_limit + 1))
@@ -637,6 +651,7 @@ def public_runtime_backend_policy() -> dict[str, Any]:
         "third_party_runtime_mode": "adapter-only",
         "supported_operations": list(RUNTIME_OPERATION_TYPES),
         "events_are_project_scoped": True,
+        "events_are_data_residency_scoped": True,
         "checkpoint_is_idempotent": True,
         "resume_is_idempotent": True,
     }

@@ -15,7 +15,12 @@ from .evidence_console import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
     validate_evidence_export,
 )
-from .security_boundary import DEFAULT_PROJECT_ID, normalize_project_id
+from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
+    DEFAULT_PROJECT_ID,
+    normalize_data_residency,
+    normalize_project_id,
+)
 
 
 class EvidenceConsoleStoreError(ValueError):
@@ -69,6 +74,7 @@ class EvidenceConsoleStore:
         *,
         created_at: str | None = None,
         project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         validate_evidence_export(package)
         if package.get("schema_version") != EVIDENCE_EXPORT_SCHEMA_VERSION:
@@ -87,9 +93,26 @@ class EvidenceConsoleStore:
         if not isinstance(console, Mapping):
             raise EvidenceConsoleStoreError("console snapshot is missing")
         scope_kind = str(scope.get("kind") or "")
-        project = normalize_project_id(
-            project_id or scope.get("project_id") or DEFAULT_PROJECT_ID
+        scope_project = normalize_project_id(
+            scope.get("project_id", DEFAULT_PROJECT_ID)
         )
+        project = normalize_project_id(
+            scope_project if project_id is None else project_id
+        )
+        if project != scope_project:
+            raise EvidenceConsoleStoreError(
+                "export project does not match its authorized scope"
+            )
+        scope_residency = normalize_data_residency(
+            scope.get("data_residency", DEFAULT_DATA_RESIDENCY)
+        )
+        residency = normalize_data_residency(
+            scope_residency if data_residency is None else data_residency
+        )
+        if residency != scope_residency:
+            raise EvidenceConsoleStoreError(
+                "export data residency does not match its authorized scope"
+            )
         if scope_kind not in {"workspace", "run"}:
             raise EvidenceConsoleStoreError("export scope is invalid")
         run_id = scope.get("run_id")
@@ -108,6 +131,7 @@ class EvidenceConsoleStore:
             "export_id": export_id,
             "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
             "project_id": project,
+            "data_residency": residency,
             "scope": scope_kind,
             "run_id": str(run_id) if run_id is not None else None,
             "package_hash": package_hash,
@@ -174,15 +198,25 @@ class EvidenceConsoleStore:
         *,
         limit: int = 100,
         project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> list[dict[str, Any]]:
         if not 1 <= int(limit) <= 1_000:
             raise EvidenceConsoleStoreError("export receipt limit is invalid")
-        project = normalize_project_id(project_id or DEFAULT_PROJECT_ID)
+        project = normalize_project_id(
+            DEFAULT_PROJECT_ID if project_id is None else project_id
+        )
+        residency = normalize_data_residency(
+            DEFAULT_DATA_RESIDENCY
+            if data_residency is None
+            else data_residency
+        )
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT receipt_json,receipt_hash FROM evidence_export_receipts "
-                "WHERE project_id=? ORDER BY created_at DESC,export_id DESC LIMIT ?",
-                (project, int(limit)),
+                "WHERE project_id=? "
+                "AND COALESCE(json_extract(receipt_json,'$.data_residency'),'local')=? "
+                "ORDER BY created_at DESC,export_id DESC LIMIT ?",
+                (project, residency, int(limit)),
             ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:

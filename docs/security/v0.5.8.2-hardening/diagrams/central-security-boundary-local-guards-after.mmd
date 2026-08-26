@@ -1,0 +1,8 @@
+flowchart LR
+  U["Local API caller"] --> S["HTTP server + route guards"]
+  S --> R["RunManager data"]
+  S --> X["Evidence export extended redactor"]
+  W["WorkOrder"] --> A["HTTP Adapter + local checks"]
+  A --> E["Environment secret"]
+  A --> N["Outbound network"]
+  A --> C["External-call reservation"]

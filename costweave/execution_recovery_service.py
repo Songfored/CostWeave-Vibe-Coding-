@@ -14,7 +14,7 @@ from .intelligence.execution_recovery import (
     ExecutionSnapshotV1,
 )
 from .execution_recovery_store import ExecutionRecoveryStore
-from .security_boundary import normalize_project_id
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class ExecutionRecoveryServiceError(ValueError):
@@ -35,6 +35,7 @@ class ExecutionRecoveryService:
             "schema_version": EXECUTION_RECOVERY_SCHEMA_VERSION,
             "policy_version": EXECUTION_RECOVERY_POLICY_REVISION,
             "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "available_actions": list(EXECUTION_ACTIONS),
             "runtime_authority": "advisory-only",
             "production_route_intervention": False,
@@ -48,7 +49,7 @@ class ExecutionRecoveryService:
             "network_calls": 0,
             "commercial_claims_allowed": False,
             "training_allowed": False,
-            "counts": self.store.counts(),
+            "counts": self.store.counts(project_id=project),
         }
 
     @staticmethod

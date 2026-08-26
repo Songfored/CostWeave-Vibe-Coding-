@@ -1,4 +1,4 @@
-"""Machine-verifiable v0.6.7 lab release readiness contracts."""
+"""Machine-verifiable release-readiness contracts."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from .small_budget_shadow import (
     public_small_budget_shadow_policy,
 )
 from .external_call_authority import EXTERNAL_CALL_AUTHORITY_SCHEMA_VERSION
+from .version import VERSION_TAG
 from .security_boundary import (
     PromptInjectionError,
     ProjectScopeError,
@@ -42,7 +43,7 @@ from .security_boundary import (
 )
 
 
-RELEASE_SCHEMA_VERSION = "v0.6.7"
+RELEASE_SCHEMA_VERSION = VERSION_TAG
 EXPECTED_RUNTIME_SCHEMA = "v6.5.0"
 EXPECTED_MIGRATIONS = 35
 
@@ -87,7 +88,7 @@ def audit_event_replay(store: Any) -> dict[str, Any]:
 
 
 def audit_security_foundation() -> dict[str, Any]:
-    """Exercise v0.6.7's portable fail-closed security contracts."""
+    """Exercise the portable fail-closed security contracts."""
 
     policy = public_security_policy()
     required_flags = (

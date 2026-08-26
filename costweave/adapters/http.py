@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import math
+import multiprocessing
 import os
+import pickle
 import re
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +21,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
+from ..version import __version__
 from ..evaluation_protocol import canonical_json
 from ..experimental_calls import (
     REAL_UNVALIDATED_EVIDENCE,
@@ -53,14 +58,92 @@ from ..security_boundary import (
 HTTP_ADAPTER_SCHEMA_VERSION = "v0.5.8.2"
 OPENAI_COMPATIBLE_ADAPTER_REVISION = "openai-compatible-http-v1"
 LOCAL_HTTP_ADAPTER_REVISION = "local-http-v1"
+MAX_CONCURRENT_DNS_RESOLVERS = 4
+_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_DNS_RESOLVERS)
 
 SECRET_LIKE = re.compile(
     r"(?i)(?:bearer\s+|api[_-]?key[=: ]+|sk-)[A-Za-z0-9._~+/-]{6,}"
 )
 
 
+def _dns_resolution_child(url: str, resolver_payload: bytes, sender: Any) -> None:
+    try:
+        resolver = pickle.loads(resolver_payload)
+        sender.send(
+            (True, validate_remote_resolution(url, resolver=resolver))
+        )
+    except BaseException:
+        try:
+            sender.send((False, None))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        sender.close()
+
+
+def _stop_dns_process(process: multiprocessing.Process) -> bool:
+    process.join(0.1)
+    if process.is_alive():
+        process.terminate()
+        process.join(1.0)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(1.0)
+    return not process.is_alive()
+
+
 class AdapterTransportError(ExperimentalCallError):
     """Categorical transport failure with no response content."""
+
+
+def _remaining_seconds(deadline_monotonic: float) -> float:
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise AdapterTransportError("absolute_timeout")
+    return max(0.001, remaining)
+
+
+def _set_stream_timeout(stream: Any, timeout_seconds: float) -> None:
+    """Best-effort timeout update for urllib/http.client response wrappers."""
+
+    current = stream
+    visited: set[int] = set()
+    for _ in range(6):
+        if current is None or id(current) in visited:
+            return
+        visited.add(id(current))
+        setter = getattr(current, "settimeout", None)
+        if callable(setter):
+            setter(timeout_seconds)
+            return
+        next_item = None
+        for name in ("fp", "raw", "_sock", "sock"):
+            candidate = getattr(current, name, None)
+            if candidate is not None:
+                next_item = candidate
+                break
+        current = next_item
+
+
+def _read_with_deadline(
+    stream: Any, *, maximum_bytes: int, deadline_monotonic: float
+) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = _remaining_seconds(deadline_monotonic)
+        _set_stream_timeout(stream, remaining)
+        size = min(64 * 1024, maximum_bytes + 1 - total)
+        if size <= 0:
+            raise AdapterTransportError("response_too_large")
+        reader = getattr(stream, "read1", None)
+        chunk = reader(size) if callable(reader) else stream.read(size)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(bytes(chunk))
+        total += len(chunk)
+        if total > maximum_bytes:
+            raise AdapterTransportError("response_too_large")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +196,17 @@ class ExperimentalAdapterConfig:
             raise ExperimentalCallError("adapter identity is required")
         if self.deployment not in {"local", "remote"}:
             raise ExperimentalCallError("adapter deployment is invalid")
+        if not all(
+            math.isfinite(float(value))
+            for value in (
+                self.input_price_per_mtok_usd,
+                self.output_price_per_mtok_usd,
+                self.timeout_seconds,
+            )
+        ):
+            raise ExperimentalCallError(
+                "adapter pricing and timeout must be finite"
+            )
         if min(
             self.input_price_per_mtok_usd,
             self.output_price_per_mtok_usd,
@@ -233,27 +327,46 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         *,
         timeout: float,
         context: ssl.SSLContext,
+        deadline_monotonic: float | None = None,
     ) -> None:
         super().__init__(hostname, port, timeout=timeout, context=context)
         self._approved_addresses = frozenset(approved_addresses)
         self._pinned_context = context
+        self._deadline_monotonic = (
+            deadline_monotonic
+            if deadline_monotonic is not None
+            else time.monotonic() + timeout
+        )
+        self._pending_socket: Any | None = None
 
     def connect(self) -> None:
         last_error: OSError | None = None
         for address in sorted(self._approved_addresses):
             raw_socket = None
             try:
+                remaining = _remaining_seconds(self._deadline_monotonic)
                 raw_socket = socket.create_connection(
-                    (address, self.port), timeout=self.timeout
+                    (address, self.port), timeout=remaining
                 )
+                self._pending_socket = raw_socket
+                if hasattr(raw_socket, "settimeout"):
+                    raw_socket.settimeout(
+                        _remaining_seconds(self._deadline_monotonic)
+                    )
                 wrapped = self._pinned_context.wrap_socket(
                     raw_socket, server_hostname=self.host
                 )
+                self._pending_socket = wrapped
+                if hasattr(wrapped, "settimeout"):
+                    wrapped.settimeout(
+                        _remaining_seconds(self._deadline_monotonic)
+                    )
                 peer = str(wrapped.getpeername()[0]).split("%", 1)[0]
                 if peer not in self._approved_addresses:
                     wrapped.close()
                     raise OSError("connected peer is outside the approved DNS set")
                 self.sock = wrapped
+                self._pending_socket = None
                 return
             except OSError as error:
                 last_error = error
@@ -262,7 +375,18 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
                         raw_socket.close()
                     except OSError:
                         pass
+                self._pending_socket = None
         raise OSError("no approved remote address could be connected") from last_error
+
+    def close(self) -> None:
+        pending = self._pending_socket
+        self._pending_socket = None
+        if pending is not None:
+            try:
+                pending.close()
+            except OSError:
+                pass
+        super().close()
 
 
 class UrllibHTTPTransport:
@@ -277,13 +401,81 @@ class UrllibHTTPTransport:
         ssl_context_factory: Callable[[], ssl.SSLContext] = ssl.create_default_context,
         pinned_connection_class: type[_PinnedHTTPSConnection] = _PinnedHTTPSConnection,
     ) -> None:
-        self._resolver = resolver
+        if not callable(resolver):
+            raise AdapterTransportError("dns_resolver_not_callable")
+        try:
+            # Serialize at trusted transport construction time.  The request
+            # path only passes inert bytes into the child, so a resolver with
+            # a hostile or blocking ``__reduce__`` cannot run while an HTTP
+            # deadline or project mutation boundary is held.
+            self._resolver_payload = pickle.dumps(
+                resolver, protocol=pickle.HIGHEST_PROTOCOL
+            )
+        except Exception as error:
+            raise AdapterTransportError(
+                "dns_resolver_not_isolatable"
+            ) from error
         self._ssl_context_factory = ssl_context_factory
         self._pinned_connection_class = pinned_connection_class
 
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
+
+    def _resolve_remote(
+        self, url: str, *, deadline_monotonic: float
+    ) -> tuple[str, ...]:
+        if not _DNS_RESOLVER_SLOTS.acquire(
+            timeout=_remaining_seconds(deadline_monotonic)
+        ):
+            raise AdapterTransportError("absolute_timeout")
+        process: multiprocessing.Process | None = None
+        receiver = None
+        sender = None
+        release_slot = True
+        try:
+            context = multiprocessing.get_context("spawn")
+            receiver, sender = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_dns_resolution_child,
+                args=(url, self._resolver_payload, sender),
+                name="costweave-dns-resolver",
+                daemon=True,
+            )
+            process.start()
+            sender.close()
+            sender = None
+            if not receiver.poll(_remaining_seconds(deadline_monotonic)):
+                if not _stop_dns_process(process):
+                    release_slot = False
+                    raise AdapterTransportError("dns_resolver_isolation_failed")
+                raise AdapterTransportError("absolute_timeout")
+            try:
+                succeeded, value = receiver.recv()
+            except (EOFError, OSError) as error:
+                raise AdapterTransportError("transport_error") from error
+            if not _stop_dns_process(process):
+                release_slot = False
+                raise AdapterTransportError("dns_resolver_isolation_failed")
+            if not succeeded:
+                raise AdapterTransportError("transport_error")
+            return tuple(value)
+        except AdapterTransportError:
+            raise
+        except Exception as error:
+            if process is not None and process.pid is not None:
+                if not _stop_dns_process(process):
+                    release_slot = False
+            raise AdapterTransportError("transport_error") from error
+        finally:
+            if sender is not None:
+                sender.close()
+            if receiver is not None:
+                receiver.close()
+            if process is not None and process.pid is not None and not process.is_alive():
+                process.close()
+            if release_slot:
+                _DNS_RESOLVER_SLOTS.release()
 
     def _post_remote_pinned(
         self,
@@ -294,15 +486,24 @@ class UrllibHTTPTransport:
         timeout_seconds: float,
     ) -> HTTPResponse:
         parsed = urlparse(url)
-        addresses = validate_remote_resolution(url, resolver=self._resolver)
+        deadline = time.monotonic() + timeout_seconds
+        addresses = self._resolve_remote(
+            url, deadline_monotonic=deadline
+        )
         connection = self._pinned_connection_class(
             str(parsed.hostname),
             int(parsed.port or 443),
             addresses,
-            timeout=timeout_seconds,
+            timeout=_remaining_seconds(deadline),
             context=self._ssl_context_factory(),
+            deadline_monotonic=deadline,
         )
         started = time.monotonic()
+        timer = threading.Timer(
+            _remaining_seconds(deadline), connection.close
+        )
+        timer.daemon = True
+        timer.start()
         try:
             connection.request(
                 "POST",
@@ -310,10 +511,14 @@ class UrllibHTTPTransport:
                 body=body,
                 headers=dict(headers),
             )
+            if getattr(connection, "sock", None) is not None:
+                connection.sock.settimeout(_remaining_seconds(deadline))
             response = connection.getresponse()
-            payload = response.read(MAX_RESPONSE_BYTES + 1)
-            if len(payload) > MAX_RESPONSE_BYTES:
-                raise AdapterTransportError("response_too_large")
+            payload = _read_with_deadline(
+                response,
+                maximum_bytes=MAX_RESPONSE_BYTES,
+                deadline_monotonic=deadline,
+            )
             return HTTPResponse(
                 status_code=int(response.status),
                 body=payload,
@@ -323,8 +528,11 @@ class UrllibHTTPTransport:
         except AdapterTransportError:
             raise
         except Exception as error:
+            if time.monotonic() >= deadline:
+                raise AdapterTransportError("absolute_timeout") from error
             raise AdapterTransportError("transport_error") from error
         finally:
+            timer.cancel()
             connection.close()
 
     def post(
@@ -345,44 +553,51 @@ class UrllibHTTPTransport:
                 body=body,
                 timeout_seconds=timeout_seconds,
             )
-        request = urllib.request.Request(
-            url,
-            data=body,
-            headers=dict(headers),
-            method="POST",
+        parsed = urlparse(url)
+        deadline = time.monotonic() + timeout_seconds
+        connection_class = (
+            http.client.HTTPSConnection
+            if parsed.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_class(
+            str(parsed.hostname),
+            int(parsed.port or (443 if parsed.scheme == "https" else 80)),
+            timeout=_remaining_seconds(deadline),
         )
         started = time.monotonic()
-        opener = urllib.request.build_opener(self._NoRedirect())
+        timer = threading.Timer(
+            _remaining_seconds(deadline), connection.close
+        )
+        timer.daemon = True
+        timer.start()
         try:
-            with opener.open(request, timeout=timeout_seconds) as response:
-                payload = response.read(MAX_RESPONSE_BYTES + 1)
-                if len(payload) > MAX_RESPONSE_BYTES:
-                    raise AdapterTransportError("response_too_large")
-                return HTTPResponse(
-                    status_code=int(response.status),
-                    body=payload,
-                    headers=dict(response.headers.items()),
-                    elapsed_ms=round(
-                        (time.monotonic() - started) * 1000
-                    ),
-                )
-        except urllib.error.HTTPError as error:
-            try:
-                payload = error.read(MAX_RESPONSE_BYTES + 1)
-                if len(payload) > MAX_RESPONSE_BYTES:
-                    raise AdapterTransportError("response_too_large")
-                return HTTPResponse(
-                    status_code=int(error.code),
-                    body=payload,
-                    headers=dict(error.headers.items()),
-                    elapsed_ms=round(
-                        (time.monotonic() - started) * 1000
-                    ),
-                )
-            finally:
-                error.close()
+            connection.request(
+                "POST", parsed.path or "/", body=body, headers=dict(headers)
+            )
+            if connection.sock is not None:
+                connection.sock.settimeout(_remaining_seconds(deadline))
+            response = connection.getresponse()
+            payload = _read_with_deadline(
+                response,
+                maximum_bytes=MAX_RESPONSE_BYTES,
+                deadline_monotonic=deadline,
+            )
+            return HTTPResponse(
+                status_code=int(response.status),
+                body=payload,
+                headers=dict(response.getheaders()),
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+            )
+        except AdapterTransportError:
+            raise
         except Exception as error:
+            if time.monotonic() >= deadline:
+                raise AdapterTransportError("absolute_timeout") from error
             raise AdapterTransportError("transport_error") from error
+        finally:
+            timer.cancel()
+            connection.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,7 +761,7 @@ class BaseExperimentalHTTPAdapter(ABC):
     ) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "CostWeave/0.6.7-experimental",
+            "User-Agent": f"CostWeave/{__version__}-experimental",
             "Idempotency-Key": idempotency_key,
         }
         if secret_lease is not None:
@@ -587,9 +802,9 @@ class BaseExperimentalHTTPAdapter(ABC):
                     raise ExperimentalCallError(
                         "provider billing header is invalid"
                     ) from error
-                if billed < 0:
+                if not math.isfinite(billed) or billed < 0:
                     raise ExperimentalCallError(
-                        "provider billing header is negative"
+                        "provider billing header must be finite and non-negative"
                     )
                 return round(billed, 10), "provider_billing_header"
         cost = (
@@ -607,12 +822,26 @@ class BaseExperimentalHTTPAdapter(ABC):
     ) -> ExternalCallReceipt:
         secret_lease, prompt_assessment, manifest = self._admit(request)
         try:
-            return self._execute_admitted(
-                request,
-                secret_lease=secret_lease,
-                prompt_assessment=prompt_assessment,
-                manifest=manifest,
-            )
+            with self.security_store.active_project_operation(
+                request.project_id
+            ):
+                try:
+                    return self._execute_admitted(
+                        request,
+                        secret_lease=secret_lease,
+                        prompt_assessment=prompt_assessment,
+                        manifest=manifest,
+                    )
+                finally:
+                    # Capabilities must be gone before the project operation
+                    # lock is released, so revocation cannot return while a
+                    # previously issued transport authority remains usable.
+                    self.authority.close_capabilities_for_request(
+                        project_id=request.project_id,
+                        data_residency=request.data_residency,
+                        run_id=request.run_id,
+                        task_id=request.task_id,
+                    )
         finally:
             if secret_lease is not None:
                 secret_lease.close()
@@ -622,8 +851,14 @@ class BaseExperimentalHTTPAdapter(ABC):
         *,
         reservation: Any,
         side_effect_id: str,
+        project_id: str,
+        data_residency: str,
+        secret_lease: SecretLease | None,
     ) -> ExternalCallReceipt | None:
         state = self.security_store.side_effect(side_effect_id) or {}
+        contract = state.get("contract")
+        if not isinstance(contract, Mapping):
+            return None
         completed = next(
             (
                 item
@@ -634,12 +869,53 @@ class BaseExperimentalHTTPAdapter(ABC):
         )
         if completed is None:
             return None
-        source_call_id = str(completed.get("detail", {}).get("external_call_id") or "")
+        source_call_id = str(contract.get("origin_external_call_id") or "")
         source_call = self.store.call(source_call_id) if source_call_id else None
+        expected = {
+            "external_call_id": source_call_id,
+            "project_id": normalize_project_id(project_id),
+            "data_residency": normalize_data_residency(data_residency),
+            "adapter_id": self.config.adapter_id,
+            "provider": self.config.provider,
+            "deployment_id": self.config.deployment_id,
+            "endpoint": self.config.endpoint,
+            "model_id": self.config.model_id,
+            "adapter_revision": self.config.adapter_revision,
+            "operation": "model_inference",
+            "request_hash": contract.get("request_hash"),
+            "provider_idempotency_key_hash": contract.get(
+                "provider_idempotency_key_hash"
+            ),
+            "side_effect_id": side_effect_id,
+        }
+        if (
+            source_call is None
+            or source_call.get("status") != "completed"
+            or any(
+                source_call.get(key) != contract.get(key)
+                for key in (
+                    "provider",
+                    "deployment_id",
+                    "model_id",
+                    "adapter_revision",
+                )
+            )
+            or completed.get("detail", {}).get("external_call_id")
+            != source_call_id
+        ):
+            raise ExperimentalCallError(
+                "completed side-effect replay source is not authoritative"
+            )
         source_result = source_call.get("result") if source_call is not None else None
         if not isinstance(source_result, Mapping):
             return None
+        if secret_lease is not None:
+            secret_lease.reject_if_exposed(source_result)
         prior = ExternalCallReceipt.from_dict(source_result, replayed=True)
+        if any(prior.telemetry.get(key) != value for key, value in expected.items()):
+            raise ExperimentalCallError(
+                "completed side-effect replay receipt does not match its contract"
+            )
         replayed_result = ResultEnvelope(
             work_order_id=prior.result.work_order_id,
             status=prior.result.status,
@@ -669,6 +945,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             telemetry=telemetry,
             replayed=True,
         )
+        if secret_lease is not None:
+            secret_lease.reject_if_exposed(receipt.to_dict())
         self.store.finalize(
             reservation.external_call_id,
             status="completed",
@@ -702,6 +980,7 @@ class BaseExperimentalHTTPAdapter(ABC):
             raise ExternalBudgetExceededError(
                 "WorkOrder hard cost limit cannot fund worst-case attempts"
             )
+        payload_hash = hashlib.sha256(payload_raw).hexdigest()
         fingerprint = {
             "experiment_id": request.experiment_id,
             "run_id": request.run_id,
@@ -716,10 +995,16 @@ class BaseExperimentalHTTPAdapter(ABC):
             "provider": self.config.provider,
             "model_id": self.config.model_id,
             "adapter_revision": self.config.adapter_revision,
+            "adapter_id": self.config.adapter_id,
+            "operation": "model_inference",
+            "endpoint": self.config.endpoint,
+            "request_hash": payload_hash,
+            "provider_idempotency_key_hash": hashlib.sha256(
+                provider_idempotency_key.encode("utf-8")
+            ).hexdigest(),
             "max_output_tokens": request.max_output_tokens,
             "payload_hash": hashlib.sha256(payload_raw).hexdigest(),
         }
-        payload_hash = hashlib.sha256(payload_raw).hexdigest()
         authority_reservation = self.authority.reserve(
             logical_values={
                 "experiment_id": request.experiment_id,
@@ -736,8 +1021,13 @@ class BaseExperimentalHTTPAdapter(ABC):
                 "max_attempts": self.config.max_retries + 1,
             },
             project_id=request.project_id,
+            data_residency=request.data_residency,
             adapter_id=self.config.adapter_id,
+            provider=self.config.provider,
+            deployment_id=self.config.deployment_id,
             endpoint=self.config.endpoint,
+            model_id=self.config.model_id,
+            adapter_revision=self.config.adapter_revision,
             operation="model_inference",
             provider_idempotency_key=provider_idempotency_key,
             request_hash=payload_hash,
@@ -746,6 +1036,8 @@ class BaseExperimentalHTTPAdapter(ABC):
         reservation = authority_reservation.logical
         if authority_reservation.mode == "logical_replay":
             if reservation.status == "completed" and reservation.result:
+                if secret_lease is not None:
+                    secret_lease.reject_if_exposed(reservation.result)
                 return ExternalCallReceipt.from_dict(
                     reservation.result, replayed=True
                 )
@@ -762,6 +1054,9 @@ class BaseExperimentalHTTPAdapter(ABC):
             replay = self._replay_completed_side_effect(
                 reservation=reservation,
                 side_effect_id=side_effect_id,
+                project_id=request.project_id,
+                data_residency=request.data_residency,
+                secret_lease=secret_lease,
             )
             if replay is not None:
                 return replay
@@ -796,6 +1091,7 @@ class BaseExperimentalHTTPAdapter(ABC):
         )
         result: ResultEnvelope | None = None
         last_error = "external_call_failed"
+        call_deadline = time.monotonic() + self.config.timeout_seconds
         for ordinal in range(1, self.config.max_retries + 2):
             transport_called = False
             try:
@@ -814,7 +1110,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                     url=self.config.endpoint,
                     headers=request_headers,
                     body=payload_raw,
-                    timeout_seconds=self.config.timeout_seconds,
+                    timeout_seconds=_remaining_seconds(call_deadline),
                 )
                 self.authority.guard_response(
                     capability,
@@ -875,7 +1171,11 @@ class BaseExperimentalHTTPAdapter(ABC):
                     raise ExperimentalCallError(
                         "provider response must be a JSON object"
                     )
+                if secret_lease is not None:
+                    secret_lease.reject_if_exposed(value)
                 parsed = self.parse_response(value)
+                if secret_lease is not None:
+                    secret_lease.reject_if_exposed(parsed.content)
                 actual_cost, billing_source = self._actual_cost(
                     parsed, response
                 )
@@ -971,6 +1271,13 @@ class BaseExperimentalHTTPAdapter(ABC):
             "provider": self.config.provider,
             "model_id": self.config.model_id,
             "adapter_revision": self.config.adapter_revision,
+            "adapter_id": self.config.adapter_id,
+            "operation": "model_inference",
+            "endpoint": self.config.endpoint,
+            "request_hash": payload_hash,
+            "provider_idempotency_key_hash": hashlib.sha256(
+                provider_idempotency_key.encode("utf-8")
+            ).hexdigest(),
             "reasoning_effort": self.config.reasoning_effort,
             "attempt_count": len(attempts),
             "input_tokens": sum(item.input_tokens for item in attempts),
@@ -1035,6 +1342,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             result=result,
             telemetry=telemetry,
         )
+        if secret_lease is not None:
+            secret_lease.reject_if_exposed(receipt.to_dict())
         self.store.finalize(
             reservation.external_call_id,
             status="completed",

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .contracts_v4 import utc_now
 from .evaluation_protocol import canonical_json
@@ -56,12 +57,17 @@ class ExperimentBudget:
     def __post_init__(self) -> None:
         if not self.experiment_id.startswith("experiment_"):
             raise ExperimentalCallError("experiment id is invalid")
-        if self.total_cost_limit_usd <= 0:
+        if (
+            not math.isfinite(float(self.total_cost_limit_usd))
+            or self.total_cost_limit_usd <= 0
+        ):
             raise ExperimentalCallError("experiment budget must be positive")
         if not self.provider_cost_limits_usd:
             raise ExperimentalCallError("provider budgets are required")
         if any(
-            not key or float(value) < 0
+            not key
+            or not math.isfinite(float(value))
+            or float(value) < 0
             for key, value in self.provider_cost_limits_usd.items()
         ):
             raise ExperimentalCallError("provider budget is invalid")
@@ -149,7 +155,11 @@ class ExternalAttempt:
             self.request_latency_ms,
             self.queue_latency_ms,
         )
-        if any(value < 0 for value in numeric) or self.actual_cost_usd < 0:
+        if (
+            any(value < 0 for value in numeric)
+            or not math.isfinite(float(self.actual_cost_usd))
+            or self.actual_cost_usd < 0
+        ):
             raise ExperimentalCallError("attempt measurements cannot be negative")
 
     @property
@@ -266,7 +276,11 @@ class ExperimentalCallStore:
     ) -> CallReservation:
         if not idempotency_key.strip() or len(idempotency_key) > 240:
             raise ExternalIdempotencyError("bounded idempotency key is required")
-        if worst_case_cost_per_attempt_usd < 0 or max_attempts <= 0:
+        if (
+            not math.isfinite(float(worst_case_cost_per_attempt_usd))
+            or worst_case_cost_per_attempt_usd < 0
+            or max_attempts <= 0
+        ):
             raise ExternalBudgetExceededError("invalid call reservation")
         request_hash = self._hash(request_fingerprint)
         reserved_cost = round(
@@ -651,8 +665,61 @@ class ExperimentalCallStore:
             "providers": provider,
         }
 
-    def counts(self) -> dict[str, int]:
+    def counts(
+        self, *, experiment_ids: Iterable[str] | None = None
+    ) -> dict[str, int]:
+        scoped_ids = (
+            None
+            if experiment_ids is None
+            else tuple(sorted({str(item) for item in experiment_ids if str(item)}))
+        )
         with self._connection() as connection:
+            if scoped_ids is not None:
+                if not scoped_ids:
+                    return {
+                        "external_experiments": 0,
+                        "external_calls": 0,
+                        "external_call_attempts": 0,
+                        "shadow_decisions": 0,
+                        "shadow_comparisons": 0,
+                    }
+                placeholders = ",".join("?" for _ in scoped_ids)
+                return {
+                    "external_experiments": int(
+                        connection.execute(
+                            f"SELECT COUNT(*) FROM external_experiments WHERE experiment_id IN ({placeholders})",
+                            scoped_ids,
+                        ).fetchone()[0]
+                    ),
+                    "external_calls": int(
+                        connection.execute(
+                            f"SELECT COUNT(*) FROM external_calls WHERE experiment_id IN ({placeholders})",
+                            scoped_ids,
+                        ).fetchone()[0]
+                    ),
+                    "external_call_attempts": int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM external_call_attempts a "
+                            "JOIN external_calls c ON c.external_call_id=a.external_call_id "
+                            f"WHERE c.experiment_id IN ({placeholders})",
+                            scoped_ids,
+                        ).fetchone()[0]
+                    ),
+                    "shadow_decisions": int(
+                        connection.execute(
+                            f"SELECT COUNT(*) FROM shadow_decisions WHERE experiment_id IN ({placeholders})",
+                            scoped_ids,
+                        ).fetchone()[0]
+                    ),
+                    "shadow_comparisons": int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM shadow_comparisons c "
+                            "JOIN shadow_decisions d ON d.shadow_decision_id=c.shadow_decision_id "
+                            f"WHERE d.experiment_id IN ({placeholders})",
+                            scoped_ids,
+                        ).fetchone()[0]
+                    ),
+                }
             return {
                 table: int(
                     connection.execute(

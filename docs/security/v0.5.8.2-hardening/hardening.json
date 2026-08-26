@@ -1,0 +1,113 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "costweave_v0582_security_boundary",
+  "sourceEvidence": {
+    "kind": "source_collection",
+    "label": "CostWeave v0.5.8.1 privileged boundary source review",
+    "collectionSha256": "fab1b89c7d4de5941c849e04e9b9554f56c5920178711fd18981cf643634c624",
+    "artifactCount": 7,
+    "sourceDrift": "unknown"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "Secret, network, redaction, project and replay invariants should share one owned enforcement boundary before stable Adapters are added."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": ["incremental", "medium_term", "foundational"],
+    "nonNegotiables": [
+      "Default installation performs zero external calls.",
+      "No secret value is persisted or returned by a public API.",
+      "A project cannot enumerate another project's runs or artifacts.",
+      "An ambiguous external side effect is not automatically repeated."
+    ],
+    "assumptions": [
+      "No measured latency or memory budget was supplied.",
+      "v0.5.8.2 remains a single-process, loopback-only control plane."
+    ]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "central-security-boundary",
+      "title": "Centralize privileged Adapter and data-scope enforcement",
+      "summary": "Give one versioned boundary ownership of Adapter manifests, secret leases, endpoint admission, prompt risk, project scope, redaction and side-effect identity.",
+      "diagnosis": "The current controls are useful but dispersed; callers can acquire ambient environment and network authority or return global data without passing one common policy object.",
+      "evidence": [
+        {"claimType":"observed","sourceKind":"source","evidenceId":"E001","path":"costweave/adapters/http.py","claim":"HTTP adapters read configured environment variables directly and construct Authorization headers inside the execution path."},
+        {"claimType":"observed","sourceKind":"source","evidenceId":"E002","path":"costweave/experimental_calls.py","claim":"Logical external calls have reservation idempotency, but Provider idempotency forwarding and an append-only side-effect contract are not centrally represented."},
+        {"claimType":"observed","sourceKind":"source","evidenceId":"E003","path":"costweave/evidence_console.py","claim":"Evidence export owns a local recursive redactor with a limited key and Bearer-prefix vocabulary."},
+        {"claimType":"observed","sourceKind":"source","evidenceId":"E004","path":"costweave/server.py","claim":"Run, approval, task and artifact reads are loopback-protected but not filtered by a project security scope."},
+        {"claimType":"inferred","sourceKind":"source","evidenceId":"E005","path":"costweave/domain.py","claim":"Without a project identifier in the durable run request, project ownership cannot survive restart as part of the authoritative projection."}
+      ],
+      "desiredInvariants": [
+        "Only a versioned registered Adapter manifest can request network or secret capabilities.",
+        "Secrets are resolved by short-lived leases and never enter config, persistence, logs, errors or exports.",
+        "Remote endpoints are explicit HTTPS targets, redirects and private-address targets are rejected, and response size is bounded.",
+        "Every run and derived Artifact is visible only inside its durable project scope.",
+        "Prompt-like untrusted data cannot expand tools, authority or scope; suspicious override instructions fail closed without a separate approval.",
+        "Every external side effect has an immutable project-scoped identity and either Provider idempotency or an explicit compensation strategy."
+      ],
+      "proposalPath": "proposals/central-security-boundary.md",
+      "options": [
+        {
+          "optionId":"local-guards",
+          "title":"Strengthen local guards",
+          "kind":"baseline",
+          "summary":"Extend checks in the current Adapter, server and exporter without a common policy owner.",
+          "diagramPaths":{"before":"diagrams/central-security-boundary-before.mmd","after":"diagrams/central-security-boundary-local-guards-after.mmd"},
+          "evidenceCoverage":[{"evidenceId":"E001","effect":"mitigates","tacticalFixRequired":true,"rationale":"Direct checks narrow known paths but ambient authority remains distributed."},{"evidenceId":"E004","effect":"mitigates","tacticalFixRequired":true,"rationale":"Route filters can cover current endpoints but future endpoints may omit them."}],
+          "tradeoffs":[
+            {"dimension":"security","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Known call sites gain checks, while ownership drift remains possible.","validationPlan":"Trace every secret, network and run-data entry point."},
+            {"dimension":"performance","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Local checks add no service hop.","validationPlan":"Benchmark request and Adapter admission latency."},
+            {"dimension":"memory","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"Only bounded temporary values are added.","validationPlan":"Compare peak RSS during export and Adapter fixtures."},
+            {"dimension":"reliability","direction":"improves","confidence":"low","basis":"hypothetical","assessment":"Known unsafe inputs fail earlier, but policy behavior can diverge.","validationPlan":"Run a shared negative corpus against every call site."},
+            {"dimension":"operability","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"No new component exists, but audit state remains fragmented.","validationPlan":"Review incident reconstruction from logs and SQLite."},
+            {"dimension":"migration","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Small compatibility-preserving patches are easy to roll back.","validationPlan":"Run the full historical suite."}
+          ],
+          "residualRisks":["Future connectors can omit one or more local guards."],
+          "implementationReadiness":{"affectedComponents":["costweave/adapters/http.py","costweave/evidence_console.py","costweave/server.py"],"workPackages":["Patch local guards and add negative tests."],"acceptanceCriteria":["Known negative cases fail before privileged operations."],"migrationNotes":[],"rollback":"Revert focused guards."}
+        },
+        {
+          "optionId":"central-security-boundary",
+          "title":"Central security boundary",
+          "kind":"structural",
+          "summary":"Introduce one policy, broker and append-only store consumed by Adapters, exports and HTTP project gates.",
+          "diagramPaths":{"before":"diagrams/central-security-boundary-before.mmd","after":"diagrams/central-security-boundary-central-security-boundary-after.mmd"},
+          "evidenceCoverage":[{"evidenceId":"E001","effect":"addresses","tacticalFixRequired":true,"rationale":"Adapters receive leases and admission decisions from the boundary."},{"evidenceId":"E002","effect":"addresses","tacticalFixRequired":true,"rationale":"Append-only side-effect identity complements the existing call reservation."},{"evidenceId":"E003","effect":"addresses","tacticalFixRequired":true,"rationale":"One redactor is reused for API, logs and exports."},{"evidenceId":"E004","effect":"addresses","tacticalFixRequired":true,"rationale":"Durable project scope is enforced before run-derived reads or writes."},{"evidenceId":"E005","effect":"addresses","tacticalFixRequired":true,"rationale":"Project and residency become part of the persisted RunRequest."}],
+          "tradeoffs":[
+            {"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Privileged capabilities and data scope share one fail-closed owner.","validationPlan":"Run negative endpoint, secret, injection, project and replay tests."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"hypothetical","assessment":"Admission adds bounded hashing, pattern matching and SQLite writes around external calls.","validationPlan":"Compare P50/P95 admission latency against v0.5.8.1 fixtures; investigate if P95 exceeds 10 ms locally."},
+            {"dimension":"memory","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Registries and secret leases are bounded and contain no retained response bodies.","validationPlan":"Measure peak RSS over 10,000 admissions and exports."},
+            {"dimension":"reliability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Ambiguous side effects stop in reserved state instead of automatic replay; central failures are fail closed.","validationPlan":"Inject crashes before and after transport completion and verify no second transport call."},
+            {"dimension":"operability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"One public policy and count surface simplifies audit, with a new migration and event vocabulary.","validationPlan":"Reconstruct a fixture call from security and external-call receipts."},
+            {"dimension":"migration","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Run projections and API scope gain compatible defaulted fields; all run-derived routes require audit.","validationPlan":"Hydrate old snapshots and run the full historical suite."}
+          ],
+          "residualRisks":["Single-process isolation cannot contain malicious in-process plugin code.","Logical project revocation does not physically erase historical SQLite rows."],
+          "implementationReadiness":{"affectedComponents":["costweave/security_boundary.py","costweave/security_store.py","costweave/adapters/http.py","costweave/domain.py","costweave/engine.py","costweave/server.py","costweave/evidence_console.py"],"workPackages":["Add central contracts and store.","Route Adapter admission and secret leases through them.","Persist and enforce project scope.","Reuse redaction at public boundaries.","Add API, UI and regression coverage."],"acceptanceCriteria":["Secret leak corpus has zero public or persistent occurrences.","Unauthorized network and tools perform zero transport calls.","Cross-project runs and artifacts return not found.","Side-effect identity replay is idempotent and conflicting reuse is rejected."],"migrationNotes":["Default old project scope to local-default."],"rollback":"Disable new Adapter entry points, retain migration records, and run v0.5.8.1 with local-default compatibility."}
+        },
+        {
+          "optionId":"isolated-adapter-gateway",
+          "title":"Isolated Adapter gateway",
+          "kind":"isolation",
+          "summary":"Move credentials and outbound network into a separate least-privileged process or service.",
+          "diagramPaths":{"before":"diagrams/central-security-boundary-before.mmd","after":"diagrams/central-security-boundary-isolated-adapter-gateway-after.mmd"},
+          "evidenceCoverage":[{"evidenceId":"E001","effect":"addresses","tacticalFixRequired":true,"rationale":"The orchestrator no longer holds Provider credentials or raw network authority."},{"evidenceId":"E004","effect":"mitigates","tacticalFixRequired":true,"rationale":"Gateway isolation does not itself enforce local API project scope."}],
+          "tradeoffs":[
+            {"dimension":"security","direction":"improves","confidence":"high","basis":"analogous","assessment":"A process boundary narrows credential and network blast radius.","validationPlan":"Attempt capability escape from a deliberately hostile plugin fixture."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"hypothetical","assessment":"IPC serialization and another queue enter each external call.","validationPlan":"Measure end-to-end P50/P95 with realistic payload sizes."},
+            {"dimension":"memory","direction":"regresses","confidence":"medium","basis":"hypothetical","assessment":"A second runtime and bounded queues consume additional memory.","validationPlan":"Measure combined working set under idle and burst load."},
+            {"dimension":"reliability","direction":"improves","confidence":"medium","basis":"analogous","assessment":"Plugin crashes are isolated, but gateway availability becomes a dependency.","validationPlan":"Kill and restart the gateway during calls and verify reconciliation."},
+            {"dimension":"operability","direction":"regresses","confidence":"high","basis":"source-derived","assessment":"Deployment, health, version skew and credential rotation become multi-process concerns.","validationPlan":"Perform install, upgrade, rollback and incident drills."},
+            {"dimension":"migration","direction":"regresses","confidence":"high","basis":"source-derived","assessment":"Adapter calls need a versioned IPC protocol and deployment packaging.","validationPlan":"Run dual-path Shadow traffic before cutover."}
+          ],
+          "residualRisks":["The local API and project data boundary still need central enforcement."],
+          "implementationReadiness":{"affectedComponents":["future adapter gateway","future IPC protocol"],"workPackages":["Define capability protocol.","Build isolated process.","Shadow and migrate connectors."],"acceptanceCriteria":["Host process cannot read Provider secrets or open arbitrary outbound connections."],"migrationNotes":["Defer to v0.6 production connector work."],"rollback":"Return traffic to the in-process boundary while keeping Adapters default off."}
+        }
+      ],
+      "recommendedOptionId":"central-security-boundary",
+      "recommendation":"Implement the central boundary in v0.5.8.2; revisit process isolation before accepting untrusted production plugins."
+    }
+  ],
+  "openQuestions":["What verified physical-erasure SLA will future multi-tenant deployments require?","What Adapter admission P95 is acceptable under real concurrency?"]
+}

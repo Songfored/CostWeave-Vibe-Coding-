@@ -91,7 +91,7 @@ def verify_fresh_install(*, timeout_seconds: float = 30.0) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Verify CostWeave v0.5 stable offline installation"
+        description=f"Verify CostWeave v{__version__} offline installation"
     )
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--pretty", action="store_true")

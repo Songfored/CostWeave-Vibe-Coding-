@@ -11,9 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import multiprocessing
 import os
+import pickle
 import re
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -43,6 +46,7 @@ from .security_boundary import (
     prompt_approval_binding,
     require_prompt_admission,
 )
+from .security_store import SecurityStore
 
 
 SMALL_BUDGET_SHADOW_SCHEMA_VERSION = "v0.6.6"
@@ -60,6 +64,11 @@ MAX_SHADOW_LOGICAL_CALLS = 20
 MAX_SHADOW_ATTEMPTS_PER_PROBE = 1
 MAX_SHADOW_OUTPUT_TOKENS = 8_192
 MAX_SHADOW_LIFETIME_SECONDS = 86_400
+MAX_SHADOW_EXECUTOR_SECONDS = 30.0
+MAX_CONCURRENT_SHADOW_EXECUTORS = 4
+_SHADOW_EXECUTOR_SLOTS = threading.BoundedSemaphore(
+    MAX_CONCURRENT_SHADOW_EXECUTORS
+)
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -71,6 +80,14 @@ class SmallBudgetShadowError(ValueError):
 
 class SmallBudgetShadowNotFoundError(KeyError):
     """Raised for missing or cross-project shadow sessions."""
+
+
+class ShadowProbeDeadlineExceededError(SmallBudgetShadowError):
+    """Raised after a shadow child is forcibly stopped at its hard deadline."""
+
+
+class ShadowProbeIsolationError(SmallBudgetShadowError):
+    """Raised when the isolated shadow child cannot start or stop safely."""
 
 
 def _hash(value: Any) -> str:
@@ -587,6 +604,7 @@ class ShadowSessionV1:
 class ShadowProbeRequestV1:
     experiment_id: str
     project_id: str
+    data_residency: str
     work_order: WorkOrder
     baseline_route_id: str
     baseline_route_fingerprint: str
@@ -602,6 +620,8 @@ class ShadowProbeRequestV1:
             raise SmallBudgetShadowError("shadow experiment id is invalid")
         if normalize_project_id(self.project_id) != self.project_id:
             raise SmallBudgetShadowError("project_id is not canonical")
+        if normalize_data_residency(self.data_residency) != self.data_residency:
+            raise SmallBudgetShadowError("data_residency is not canonical")
         _identifier(self.baseline_route_id, "baseline_route_id")
         _sha256(
             self.baseline_route_fingerprint,
@@ -641,6 +661,7 @@ class ShadowProbeRequestV1:
             {
                 "experiment_id": self.experiment_id,
                 "project_id": self.project_id,
+                "data_residency": self.data_residency,
                 "work_order_hash": _hash(self.work_order.to_dict()),
                 "baseline_route_id": self.baseline_route_id,
                 "baseline_route_fingerprint": self.baseline_route_fingerprint,
@@ -656,6 +677,7 @@ class ShadowProbeRequestV1:
         allowed = {
             "experiment_id",
             "project_id",
+            "data_residency",
             "work_order",
             "baseline_route_id",
             "baseline_route_fingerprint",
@@ -673,6 +695,7 @@ class ShadowProbeRequestV1:
         missing = {
             "experiment_id",
             "project_id",
+            "data_residency",
             "work_order",
             "baseline_route_id",
             "baseline_route_fingerprint",
@@ -687,6 +710,9 @@ class ShadowProbeRequestV1:
         return cls(
             experiment_id=str(value["experiment_id"]),
             project_id=normalize_project_id(value["project_id"]),
+            data_residency=normalize_data_residency(
+                value["data_residency"]
+            ),
             work_order=_work_order(value["work_order"]),
             baseline_route_id=str(value["baseline_route_id"]),
             baseline_route_fingerprint=str(
@@ -801,6 +827,177 @@ class ShadowProbeExecutor(Protocol):
         ...
 
 
+def _shadow_probe_child(
+    delegate_payload: bytes,
+    config: ShadowExperimentConfigV1,
+    request: ShadowProbeRequestV1,
+    sender: Any,
+) -> None:
+    """Execute untrusted synchronous probe code without returning raw errors."""
+
+    try:
+        delegate = pickle.loads(delegate_payload)
+        measurement = delegate.execute(config, request)
+        if not isinstance(measurement, ShadowProbeMeasurementV1):
+            sender.send(("error", "unsupported_measurement"))
+        else:
+            sender.send(("completed", measurement.to_dict()))
+    except BaseException:
+        try:
+            sender.send(("error", "shadow_executor_failed"))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        sender.close()
+
+
+class ProcessIsolatedShadowProbeExecutor:
+    """Host-enforced, bounded and terminable wrapper for synchronous probes."""
+
+    def __init__(
+        self,
+        delegate: ShadowProbeExecutor,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        if not callable(getattr(delegate, "execute", None)):
+            raise ShadowProbeIsolationError(
+                "shadow executor delegate must define execute"
+            )
+        timeout = float(timeout_seconds)
+        if (
+            not math.isfinite(timeout)
+            or timeout < 0.05
+            or timeout > MAX_SHADOW_EXECUTOR_SECONDS
+        ):
+            raise ShadowProbeIsolationError(
+                "shadow executor timeout is outside the bounded policy"
+            )
+        try:
+            # Serialize once at trusted wrapper construction time.  Runtime
+            # execution passes inert bytes only; delegate deserialization and
+            # execution both occur inside the terminable child process.
+            self._delegate_payload = pickle.dumps(
+                delegate, protocol=pickle.HIGHEST_PROTOCOL
+            )
+        except Exception as error:
+            raise ShadowProbeIsolationError(
+                "shadow executor delegate is not process isolatable"
+            ) from error
+        self.timeout_seconds = timeout
+        self._calls = 0
+        self._lock = threading.Lock()
+
+    @property
+    def calls(self) -> int:
+        with self._lock:
+            return self._calls
+
+    @staticmethod
+    def _stop(process: multiprocessing.Process) -> bool:
+        process.join(0.2)
+        if process.is_alive():
+            process.terminate()
+            process.join(1.0)
+        if process.is_alive() and hasattr(process, "kill"):
+            process.kill()
+            process.join(1.0)
+        return not process.is_alive()
+
+    def execute(
+        self,
+        config: ShadowExperimentConfigV1,
+        request: ShadowProbeRequestV1,
+    ) -> ShadowProbeMeasurementV1:
+        configured_timeout = float(self.timeout_seconds)
+        if (
+            not math.isfinite(configured_timeout)
+            or configured_timeout < 0.05
+            or configured_timeout > MAX_SHADOW_EXECUTOR_SECONDS
+        ):
+            raise ShadowProbeIsolationError(
+                "shadow executor timeout is outside the bounded policy"
+            )
+        request_limit = max(0.05, request.work_order.time_limit_ms / 1000.0)
+        _expires_text, expires_at = _timestamp(config.expires_at, "expires_at")
+        expiry_limit = (expires_at - datetime.now(UTC)).total_seconds()
+        if expiry_limit <= 0:
+            raise ShadowProbeDeadlineExceededError(
+                "shadow experiment expired before execution"
+            )
+        deadline_seconds = min(configured_timeout, request_limit, expiry_limit)
+        started = time.monotonic()
+        if not _SHADOW_EXECUTOR_SLOTS.acquire(timeout=deadline_seconds):
+            raise ShadowProbeDeadlineExceededError(
+                "shadow executor concurrency deadline exceeded"
+            )
+        process: multiprocessing.Process | None = None
+        receiver = None
+        sender = None
+        release_slot = True
+        try:
+            context = multiprocessing.get_context("spawn")
+            receiver, sender = context.Pipe(duplex=False)
+            process = context.Process(
+                target=_shadow_probe_child,
+                args=(self._delegate_payload, config, request, sender),
+                name="costweave-shadow-probe",
+                daemon=True,
+            )
+            process.start()
+            sender.close()
+            sender = None
+            with self._lock:
+                self._calls += 1
+            remaining = max(
+                0.0,
+                deadline_seconds - (time.monotonic() - started),
+            )
+            if not receiver.poll(remaining):
+                if not self._stop(process):
+                    release_slot = False
+                    raise ShadowProbeIsolationError(
+                        "shadow executor could not be terminated"
+                    )
+                raise ShadowProbeDeadlineExceededError(
+                    "shadow executor hard deadline exceeded"
+                )
+            try:
+                status, payload = receiver.recv()
+            except (EOFError, OSError) as error:
+                raise ShadowProbeIsolationError(
+                    "shadow executor result channel failed"
+                ) from error
+            if not self._stop(process):
+                release_slot = False
+                raise ShadowProbeIsolationError(
+                    "shadow executor did not exit after returning"
+                )
+            if status != "completed" or not isinstance(payload, Mapping):
+                raise ShadowProbeIsolationError("shadow executor failed")
+            return ShadowProbeMeasurementV1.from_dict(payload)
+        except ShadowProbeDeadlineExceededError:
+            raise
+        except ShadowProbeIsolationError:
+            raise
+        except Exception as error:
+            if process is not None and process.pid is not None:
+                if not self._stop(process):
+                    release_slot = False
+            raise ShadowProbeIsolationError(
+                "shadow executor could not be isolated"
+            ) from error
+        finally:
+            if sender is not None:
+                sender.close()
+            if receiver is not None:
+                receiver.close()
+            if process is not None and process.pid is not None and not process.is_alive():
+                process.close()
+            if release_slot:
+                _SHADOW_EXECUTOR_SLOTS.release()
+
+
 @dataclass(frozen=True, slots=True)
 class ShadowProbeReceiptV1:
     receipt_id: str
@@ -906,6 +1103,7 @@ class SmallBudgetShadowRuntime:
         adapter_policy: AdapterRuntimePolicy | None = None,
     ) -> None:
         self.store = store
+        self.security_store = SecurityStore(store.path)
         self.approval_store = ApprovalStore(store.path)
         self.executor = executor
         self.adapter_policy = adapter_policy or AdapterRuntimePolicy.from_environment()
@@ -914,6 +1112,9 @@ class SmallBudgetShadowRuntime:
         self._lock = threading.RLock()
 
     def _admission(self, config: ShadowExperimentConfigV1) -> tuple[bool, str | None]:
+        _expires_text, expires_at = _timestamp(config.expires_at, "expires_at")
+        if expires_at <= datetime.now(UTC):
+            return False, "shadow_session_expired"
         if not config.live_calls_requested:
             return False, "live_calls_not_requested"
         if not self.adapter_policy.experimental_calls_enabled:
@@ -930,6 +1131,8 @@ class SmallBudgetShadowRuntime:
             return False, "secret_unavailable"
         if self.executor is None:
             return False, "shadow_executor_unavailable"
+        if type(self.executor) is not ProcessIsolatedShadowProbeExecutor:
+            return False, "shadow_executor_isolation_required"
         return True, None
 
     def configure(self, config: ShadowExperimentConfigV1) -> ShadowSessionV1:
@@ -940,7 +1143,10 @@ class SmallBudgetShadowRuntime:
                 raise SmallBudgetShadowError(
                     "configure requires ShadowExperimentConfigV1"
                 )
-        with self._lock:
+        with (
+            self.security_store.active_project_operation(config.project_id),
+            self._lock,
+        ):
             existing = self._configs.get(config.experiment_id)
             if (
                 existing is not None
@@ -962,11 +1168,23 @@ class SmallBudgetShadowRuntime:
                 configured_at=self._configured_at[config.experiment_id],
             )
 
-    def session(self, experiment_id: str, *, project_id: str) -> ShadowSessionV1:
+    def session(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str,
+        data_residency: str,
+    ) -> ShadowSessionV1:
         project = normalize_project_id(project_id)
+        residency = normalize_data_residency(data_residency)
+        self.security_store.ensure_project_active(project)
         with self._lock:
             config = self._configs.get(str(experiment_id))
-            if config is None or config.project_id != project:
+            if (
+                config is None
+                or config.project_id != project
+                or config.data_residency != residency
+            ):
                 raise SmallBudgetShadowNotFoundError(experiment_id)
             armed, reason = self._admission(config)
             return ShadowSessionV1(
@@ -977,17 +1195,45 @@ class SmallBudgetShadowRuntime:
                 configured_at=self._configured_at[config.experiment_id],
             )
 
-    def summary(self, experiment_id: str, *, project_id: str) -> dict[str, Any]:
-        session = self.session(experiment_id, project_id=project_id)
+    def summary(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str,
+        data_residency: str,
+    ) -> dict[str, Any]:
+        session = self.session(
+            experiment_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        )
         return {
             "session": session.to_dict(),
             "budget": self.store.experiment_summary(experiment_id),
         }
 
-    def counts(self) -> dict[str, int]:
+    def counts(
+        self,
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
+    ) -> dict[str, int]:
         with self._lock:
             configs = tuple(self._configs.values())
-        store_counts = self.store.counts()
+        if project_id is not None:
+            project = normalize_project_id(project_id)
+            configs = tuple(item for item in configs if item.project_id == project)
+        if data_residency is not None:
+            residency = normalize_data_residency(data_residency)
+            configs = tuple(
+                item for item in configs if item.data_residency == residency
+            )
+        scoped = project_id is not None or data_residency is not None
+        store_counts = self.store.counts(
+            experiment_ids=(item.experiment_id for item in configs)
+            if scoped
+            else None
+        )
         return {
             "configured_sessions": len(configs),
             "armed_sessions": sum(self._admission(item)[0] for item in configs),
@@ -1041,8 +1287,18 @@ class SmallBudgetShadowRuntime:
                 raise SmallBudgetShadowError(
                     "probe requires ShadowProbeRequestV1"
                 )
+        with self.security_store.active_project_operation(
+            request.project_id
+        ):
+            return self._probe_active(request)
+
+    def _probe_active(
+        self, request: ShadowProbeRequestV1
+    ) -> ShadowProbeReceiptV1:
         session = self.session(
-            request.experiment_id, project_id=request.project_id
+            request.experiment_id,
+            project_id=request.project_id,
+            data_residency=request.data_residency,
         )
         config = session.config
         if request.max_output_tokens > config.max_output_tokens_per_probe:
@@ -1220,7 +1476,11 @@ class SmallBudgetShadowRuntime:
             error_code = (
                 "actual_cost_exceeded_reservation"
                 if isinstance(exc, ExternalBudgetExceededError)
-                else "shadow_executor_failed"
+                else (
+                    "shadow_deadline_exceeded"
+                    if isinstance(exc, ShadowProbeDeadlineExceededError)
+                    else "shadow_executor_failed"
+                )
             )
             # An executor error can happen after the Provider accepted a paid
             # request.  Until WP08 reconciles invoices, conservatively consume
@@ -1282,6 +1542,8 @@ def public_small_budget_shadow_policy() -> dict[str, Any]:
         "live_calls_enabled_by_default": False,
         "paid_calls_enabled_by_default": False,
         "executor_available_by_default": False,
+        "process_isolation_required": True,
+        "host_enforced_deadline": True,
         "explicit_provider_required": True,
         "explicit_secret_reference_required_for_remote": True,
         "explicit_data_scope_required": True,
@@ -1298,8 +1560,11 @@ def public_small_budget_shadow_policy() -> dict[str, Any]:
             "maximum_attempts_per_probe": MAX_SHADOW_ATTEMPTS_PER_PROBE,
             "maximum_output_tokens_per_probe": MAX_SHADOW_OUTPUT_TOKENS,
             "maximum_lifetime_seconds": MAX_SHADOW_LIFETIME_SECONDS,
+            "maximum_executor_seconds": MAX_SHADOW_EXECUTOR_SECONDS,
+            "maximum_concurrent_executors": MAX_CONCURRENT_SHADOW_EXECUTORS,
         },
         "project_scoped": True,
+        "data_residency_scoped": True,
         "idempotent": True,
         "failure_isolated": True,
         "policy_promotion_allowed": False,
@@ -1310,6 +1575,8 @@ def public_small_budget_shadow_policy() -> dict[str, Any]:
 
 __all__ = [
     "MAX_SHADOW_ATTEMPTS_PER_PROBE",
+    "MAX_CONCURRENT_SHADOW_EXECUTORS",
+    "MAX_SHADOW_EXECUTOR_SECONDS",
     "MAX_SHADOW_LIFETIME_SECONDS",
     "MAX_SHADOW_LOGICAL_CALLS",
     "MAX_SHADOW_OUTPUT_TOKENS",
@@ -1319,10 +1586,13 @@ __all__ = [
     "SMALL_BUDGET_SHADOW_POLICY_REVISION",
     "SMALL_BUDGET_SHADOW_SCHEMA_VERSION",
     "ShadowExperimentConfigV1",
+    "ProcessIsolatedShadowProbeExecutor",
+    "ShadowProbeDeadlineExceededError",
     "ShadowProbeExecutor",
     "ShadowProbeMeasurementV1",
     "ShadowProbeReceiptV1",
     "ShadowProbeRequestV1",
+    "ShadowProbeIsolationError",
     "ShadowSessionV1",
     "SmallBudgetShadowError",
     "SmallBudgetShadowNotFoundError",

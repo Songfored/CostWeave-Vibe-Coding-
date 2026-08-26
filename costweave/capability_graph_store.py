@@ -269,7 +269,8 @@ class CapabilityGraphStore:
             rows = connection.execute("SELECT * FROM capability_route_decisions_v062 WHERE project_id=? ORDER BY created_at DESC,decision_id DESC LIMIT ?", (project, limit)).fetchall()
         return [self._row_decision(row) for row in rows]
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
             tables = {
                 "capability_nodes_v062": "capability_nodes_v062",
@@ -279,7 +280,9 @@ class CapabilityGraphStore:
                 "capability_route_decisions_v062": "capability_route_decisions_v062",
                 "capability_route_idempotency_v062": "capability_route_idempotency_v062",
             }
-            return {key: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in tables.items()}
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
+            return {key: int(connection.execute(f"SELECT COUNT(*) FROM {table}{suffix}", params).fetchone()[0]) for key, table in tables.items()}
 
 
 __all__ = ["CapabilityGraphStore", "CapabilityGraphStoreError"]

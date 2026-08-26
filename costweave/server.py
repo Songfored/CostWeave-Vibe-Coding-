@@ -18,7 +18,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import __version__
+from .version import (
+    ACTIVE_WORK_PACKAGE,
+    STABLE_BASELINE,
+    VERSION_TAG,
+    __version__,
+)
 from .catalog_store import (
     CATALOG_STORE,
     CatalogConflictError,
@@ -146,6 +151,9 @@ MANAGER: RunManager | None = None
 WEB_ROOT = files("costweave").joinpath("web")
 LOCAL_SESSION_HEADER = "X-CostWeave-Session"
 DEFAULT_MAX_ACTIVE_REQUESTS = 32
+DEFAULT_HEADER_DEADLINE_SECONDS = 10.0
+DEFAULT_BODY_DEADLINE_SECONDS = 10.0
+DEFAULT_REJECTED_BODY_DRAIN_SECONDS = 0.25
 
 
 def resolve_static_target(
@@ -205,11 +213,28 @@ class CostWeaveServer(ThreadingHTTPServer):
         request_handler_class,
         *,
         max_active_requests: int = DEFAULT_MAX_ACTIVE_REQUESTS,
+        header_deadline_seconds: float = DEFAULT_HEADER_DEADLINE_SECONDS,
+        body_deadline_seconds: float = DEFAULT_BODY_DEADLINE_SECONDS,
+        rejected_body_drain_seconds: float = DEFAULT_REJECTED_BODY_DRAIN_SECONDS,
         bind_and_activate: bool = True,
     ) -> None:
         if isinstance(max_active_requests, bool) or not 1 <= int(max_active_requests) <= 256:
             raise ValueError("max_active_requests must be between 1 and 256")
         self.max_active_requests = int(max_active_requests)
+        for label, value in (
+            ("header_deadline_seconds", header_deadline_seconds),
+            ("body_deadline_seconds", body_deadline_seconds),
+            ("rejected_body_drain_seconds", rejected_body_drain_seconds),
+        ):
+            if (
+                isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or not 0.01 <= float(value) <= 120.0
+            ):
+                raise ValueError(f"{label} must be between 0.01 and 120 seconds")
+        self.header_deadline_seconds = float(header_deadline_seconds)
+        self.body_deadline_seconds = float(body_deadline_seconds)
+        self.rejected_body_drain_seconds = float(rejected_body_drain_seconds)
         self._request_slots = threading.BoundedSemaphore(self.max_active_requests)
         self._request_count_lock = threading.Lock()
         self._active_requests = 0
@@ -234,14 +259,12 @@ class CostWeaveServer(ThreadingHTTPServer):
                     + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
                     + body
                 )
-                # Windows may discard the response with an RST when a socket
-                # is closed while the client's request bytes remain unread.
-                # Drain only bytes that are already available; never let an
-                # overload response consume another worker or block intake.
-                request.settimeout(0.02)
-                while request.recv(4096):
-                    pass
-            except (TimeoutError, socket.timeout):
+                # Never drain an attacker-controlled stream in the accept
+                # thread.  One non-blocking read can reduce Windows RSTs but
+                # has a strict byte and time bound.
+                request.setblocking(False)
+                request.recv(4096)
+            except (BlockingIOError, TimeoutError, socket.timeout):
                 pass
             except OSError:
                 pass
@@ -282,7 +305,7 @@ class CostWeaveServer(ThreadingHTTPServer):
 
 
 class CostWeaveHandler(BaseHTTPRequestHandler):
-    server_version = "CostWeave/0.6.7"
+    server_version = f"CostWeave/{__version__}"
 
     def setup(self) -> None:
         super().setup()
@@ -290,6 +313,58 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._legacy_api = False
         self._request_security_context: RequestSecurityContextV1 | None = None
         self._authorized_path: str | None = None
+        self._deadline_lock = threading.Lock()
+        self._deadline_timer: threading.Timer | None = None
+        self._deadline_generation = 0
+        self._deadline_expired = False
+
+    def _expire_absolute_deadline(self, generation: int) -> None:
+        with self._deadline_lock:
+            if generation != self._deadline_generation:
+                return
+            self._deadline_expired = True
+            self._deadline_timer = None
+            self.close_connection = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def _arm_absolute_deadline(self, seconds: float) -> None:
+        with self._deadline_lock:
+            old_timer = self._deadline_timer
+            self._deadline_generation += 1
+            generation = self._deadline_generation
+            self._deadline_expired = False
+            timer = threading.Timer(
+                float(seconds), self._expire_absolute_deadline, (generation,)
+            )
+            timer.daemon = True
+            self._deadline_timer = timer
+            if old_timer is not None:
+                old_timer.cancel()
+            timer.start()
+
+    def _cancel_absolute_deadline(self) -> None:
+        with self._deadline_lock:
+            self._deadline_generation += 1
+            timer = self._deadline_timer
+            self._deadline_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def handle_one_request(self) -> None:
+        self._arm_absolute_deadline(
+            float(getattr(self.server, "header_deadline_seconds", 10.0))
+        )
+        try:
+            try:
+                super().handle_one_request()
+            except OSError:
+                if not self._deadline_expired:
+                    raise
+        finally:
+            self._cancel_absolute_deadline()
 
     @property
     def manager(self) -> RunManager:
@@ -331,7 +406,10 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         return {
             "runtime_available": True,
             "adapter_policy": runtime.adapter_policy.public(),
-            "runtime_counts": runtime.counts(),
+            "runtime_counts": runtime.counts(
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
+            ),
         }
 
     def _project_id(self) -> str:
@@ -427,11 +505,27 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             "/api/health",
             "/api/v1/security/policy",
             "/api/v1/system/diagnostics",
+            "/api/v1/system/backups",
+            "/api/v1/resilience/status",
             "/api/v1/release/status",
             "/api/v1/resources",
         }:
             return False
         return not path.startswith(("/api/catalog", "/api/v1/catalog"))
+
+    @staticmethod
+    def _local_only_lab_path(path: str) -> bool:
+        prefixes = (
+            "/api/v1/tournaments",
+            "/api/v1/meta-controller",
+            "/api/v1/capability-router",
+            "/api/v1/joint-search",
+            "/api/v1/execution-recovery",
+            "/api/v1/safe-learning",
+            "/api/v1/resilience",
+            "/api/v1/release",
+        )
+        return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
 
     def _authorize_request(self, path: str, *, require_json: bool = False) -> None:
         self._validate_request_headers(require_json=require_json)
@@ -455,6 +549,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 "X-CostWeave-Data-Residency", DEFAULT_DATA_RESIDENCY
             )
         )
+        if residency != DEFAULT_DATA_RESIDENCY and self._local_only_lab_path(path):
+            raise RequestError(
+                "this offline lab API currently supports local data residency only",
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "data_residency_unsupported",
+            )
         revocation_request = (
             path.startswith("/api/v1/projects/") and path.endswith("/revoke")
         )
@@ -486,7 +586,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             data_residency=self._data_residency(),
         )
 
-    def _shot_visible(self, shot_id: str) -> bool:
+    def _visible_shot_owner(self, shot_id: str) -> str | None:
+        owners: list[str] = []
         for run in self.manager.list(
             project_id=self._project_id(),
             data_residency=self._data_residency(),
@@ -495,10 +596,17 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 str(item.get("shot_id")) == shot_id
                 for item in self.manager.media_shots(str(run.get("id")))
             ):
-                return True
-        return False
+                owners.append(str(run.get("id")))
+        if len(owners) > 1:
+            raise RequestError(
+                "media shot identity is ambiguous within this scope",
+                HTTPStatus.CONFLICT,
+                "media_shot_ambiguous",
+            )
+        return owners[0] if owners else None
 
     def do_GET(self) -> None:  # noqa: N802
+        self._cancel_absolute_deadline()
         parsed = urlparse(self.path)
         path = self._normalise_api_path(parsed.path)
         try:
@@ -525,15 +633,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({
                 "status": "ok",
                 "runtime": "offline-decision-simulation",
-                # Keep the released v0.5.8.4 compatibility label while
-                # Expose the active v0.6.7 development line explicitly.
-                "version": "0.5.8.4",
-                "development_version": __version__,
+                "version": __version__,
                 "version_line": {
-                    "stable_baseline": "v0.5.8.4",
+                    "stable_baseline": STABLE_BASELINE,
                     "previous_lab": "v0.6.0",
-                    "active_development": "v0.6.7",
-                    "active_work_package": "Security Foundation Recovery",
+                    "active_development": VERSION_TAG,
+                    "active_work_package": ACTIVE_WORK_PACKAGE,
                 },
                 "catalog_revision": self.catalog_store.revision,
                 "planning_contract": {
@@ -664,6 +769,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                         self.small_budget_shadow.summary(
                             experiment_id,
                             project_id=self._project_id(),
+                            data_residency=self._data_residency(),
                         )
                     )
                 except SmallBudgetShadowNotFoundError:
@@ -705,6 +811,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     page = self.runtime_backend.events(
                         run_id,
                         project_id=self._project_id(),
+                        data_residency=self._data_residency(),
                         after_revision=after,
                         limit=limit,
                     )
@@ -871,7 +978,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
                 return
             try:
-                self._json(OfflineTournamentService(kernel.decision_intelligence_store).status())
+                self._json(OfflineTournamentService(kernel.decision_intelligence_store).status(project_id=self._project_id()))
             except (TournamentServiceError, ValueError, RuntimeError) as exc:
                 self._json(
                     {"error": "tournament_status_unavailable", "message": str(exc)},
@@ -911,6 +1018,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                         self.manager,
                         run_id=run_id,
                         project_id=self._project_id(),
+                        data_residency=self._data_residency(),
                     )
                 )
             except KeyError:
@@ -931,6 +1039,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "exports": self.manager.evidence_exports(
                         limit=limit,
                         project_id=self._project_id(),
+                        data_residency=self._data_residency(),
                     )
                 })
             except (TypeError, ValueError, EvidenceConsoleStoreError) as exc:
@@ -963,22 +1072,47 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
                 return
             try:
-                project_id = self._project_id()
-                kernel.security_store.ensure_project_active(project_id)
                 maintenance = RuntimeMaintenance(kernel.store.path)
                 self._json({
                     **public_resilience_policy(),
-                    "project_id": project_id,
+                    "scope": "workspace",
                     "counts": kernel.resilience_store.counts(),
                     "integrity": kernel.resilience_store.integrity_audit(),
                     "runtime": maintenance.diagnostics(),
-                    "campaigns": kernel.resilience_store.list_campaigns(
-                        project_id=project_id, limit=25
-                    ),
+                })
+            except (ResilienceStoreError, RuntimeError) as exc:
+                self._json(
+                    {"error": "resilience_status_unavailable", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        if path == "/api/v1/resilience/project-status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                project_id = self._project_id()
+                kernel.security_store.ensure_project_active(project_id)
+                campaigns = kernel.resilience_store.list_campaigns(
+                    project_id=project_id, limit=25
+                )
+                self._json({
+                    **public_resilience_policy(),
+                    "scope": "project",
+                    "project_id": project_id,
+                    "counts": {"resilience_campaigns": len(campaigns)},
+                    "campaigns": campaigns,
                 })
             except (ProjectRevokedError, ResilienceStoreError, RuntimeError) as exc:
                 self._json(
-                    {"error": "resilience_status_unavailable", "message": str(exc)},
+                    {
+                        "error": "resilience_project_status_unavailable",
+                        "message": str(exc),
+                    },
                     HTTPStatus.CONFLICT,
                 )
             return
@@ -991,8 +1125,6 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
                 return
             try:
-                project_id = self._project_id()
-                kernel.security_store.ensure_project_active(project_id)
                 self._json({
                     **build_release_status(
                         kernel,
@@ -1002,14 +1134,41 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                         litellm_policy=public_litellm_gateway_policy(),
                         local_policy=public_local_endpoint_policy(),
                     ),
+                    "scope": "workspace",
+                })
+            except (ReleaseStoreError, RuntimeError) as exc:
+                self._json(
+                    {"error": "release_status_unavailable", "message": str(exc)},
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        if path == "/api/v1/release/project-status":
+            kernel = self.manager.control_kernel
+            if kernel is None:
+                self._json(
+                    {"error": "persistent_runtime_disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                project_id = self._project_id()
+                kernel.security_store.ensure_project_active(project_id)
+                attestations = kernel.release_store.list_attestations(
+                    project_id=project_id, limit=25
+                )
+                self._json({
+                    **public_release_policy(),
+                    "scope": "project",
                     "project_id": project_id,
-                    "attestations": kernel.release_store.list_attestations(
-                        project_id=project_id, limit=25
-                    ),
+                    "counts": {"release_attestations": len(attestations)},
+                    "attestations": attestations,
                 })
             except (ProjectRevokedError, ReleaseStoreError, RuntimeError) as exc:
                 self._json(
-                    {"error": "release_status_unavailable", "message": str(exc)},
+                    {
+                        "error": "release_project_status_unavailable",
+                        "message": str(exc),
+                    },
                     HTTPStatus.CONFLICT,
                 )
             return
@@ -1348,7 +1507,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
                 return
             entries = self.manager.ledger(
-                run_id=run_id, project_id=self._project_id()
+                run_id=run_id,
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
             )
             self._json({
                 "run_id": run_id,
@@ -1374,16 +1535,48 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "approvals": self.manager.approvals(
                         status=status,
                         project_id=self._project_id(),
+                        data_residency=self._data_residency(),
                     )
                 }
             )
             return
         if path == "/api/v1/evaluations":
-            evaluations = [
-                item for item in self.manager.evaluations()
-                if not item.get("run_id")
-                or self._get_run(str(item.get("run_id"))) is not None
-            ]
+            evaluations = []
+            for item in self.manager.evaluations():
+                security_scope = item.get("security_scope")
+                visibility = (
+                    str(security_scope.get("visibility") or "")
+                    if isinstance(security_scope, dict)
+                    else ""
+                )
+                if visibility == "global_fixture":
+                    evaluations.append(item)
+                    continue
+                if visibility == "project":
+                    try:
+                        owned = (
+                            normalize_project_id(
+                                str(security_scope.get("project_id") or "")
+                            )
+                            == self._project_id()
+                            and normalize_data_residency(
+                                str(security_scope.get("data_residency") or "")
+                            )
+                            == self._data_residency()
+                        )
+                    except (TypeError, ValueError):
+                        owned = False
+                    if owned:
+                        evaluations.append(item)
+                    continue
+                if visibility:
+                    # Internal or unknown visibility classes are never public.
+                    continue
+                # Compatibility path for legacy run-bound rows that predate an
+                # explicit security scope. Unowned rows remain fail-closed.
+                run_id = str(item.get("run_id") or "")
+                if run_id and self._get_run(run_id) is not None:
+                    evaluations.append(item)
             self._json({"evaluations": evaluations})
             return
         if path.startswith("/api/v1/media/projects/"):
@@ -1717,6 +1910,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._cancel_absolute_deadline()
         path = self._normalise_api_path(urlparse(self.path).path)
         try:
             self._authorize_request(path)
@@ -1731,6 +1925,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
             return
+        # Revocation serialization belongs at each final durable mutation.
+        # Holding the project lock across dispatch would invert the runtime's
+        # record -> kernel -> project lock order and can deadlock with workers.
+        try:
+            self._dispatch_authorized_post(path)
+        except ProjectRevokedError:
+            self._json(
+                {
+                    "error": "project_revoked",
+                    "message": "project access has been revoked",
+                },
+                HTTPStatus.FORBIDDEN,
+            )
+
+    def _dispatch_authorized_post(self, path: str) -> None:
         if path.startswith("/api/v1/projects/") and path.endswith("/revoke"):
             self._revoke_project(
                 unquote(
@@ -1858,6 +2067,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
 
     def do_PUT(self) -> None:  # noqa: N802
+        self._cancel_absolute_deadline()
         path = self._normalise_api_path(urlparse(self.path).path)
         try:
             self._authorize_request(path)
@@ -1902,6 +2112,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._catalog_error(exc)
 
     def do_DELETE(self) -> None:  # noqa: N802
+        self._cancel_absolute_deadline()
         parsed = urlparse(self.path)
         parsed = parsed._replace(path=self._normalise_api_path(parsed.path))
         try:
@@ -1966,7 +2177,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "persistent_runtime_disabled",
                 )
-            tombstone, replayed = kernel.revoke_project(
+            tombstone, replayed = self.manager.revoke_project(
                 project,
                 idempotency_key=key,
                 reason=str(payload.get("reason") or "user_requested"),
@@ -2073,6 +2284,16 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                     "shadow_experiment_mismatch",
                 )
+            residency = self._data_residency()
+            body_residency = normalize_data_residency(
+                payload.get("data_residency", residency)
+            )
+            if body_residency != residency:
+                raise RequestError(
+                    "shadow probe data residency does not match the request header",
+                    HTTPStatus.FORBIDDEN,
+                    "data_residency_forbidden",
+                )
             key = self.headers.get("Idempotency-Key")
             if not key:
                 raise RequestError(
@@ -2088,6 +2309,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
             payload["experiment_id"] = experiment_id
             payload["project_id"] = project
+            payload["data_residency"] = residency
             payload["idempotency_key"] = key
             receipt = self.small_budget_shadow.probe(
                 ShadowProbeRequestV1.from_dict(payload)
@@ -2179,6 +2401,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 )
             kwargs = {
                 "project_id": self._project_id(),
+                "data_residency": self._data_residency(),
                 "idempotency_key": key,
                 "expected_revision": expected,
             }
@@ -2296,6 +2519,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 raise ValueError("expected_revision 必须是整数")
             record = self.manager.cancel(
                 run_id,
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
                 idempotency_key=key,
                 expected_revision=int(expected),
             )
@@ -2351,8 +2576,6 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _approve_media_project(self, run_id: str) -> None:
         try:
-            if self._get_run(run_id) is None:
-                raise KeyError(run_id)
             self._read_write_json()
             if not self.headers.get("Idempotency-Key"):
                 raise RequestError(
@@ -2363,6 +2586,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json(
                 self.manager.approve_media_project(
                     run_id,
+                    project_id=self._project_id(),
+                    data_residency=self._data_residency(),
                     idempotency_key=self.headers.get("Idempotency-Key"),
                 ),
                 HTTPStatus.ACCEPTED,
@@ -2384,8 +2609,6 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
 
     def _approve_media_shot(self, shot_id: str) -> None:
         try:
-            if not self._shot_visible(shot_id):
-                raise KeyError(shot_id)
             self._read_write_json()
             if not self.headers.get("Idempotency-Key"):
                 raise RequestError(
@@ -2393,9 +2616,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                     "idempotency_key_required",
                 )
+            run_id = self._visible_shot_owner(shot_id)
+            if run_id is None:
+                raise KeyError(shot_id)
             self._json(
                 self.manager.approve_media_shot(
+                    run_id,
                     shot_id,
+                    project_id=self._project_id(),
+                    data_residency=self._data_residency(),
                     idempotency_key=self.headers.get("Idempotency-Key"),
                 ),
                 HTTPStatus.ACCEPTED,
@@ -2420,7 +2649,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             if not any(
                 str(item.get("approval_id")) == approval_id
                 for item in self.manager.approvals(
-                    project_id=self._project_id()
+                    project_id=self._project_id(),
+                    data_residency=self._data_residency(),
                 )
             ):
                 raise KeyError(approval_id)
@@ -2441,6 +2671,8 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 note=str(payload.get("note", ""))[:2000],
                 expected_revision=int(expected),
                 idempotency_key=key,
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
             )
             self._json(approval)
         except KeyError:
@@ -2499,15 +2731,17 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "persistent_runtime_disabled",
                 )
-            result, replayed = OfflineTournamentService(
-                kernel.decision_intelligence_store
-            ).run(
-                project_id=self._project_id(),
-                idempotency_key=key,
-                confirm=payload.get("confirm"),
-                bootstrap_samples=payload.get("bootstrap_samples", 2000),
-                seed=payload.get("seed", 600),
-            )
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = OfflineTournamentService(
+                    kernel.decision_intelligence_store
+                ).run(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    confirm=payload.get("confirm"),
+                    bootstrap_samples=payload.get("bootstrap_samples", 2000),
+                    seed=payload.get("seed", 600),
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2539,11 +2773,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "persistent_runtime_disabled",
                 )
-            result, replayed = RationalMetaControllerService(kernel.meta_controller_store).decide(
-                project_id=self._project_id(),
-                idempotency_key=key,
-                payload=payload,
-            )
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = RationalMetaControllerService(
+                    kernel.meta_controller_store
+                ).decide(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2561,7 +2799,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = CapabilityGraphService(kernel.capability_graph_store).ingest(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = CapabilityGraphService(
+                    kernel.capability_graph_store
+                ).ingest(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2579,7 +2825,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = CapabilityGraphService(kernel.capability_graph_store).decide(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = CapabilityGraphService(
+                    kernel.capability_graph_store
+                ).decide(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2614,7 +2868,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = JointSearchService(kernel.joint_search_store).decide(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = JointSearchService(
+                    kernel.joint_search_store
+                ).decide(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2632,7 +2894,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = ExecutionRecoveryService(kernel.execution_recovery_store).decide(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = ExecutionRecoveryService(
+                    kernel.execution_recovery_store
+                ).decide(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2650,7 +2920,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = SafeLearningService(kernel.safe_learning_store).credit(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = SafeLearningService(
+                    kernel.safe_learning_store
+                ).credit(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2665,7 +2943,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            self._json(SafeLearningService(kernel.safe_learning_store).replay(project_id=self._project_id(), payload=payload), HTTPStatus.CREATED)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result = SafeLearningService(kernel.safe_learning_store).replay(
+                    project_id=project_id, payload=payload
+                )
+            self._json(result, HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
         except SafeLearningStoreError as exc:
@@ -2682,7 +2965,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             kernel = self.manager.control_kernel
             if kernel is None:
                 raise RequestError("persistent runtime is disabled", HTTPStatus.SERVICE_UNAVAILABLE, "persistent_runtime_disabled")
-            result, replayed = SafeLearningService(kernel.safe_learning_store).evaluate(project_id=self._project_id(), idempotency_key=key, payload=payload)
+            project_id = self._project_id()
+            with kernel.security_store.active_project_operation(project_id):
+                result, replayed = SafeLearningService(
+                    kernel.safe_learning_store
+                ).evaluate(
+                    project_id=project_id,
+                    idempotency_key=key,
+                    payload=payload,
+                )
             self._json(result, HTTPStatus.OK if replayed else HTTPStatus.CREATED)
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
@@ -2782,6 +3073,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             return
         connection = getattr(self, "connection", None)
         previous_timeout = connection.gettimeout() if connection is not None else None
+        self._arm_absolute_deadline(
+            float(getattr(self.server, "rejected_body_drain_seconds", 0.25))
+        )
         try:
             if connection is not None:
                 connection.settimeout(0.1)
@@ -2795,8 +3089,12 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except (OSError, TimeoutError, socket.timeout):
             self.close_connection = True
         finally:
+            self._cancel_absolute_deadline()
             if connection is not None:
-                connection.settimeout(previous_timeout)
+                try:
+                    connection.settimeout(previous_timeout)
+                except OSError:
+                    pass
 
     def _validate_write_headers(self, *, require_json: bool) -> None:
         self._validate_request_headers(require_json=require_json)
@@ -2825,14 +3123,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             raise ValueError("Content-Length不能为负数")
         if length > max_bytes:
             raise ValueError("请求体过大")
+        self._arm_absolute_deadline(
+            float(getattr(self.server, "body_deadline_seconds", 10.0))
+        )
         try:
             raw = self.rfile.read(length)
-        except (TimeoutError, socket.timeout) as exc:
+        except (OSError, TimeoutError, socket.timeout) as exc:
             raise RequestError(
                 "request body timed out",
                 HTTPStatus.REQUEST_TIMEOUT,
                 "request_timeout",
             ) from exc
+        finally:
+            self._cancel_absolute_deadline()
         if len(raw) != length:
             raise ValueError("request body ended before Content-Length")
         payload = json.loads(raw or b"{}")
@@ -2980,15 +3283,15 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "persistent_runtime_disabled",
                 )
             project_id = self._project_id()
-            kernel.security_store.ensure_project_active(project_id)
-            campaign, replayed = kernel.resilience_store.create_campaign(
-                project_id=project_id,
-                campaign_kind=campaign_kind,
-                spec={**spec, "real_provider_calls": False},
-                evidence_level=str(
-                    payload.get("evidence_level") or "E0-simulated"
-                ),
-            )
+            with kernel.security_store.active_project_operation(project_id):
+                campaign, replayed = kernel.resilience_store.create_campaign(
+                    project_id=project_id,
+                    campaign_kind=campaign_kind,
+                    spec={**spec, "real_provider_calls": False},
+                    evidence_level=str(
+                        payload.get("evidence_level") or "E0-simulated"
+                    ),
+                )
             self._json(
                 {"campaign": campaign, "replayed": replayed},
                 HTTPStatus.OK if replayed else HTTPStatus.CREATED,
@@ -2996,7 +3299,6 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
         except (
-            ProjectRevokedError,
             ResilienceStoreError,
             RuntimeError,
             TypeError,
@@ -3030,31 +3332,33 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "persistent_runtime_disabled",
                 )
             project_id = self._project_id()
-            kernel.security_store.ensure_project_active(project_id)
-            existing = kernel.release_store.get_by_key(
-                project_id=project_id, idempotency_key=key
-            )
-            if existing is not None:
-                self._json(
-                    {"attestation": existing, "replayed": True},
-                    HTTPStatus.OK,
+            with kernel.security_store.active_project_operation(project_id):
+                existing = kernel.release_store.get_by_key(
+                    project_id=project_id, idempotency_key=key
                 )
-                return
-            manifest = build_release_status(
-                kernel,
-                adapter_policy=AdapterRuntimePolicy.from_environment().public(),
-                litellm_policy=public_litellm_gateway_policy(),
-                local_policy=public_local_endpoint_policy(),
-            )
-            if not manifest["engineering_ready"]:
-                raise ValueError(
-                    "engineering release gates are not all satisfied"
+                if existing is not None:
+                    self._json(
+                        {"attestation": existing, "replayed": True},
+                        HTTPStatus.OK,
+                    )
+                    return
+                manifest = build_release_status(
+                    kernel,
+                    adapter_policy=(
+                        AdapterRuntimePolicy.from_environment().public()
+                    ),
+                    litellm_policy=public_litellm_gateway_policy(),
+                    local_policy=public_local_endpoint_policy(),
                 )
-            attestation, replayed = kernel.release_store.create_attestation(
-                project_id=project_id,
-                manifest=manifest,
-                idempotency_key=key,
-            )
+                if not manifest["engineering_ready"]:
+                    raise ValueError(
+                        "engineering release gates are not all satisfied"
+                    )
+                attestation, replayed = kernel.release_store.create_attestation(
+                    project_id=project_id,
+                    manifest=manifest,
+                    idempotency_key=key,
+                )
             self._json(
                 {"attestation": attestation, "replayed": replayed},
                 HTTPStatus.OK if replayed else HTTPStatus.CREATED,
@@ -3062,7 +3366,6 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
         except RequestError as exc:
             self._json({"error": exc.code, "message": str(exc)}, exc.status)
         except (
-            ProjectRevokedError,
             ReleaseStoreError,
             RuntimeError,
             TypeError,
@@ -3086,10 +3389,13 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 self.manager,
                 run_id=run_id,
                 project_id=self._project_id(),
+                data_residency=self._data_residency(),
                 catalog_snapshot=self.catalog_store.payload(),
             )
             receipt, replayed = self.manager.record_evidence_export(
-                package, project_id=self._project_id()
+                package,
+                project_id=self._project_id(),
+                data_residency=self._data_residency(),
             )
             stamp = str(package["generated_at"]).replace(":", "-")
             scope = run_id or "workspace"
@@ -3129,6 +3435,16 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             self._json({"error": "invalid_path"}, HTTPStatus.BAD_REQUEST)
             return
         data = target.read_bytes()
+        if clean == "index.html":
+            page = data.decode("utf-8")
+            replacements = {
+                "{{COSTWEAVE_VERSION}}": VERSION_TAG,
+                "{{COSTWEAVE_VERSION_NUMBER}}": __version__,
+                "{{COSTWEAVE_WORK_PACKAGE}}": ACTIVE_WORK_PACKAGE,
+            }
+            for placeholder, value in replacements.items():
+                page = page.replace(placeholder, value)
+            data = page.encode("utf-8")
         mime, _ = mimetypes.guess_type(str(target))
         self.send_response(HTTPStatus.OK)
         self.send_header(
@@ -3162,6 +3478,9 @@ def build_server(
     small_budget_shadow: SmallBudgetShadowRuntime | None = None,
     session_token: str | None = None,
     max_active_requests: int = DEFAULT_MAX_ACTIVE_REQUESTS,
+    header_deadline_seconds: float = DEFAULT_HEADER_DEADLINE_SECONDS,
+    body_deadline_seconds: float = DEFAULT_BODY_DEADLINE_SECONDS,
+    rejected_body_drain_seconds: float = DEFAULT_REJECTED_BODY_DRAIN_SECONDS,
 ) -> CostWeaveServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError(
@@ -3179,6 +3498,9 @@ def build_server(
         (host, port),
         CostWeaveHandler,
         max_active_requests=max_active_requests,
+        header_deadline_seconds=header_deadline_seconds,
+        body_deadline_seconds=body_deadline_seconds,
+        rejected_body_drain_seconds=rejected_body_drain_seconds,
     )
     server.session_token = token  # type: ignore[attr-defined]
     server.session_principal = (  # type: ignore[attr-defined]
@@ -3205,7 +3527,10 @@ def build_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the CostWeave v0.6.7 local security-recovery control plane"
+        description=(
+            f"Run the CostWeave {VERSION_TAG} local control plane "
+            f"({ACTIVE_WORK_PACKAGE})"
+        )
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)

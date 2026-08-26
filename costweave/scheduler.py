@@ -23,6 +23,7 @@ from .resource_inventory import ResourceInventory, ResourcePool, pool_id
 
 
 SCHEDULER_POLICY_ENV = "COSTWEAVE_SCHEDULER_POLICY"
+MAX_TRANSIENT_EXECUTION_RETRIES = 2
 
 
 class SchedulerError(RuntimeError):
@@ -236,7 +237,7 @@ class ParallelScheduler:
         execute,
         *,
         provider: str,
-        max_retries: int = 2,
+        max_retries: int = MAX_TRANSIENT_EXECUTION_RETRIES,
         on_retry=None,
     ):
         attempts = 0

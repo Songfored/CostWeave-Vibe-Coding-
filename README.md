@@ -4,24 +4,24 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.7-blue.svg)](pyproject.toml)
-[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.7.md)
+[![Version](https://img.shields.io/badge/version-0.6.8-blue.svg)](costweave/version.py)
+[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.8.md)
 
 ## 项目状态
 
-CostWeave 当前处于 **v0.6.7 安全基础恢复阶段**。
+CostWeave 当前处于 **v0.6.8 交付与体验收口阶段**。
 
 | 项目 | 当前结论 |
 |---|---|
 | 稳定工程基线 | v0.5.8.4 |
-| 当前开发版本 | v0.6.7 Security Foundation Recovery（候选版） |
+| 当前开发版本 | v0.6.8 Delivery & UX Convergence（候选版） |
 | 工程就绪 | 仅在全部发布门禁通过时为 `true` |
 | 生产就绪 | `false` |
 | 证据等级 | E0：离线、模拟与确定性夹具证据 |
 | 默认外部调用 | 0；外部适配器和付费调用默认关闭 |
-| 当前冻结验收证据 | 1024/1024 全量、1024/1024 隔离、19/19 发布门禁通过；真实外部调用 0；独立标准复扫尚未完成 |
+| 当前工作树验收证据 | 1063/1063 全量回归、19/19 干净安装发布门禁、四个目标宽度页面检查通过；归档违规 0；真实外部调用 0 |
 
-v0.6.7 已实现并用确定性攻击夹具回归此前 11 条安全发现，但用于正式关闭发现的独立标准复扫因旧构建归档不可读而未能启动，所以当前仍是候选版。它也不代表真实供应商质量、账单、生产并发容量或生产可靠性已经得到验证。详见[v0.6.7 验收报告](docs/ACCEPTANCE-v0.6.7.md)和[安全报告](docs/SECURITY_REPORT-v0.6.7.md)；真实效果边界见[v0.6.7 数据卡](docs/DATA_CARD-v0.6.7.md)。
+v0.6.8 不新增路由算法，而是把“用户实际拿到的产品”收口为同一事实：网页、健康接口、CLI、包元数据和发布清单共用一个版本源；移动端使用完整折叠菜单；发布物只从白名单 staging 生成，并检查数据库、日志、秘密、本地代理目录和历史构建物。v0.6.7 的安全复扫结论继续作为本版安全基线，但不等于真实供应商质量、账单、生产并发容量或生产可靠性已验证。详见[v0.6.8 验收报告](docs/ACCEPTANCE-v0.6.8.md)、[发布说明](docs/CHANGELOG-v0.6.8.md)与[数据卡](docs/DATA_CARD-v0.6.8.md)。
 
 ## 它解决什么问题
 
@@ -160,7 +160,8 @@ CostWeave 不把“先定计划、再给每个节点找最便宜模型”当作�
 | v0.6.4 | Execution-Time Belief & Recovery | 根据执行中证据更新成功预期并选择经济恢复动作 |
 | v0.6.5 | Trace Credit & Safe Learning | 做决策级信用分配、离线评估和受控策略晋升 |
 | v0.6.6 | Gateway / Runtime / Observability / Shadow | 建立真实接入前所需的供应商中立边界、持久运行时、追踪与小预算 Shadow |
-| v0.6.7 | Security Foundation Recovery | 统一本地请求与外部调用安全边界，完成 11 条已验证攻击路径的修复与回归；独立复扫待完成 |
+| v0.6.7 | Security Foundation Recovery | 统一本地请求与外部调用安全边界；修复后标准复扫覆盖 12/12 威胁面，0 项可报告发现 |
+| v0.6.8 | Delivery & UX Convergence | 统一版本源、响应式导航、仓库边界和干净发布流水线 |
 
 ## v0.6.6 工作包
 
@@ -188,6 +189,16 @@ WP07 只允许影子指标进入证据链，不允许改变基线路由、晋升
 - HTTP 活跃请求有硬上限，超限快速返回服务繁忙，槽位可恢复。
 
 这些结论来自离线确定性攻击夹具，不等于已完成公网、多用户或分布式安全认证。默认部署仍是只监听回环地址的单用户工具，`production_ready=false`。
+
+## v0.6.8 交付与体验收口
+
+- `costweave/version.py` 是网页、服务、CLI、包元数据与发布清单的唯一当前版本源；
+- 低于 768px 的页面使用可折叠、可按 Escape 关闭、可键盘访问的完整导航，不再隐藏功能入口；
+- 桌面导航允许自然换行，中文标签不会因挤压而一字一行；
+- `.gitignore` 排除本地工作区、输出、日志、运行数据库、缓存与代理元数据；
+- `costweave-package` 在 `work/` 的干净 staging 中构建，不读取根目录旧 `build/`；
+- wheel、sdist、源码 zip、发布清单与 SHA256 清单均经过归档内容检查；
+- 当前 `.git` 元数据不是有效仓库，未擅自覆盖，恢复步骤见[Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)。
 
 ## 快速开始
 
@@ -325,7 +336,7 @@ python -B tests/run_isolated.py
 python -B -m costweave.release_cli --pretty
 ```
 
-安装和冻结证据的详细步骤见[v0.6.7 复现指南](docs/INSTALL_REPRODUCE-v0.6.7.md)。测试通过只说明已经定义的工程合同得到满足，不会自动把 E0 证据提升为生产证据，也不能替代独立安全复扫。
+安装和冻结证据的详细步骤见[v0.6.8 复现指南](docs/INSTALL_REPRODUCE-v0.6.8.md)。测试通过只说明已经定义的工程合同得到满足，不会自动把 E0 证据提升为生产证据。
 
 ## 项目结构
 
@@ -355,10 +366,12 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 
 - [后续版本路线图（Revision 4，当前权威排期）](docs/REMAINING_ROADMAP.md)
 - [2026-08-22 安全加固组合](docs/hardening/2026-08-22/hardening.md)
-- [v0.6.7 验收报告](docs/ACCEPTANCE-v0.6.7.md)
-- [v0.6.7 安全报告](docs/SECURITY_REPORT-v0.6.7.md)
-- [v0.6.7 安装与复现](docs/INSTALL_REPRODUCE-v0.6.7.md)
-- [v0.6.7 迁移说明](docs/V0.6.7_MIGRATION.md)
+- [v0.6.8 简短验收报告](docs/ACCEPTANCE-v0.6.8.md)
+- [v0.6.8 发布说明](docs/CHANGELOG-v0.6.8.md)
+- [v0.6.8 安全边界](docs/SECURITY_REPORT-v0.6.8.md)
+- [v0.6.8 安装与复现](docs/INSTALL_REPRODUCE-v0.6.8.md)
+- [v0.6.8 迁移说明](docs/V0.6.8_MIGRATION.md)
+- [v0.6.8 Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)
 - [总体架构](docs/ARCHITECTURE.md)
 - [v0.6 竞争升级计划](docs/V0.6_COMPETITIVE_UPGRADE_PLAN.md)
 - [低能力模型实施手册](docs/V0.6_LOW_CAPABILITY_MODEL_PLAYBOOK.md)
@@ -385,13 +398,12 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 
 ## 下一步
 
-当前唯一允许执行的动作是清理或排除阻断扫描的历史构建归档，并在新的任务中重试 v0.6.7 独立标准复扫。复扫确认高危为 0、默认可达路径没有未缓解中危后，才允许把 v0.6.7 标记为完成并开工 **v0.6.8 Delivery & UX Convergence**。后续按以下门禁顺序推进：
+v0.6.8 完成后，下一开发版本是 **v0.6.9 Authoritative Decision Bridge**。它会把现有 advisory-only 智能模块接入同一条可追踪的影子决策链，但仍不接管正式执行。后续按以下门禁顺序推进：
 
-1. **v0.6.8**：统一网页、CLI、构建产物、版本号与中文交付体验；
-2. **v0.6.9**：把 advisory-only 智能模块接入统一决策桥，但只运行 Shadow，不接管真实执行；
-3. **v0.7.0**：逐个决策点受控启用，并为每次启用配置预算、回退和 Kill Switch；
-4. **v0.7.1～v0.7.3**：再用极小预算完成真实调用对账、能力校准、容量预判、恢复与安全学习闭环；
-5. **v0.7.4 以后**：在预注册基准上比较单模型、人工路由、静态规则与 CostWeave，最后扩展多模态和生产控制面。
+1. **v0.6.9**：把 advisory-only 智能模块接入统一决策桥，但只运行 Shadow，不接管真实执行；
+2. **v0.7.0**：逐个决策点受控启用，并为每次启用配置预算、回退和 Kill Switch；
+3. **v0.7.1～v0.7.3**：再用极小预算完成真实调用对账、能力校准、容量预判、恢复与安全学习闭环；
+4. **v0.7.4 以后**：在预注册基准上比较单模型、人工路由、静态规则与 CostWeave，最后扩展多模态和生产控制面。
 
 在真实样本量、置信区间、回滚条件和竞品基线满足前，不宣称固定节省比例，也不跳过安全与主链融合阶段直接开始付费调用。详细退出门和停止条件见[后续版本路线图](docs/REMAINING_ROADMAP.md)。
 

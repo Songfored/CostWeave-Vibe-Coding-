@@ -210,50 +210,151 @@ class CanaryStore:
         value = item.to_dict()
         raw = canonical_json(value)
         with self._lock, self._connection() as connection:
-            existing = connection.execute(
-                "SELECT assignment_json FROM canary_run_assignments WHERE assignment_id=? OR run_id=?",
-                (item.assignment_id, item.run_id),
-            ).fetchall()
-            if existing:
-                if len(existing) != 1 or not self._same(existing[0]["assignment_json"], value):
-                    raise CanaryControlError("run already has a different immutable policy snapshot")
-                return False
-            state = connection.execute(
-                "SELECT event_type,stage_pct FROM canary_runtime_pointer_events WHERE deployment_id=? ORDER BY sequence DESC LIMIT 1",
-                (item.deployment_id,),
-            ).fetchone()
-            if state is None or int(state["stage_pct"]) != item.stage_pct:
-                raise CanaryControlError("canary pointer changed before assignment was committed")
-            if state["event_type"] == "rolled_back" and item.cohort != "stable-only":
-                raise CanaryControlError("a rolled-back deployment only permits stable snapshots")
-            deployment_row = connection.execute(
-                "SELECT deployment_json,deployment_hash FROM canary_deployments WHERE deployment_id=?",
-                (item.deployment_id,),
-            ).fetchone()
-            if deployment_row is None or self._hash(deployment_row["deployment_json"]) != deployment_row["deployment_hash"]:
-                raise CanaryControlError("canary assignment requires an intact deployment")
-            deployment = self._deployment(str(deployment_row["deployment_json"]))
-            expected = assign_canary_policy(
-                deployment,
-                run_id=item.run_id,
-                stage_pct=item.stage_pct,
-                risk_level=item.risk_level,
-                task_families=item.task_families,
-                exposure_enabled=state["event_type"] != "rolled_back",
-                assigned_at=item.assigned_at,
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                created = self._record_assignment_locked(
+                    connection, item=item, value=value, raw=raw
+                )
+                connection.execute("COMMIT")
+                return created
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def _record_assignment_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        item: CanaryAssignment,
+        value: Mapping[str, Any],
+        raw: str,
+    ) -> bool:
+        existing = connection.execute(
+            "SELECT assignment_json FROM canary_run_assignments WHERE assignment_id=? OR run_id=?",
+            (item.assignment_id, item.run_id),
+        ).fetchall()
+        if existing:
+            if len(existing) != 1 or not self._same(existing[0]["assignment_json"], value):
+                raise CanaryControlError("run already has a different immutable policy snapshot")
+            return False
+        state = connection.execute(
+            "SELECT event_type,stage_pct FROM canary_runtime_pointer_events WHERE deployment_id=? ORDER BY sequence DESC LIMIT 1",
+            (item.deployment_id,),
+        ).fetchone()
+        if state is None or int(state["stage_pct"]) != item.stage_pct:
+            raise CanaryControlError("canary pointer changed before assignment was committed")
+        current = connection.execute(
+            "SELECT deployment_id,event_type,stage_pct FROM "
+            "canary_runtime_pointer_events ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+        if (
+            current is None
+            or current["deployment_id"] != item.deployment_id
+            or current["event_type"] != state["event_type"]
+            or int(current["stage_pct"]) != item.stage_pct
+        ):
+            raise CanaryControlError(
+                "canary assignment does not use the current runtime pointer"
             )
-            if expected != item:
-                raise CanaryControlError("canary assignment does not match deterministic admission")
-            connection.execute(
-                "INSERT INTO canary_run_assignments(assignment_id,deployment_id,run_id,stage_pct,bucket,risk_level,eligible_for_exploration,cohort,selected_policy_id,selected_policy_version,policy_snapshot_hash,runtime_policy_changed,provider_call_executed,assignment_json,assignment_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    item.assignment_id, item.deployment_id, item.run_id, item.stage_pct,
-                    item.bucket, item.risk_level, int(item.eligible_for_exploration), item.cohort,
-                    item.selected_policy_id, item.selected_policy_version, item.policy_snapshot_hash,
-                    int(item.runtime_policy_changed), 0, raw, self._hash(raw), item.assigned_at,
-                ),
-            )
+        if state["event_type"] == "rolled_back" and item.cohort != "stable-only":
+            raise CanaryControlError("a rolled-back deployment only permits stable snapshots")
+        deployment_row = connection.execute(
+            "SELECT deployment_json,deployment_hash FROM canary_deployments WHERE deployment_id=?",
+            (item.deployment_id,),
+        ).fetchone()
+        if deployment_row is None or self._hash(deployment_row["deployment_json"]) != deployment_row["deployment_hash"]:
+            raise CanaryControlError("canary assignment requires an intact deployment")
+        deployment = self._deployment(str(deployment_row["deployment_json"]))
+        expected = assign_canary_policy(
+            deployment,
+            run_id=item.run_id,
+            stage_pct=item.stage_pct,
+            risk_level=item.risk_level,
+            task_families=item.task_families,
+            exposure_enabled=state["event_type"] != "rolled_back",
+            assigned_at=item.assigned_at,
+        )
+        if expected != item:
+            raise CanaryControlError("canary assignment does not match deterministic admission")
+        connection.execute(
+            "INSERT INTO canary_run_assignments(assignment_id,deployment_id,run_id,stage_pct,bucket,risk_level,eligible_for_exploration,cohort,selected_policy_id,selected_policy_version,policy_snapshot_hash,runtime_policy_changed,provider_call_executed,assignment_json,assignment_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                item.assignment_id, item.deployment_id, item.run_id, item.stage_pct,
+                item.bucket, item.risk_level, int(item.eligible_for_exploration), item.cohort,
+                item.selected_policy_id, item.selected_policy_version, item.policy_snapshot_hash,
+                int(item.runtime_policy_changed), 0, raw, self._hash(raw), item.assigned_at,
+            ),
+        )
         return True
+
+    def assign_for_run(
+        self,
+        *,
+        run_id: str,
+        risk_level: str,
+        task_families: tuple[str, ...],
+    ) -> CanaryAssignment | None:
+        """Read the pointer and persist its run snapshot in one transaction."""
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = connection.execute(
+                    "SELECT assignment_json,assignment_hash FROM "
+                    "canary_run_assignments WHERE run_id=?",
+                    (str(run_id),),
+                ).fetchone()
+                if existing is not None:
+                    raw = str(existing["assignment_json"])
+                    if self._hash(raw) != existing["assignment_hash"]:
+                        raise CanaryControlError(
+                            "persisted canary assignment integrity failed"
+                        )
+                    value = json.loads(raw)
+                    value["task_families"] = tuple(value["task_families"])
+                    value["reasons"] = tuple(value["reasons"])
+                    assignment = CanaryAssignment(**value)
+                    connection.execute("COMMIT")
+                    return assignment
+
+                state = connection.execute(
+                    "SELECT p.event_type,p.stage_pct,d.deployment_json,"
+                    "d.deployment_hash FROM canary_runtime_pointer_events p "
+                    "JOIN canary_deployments d ON d.deployment_id=p.deployment_id "
+                    "ORDER BY p.sequence DESC LIMIT 1"
+                ).fetchone()
+                if state is None:
+                    connection.execute("COMMIT")
+                    return None
+                deployment_raw = str(state["deployment_json"])
+                if self._hash(deployment_raw) != state["deployment_hash"]:
+                    raise CanaryControlError(
+                        "persisted canary deployment integrity failed"
+                    )
+                deployment = self._deployment(deployment_raw)
+                assignment = assign_canary_policy(
+                    deployment,
+                    run_id=str(run_id),
+                    stage_pct=int(state["stage_pct"]),
+                    risk_level=str(risk_level),
+                    task_families=tuple(task_families),
+                    exposure_enabled=state["event_type"] != "rolled_back",
+                )
+                value = assignment.to_dict()
+                raw = canonical_json(value)
+                self._record_assignment_locked(
+                    connection,
+                    item=assignment,
+                    value=value,
+                    raw=raw,
+                )
+                connection.execute("COMMIT")
+                return assignment
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def record_window_decision(self, window: CanaryWindow, decision: CanaryDecision) -> bool:
         if decision.window_id != window.window_id or decision.deployment_id != window.deployment_id:

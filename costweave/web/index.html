@@ -3,23 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CostWeave v0.5.8.4 提供可机器验证、可复现、诚实标注证据边界的 v0.5 工程稳定版">
+  <meta name="description" content="CostWeave {{COSTWEAVE_VERSION}}：可复现、诚实标注证据边界的多模型成本感知控制平面">
   <meta name="theme-color" content="#08110f">
   <title>CostWeave · 智能算力调度台</title>
-  <link rel="stylesheet" href="/styles.css?v=0.6.1">
+  <link rel="stylesheet" href="/styles.css?v={{COSTWEAVE_VERSION_NUMBER}}">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到任务工作区</a>
   <div class="ambient ambient-one"></div>
   <div class="ambient ambient-two"></div>
 
-  <header class="topbar">
+  <header class="topbar" aria-label="CostWeave 主导航">
     <a class="brand" href="/" aria-label="CostWeave 首页">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>CostWeave</span>
     </a>
-    <div class="runtime"><span class="pulse" aria-hidden="true"></span> v0.5.8.4 Stable · v0.6.0 Lab · v0.6.1 MetaController · v0.6.2 Capability Router · v0.6.3 Joint Search · v0.6.4 Dynamic Recovery · v0.6.5 Safe Learning · v0.6.6 Gateway Interop · v0.6.7 Security Recovery</div>
-    <nav class="topnav" aria-label="页面导航">
+    <div class="runtime" aria-label="当前版本 {{COSTWEAVE_VERSION}}，v0.6 WP01 至 WP07 已完成">
+      <span class="pulse" aria-hidden="true"></span>
+      <strong id="runtime-version">{{COSTWEAVE_VERSION}}</strong>
+      <span class="runtime-scope">{{COSTWEAVE_WORK_PACKAGE}}</span>
+      <span class="runtime-history">WP01—WP07 已完成</span>
+    </div>
+    <button id="nav-toggle" class="nav-toggle" type="button" aria-controls="primary-navigation" aria-expanded="false">
+      <span class="sr-only">打开功能导航</span>
+      <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+    </button>
+    <nav id="primary-navigation" class="topnav" aria-label="页面导航">
       <a href="#workspace">开始任务</a>
       <a href="#recent-runs">最近任务</a>
       <a href="#security-boundary-section">安全边界</a>
@@ -685,7 +694,7 @@
     </form>
   </dialog>
 
-      <footer><span>CostWeave v0.5.8.4 Stable / v0.6.0 Lab / v0.6.1 MetaController / v0.6.2 Capability Router / v0.6.3 Joint Search / v0.6.4 Dynamic Recovery / v0.6.5 Safe Learning / v0.6.6 Gateway Interop / v0.6.7 Security Foundation Recovery</span><span>MIT Licensed · 2026</span></footer>
-  <script src="/app.js?v=0.6.5" defer></script>
+      <footer><span>CostWeave {{COSTWEAVE_VERSION}} · {{COSTWEAVE_WORK_PACKAGE}} · v0.6 WP01—WP07 已完成</span><span>MIT Licensed · 2026</span></footer>
+  <script src="/app.js?v={{COSTWEAVE_VERSION_NUMBER}}" defer></script>
 </body>
 </html>

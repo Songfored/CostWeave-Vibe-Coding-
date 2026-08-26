@@ -411,12 +411,15 @@ class MetaControllerStore:
     def commit(self, *, project_id: str, budget_id: str, reservation_id: str, amount: BudgetAmountV1, recorded_at: str | None = None) -> bool:
         return self._budget_event(project_id=project_id, budget_id=budget_id, reservation_id=reservation_id, event_type="commit", amount=amount, recorded_at=recorded_at)
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
-            decisions = connection.execute("SELECT COUNT(*) FROM meta_decisions_v061").fetchone()[0]
-            idempotency = connection.execute("SELECT COUNT(*) FROM meta_decision_idempotency_v061").fetchone()[0]
-            accounts = connection.execute("SELECT COUNT(*) FROM planning_budget_accounts_v061").fetchone()[0]
-            events = connection.execute("SELECT COUNT(*) FROM planning_budget_events_v061").fetchone()[0]
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
+            decisions = connection.execute("SELECT COUNT(*) FROM meta_decisions_v061" + suffix, params).fetchone()[0]
+            idempotency = connection.execute("SELECT COUNT(*) FROM meta_decision_idempotency_v061" + suffix, params).fetchone()[0]
+            accounts = connection.execute("SELECT COUNT(*) FROM planning_budget_accounts_v061" + suffix, params).fetchone()[0]
+            events = connection.execute("SELECT COUNT(*) FROM planning_budget_events_v061" + suffix, params).fetchone()[0]
         return {
             "meta_decisions_v061": int(decisions),
             "meta_decision_idempotency_v061": int(idempotency),

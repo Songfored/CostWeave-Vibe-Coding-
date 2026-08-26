@@ -451,33 +451,39 @@ class MediaRuntime:
         return self.project(run_id) or {}
 
     def approve_shot(
-        self, shot_id: str, *, idempotency_key: str | None = None
+        self,
+        run_id: str,
+        shot_id: str,
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        target_id = f"{run_id}:{shot_id}"
         with self._lock:
             replay = self._media_command_replay(
-                idempotency_key, "approve_shot", shot_id
+                idempotency_key, "approve_shot", target_id
             )
             if replay is not None:
                 return replay
-            result = self._approve_shot_once(shot_id)
+            result = self._approve_shot_once(run_id, shot_id)
             self._record_media_command(
-                idempotency_key, "approve_shot", shot_id, result
+                idempotency_key, "approve_shot", target_id, result
             )
             return result
 
-    def _approve_shot_once(self, shot_id: str) -> dict[str, Any]:
+    def _approve_shot_once(self, run_id: str, shot_id: str) -> dict[str, Any]:
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT project_id FROM shot_contracts WHERE shot_id=?",
-                (shot_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(shot_id)
             project_row = connection.execute(
-                "SELECT run_id FROM media_projects WHERE project_id=?",
-                (row["project_id"],),
+                "SELECT project_id FROM media_projects WHERE run_id=?",
+                (run_id,),
             ).fetchone()
-        data = self.project(str(project_row["run_id"]))
+            if project_row is None:
+                raise KeyError(run_id)
+            if connection.execute(
+                "SELECT 1 FROM shot_contracts WHERE project_id=? AND shot_id=?",
+                (project_row["project_id"], shot_id),
+            ).fetchone() is None:
+                raise KeyError(shot_id)
+        data = self.project(run_id)
         project = self._hydrate_project(data)
         shot = next(item for item in project.shots if item.shot_id == shot_id)
         with self._connection() as connection:
@@ -488,7 +494,7 @@ class MediaRuntime:
             )
         if not self._accepted_final_exists(project.project_id, shot_id):
             self._render_final(project, shot, approved=True)
-        return self.shot(shot_id) or {}
+        return self.shot(run_id, shot_id) or {}
 
     def _media_command_replay(
         self,
@@ -763,20 +769,11 @@ class MediaRuntime:
             result.append(item)
         return result
 
-    def shot(self, shot_id: str) -> dict[str, Any] | None:
-        with self._connection() as connection:
-            row = connection.execute(
-                "SELECT p.run_id FROM shot_contracts s "
-                "JOIN media_projects p ON p.project_id=s.project_id "
-                "WHERE s.shot_id=?",
-                (shot_id,),
-            ).fetchone()
-        if row is None:
-            return None
+    def shot(self, run_id: str, shot_id: str) -> dict[str, Any] | None:
         return next(
             (
                 item
-                for item in self.shots(row["run_id"])
+                for item in self.shots(run_id)
                 if item["shot_id"] == shot_id
             ),
             None,

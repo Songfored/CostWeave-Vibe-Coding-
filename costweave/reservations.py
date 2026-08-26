@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -317,6 +318,63 @@ class ReservationManager:
                 )
                 connection.commit()
                 return True
+            except Exception:
+                connection.rollback()
+                raise
+
+    def extend_cost(
+        self,
+        reservation_id: str,
+        *,
+        additional_cost: float,
+        budget: float,
+        spent: float,
+    ) -> float:
+        """Reserve one more paid attempt before that attempt may start."""
+
+        additional = float(additional_cost)
+        if not math.isfinite(additional) or additional <= 0:
+            raise ReservationError(
+                "additional reservation cost must be finite and positive"
+            )
+        with self._lock, self._connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT rr.status,rr.run_id,cr.status cost_status,"
+                    "cr.amount FROM resource_reservations rr "
+                    "JOIN cost_reservations cr USING(reservation_id) "
+                    "WHERE rr.reservation_id=?",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(reservation_id)
+                if row["status"] != "active" or row["cost_status"] != "active":
+                    raise ReservationError(
+                        "only an active reservation can fund a retry"
+                    )
+                active_cost = float(
+                    connection.execute(
+                        "SELECT COALESCE(SUM(amount),0) FROM cost_reservations "
+                        "WHERE run_id=? AND status='active'",
+                        (row["run_id"],),
+                    ).fetchone()[0]
+                )
+                if (
+                    float(spent) + active_cost + additional
+                    > float(budget) + 1e-9
+                ):
+                    raise BudgetUnavailable(
+                        "budget cannot cover another execution attempt"
+                    )
+                updated = float(row["amount"]) + additional
+                connection.execute(
+                    "UPDATE cost_reservations SET amount=? "
+                    "WHERE reservation_id=? AND status='active'",
+                    (updated, reservation_id),
+                )
+                connection.commit()
+                return updated
             except Exception:
                 connection.rollback()
                 raise

@@ -16,7 +16,7 @@ from .intelligence.common import stable_digest
 from .intelligence.beliefs import SystemBeliefV1, TaskBeliefV1
 from .intelligence.strategy import StrategyCandidateV1
 from .meta_controller_store import MetaControllerStore, MetaControllerStoreError
-from .security_boundary import normalize_project_id
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class MetaControllerServiceError(ValueError):
@@ -38,13 +38,14 @@ class RationalMetaControllerService:
             "policy_id": "rational-meta-controller",
             "policy_version": "rational-meta-controller-v1",
             "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "actions": ["fast", "deliberate", "probe", "expert"],
             "management_depth_limit": 2,
             "external_calls": 0,
             "provider_calls": 0,
             "network_calls": 0,
             "runtime_authority": "advisory-only",
-            "counts": self.store.counts(),
+            "counts": self.store.counts(project_id=project),
         }
 
     @staticmethod

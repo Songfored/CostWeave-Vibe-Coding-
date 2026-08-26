@@ -1,0 +1,9 @@
+flowchart LR
+    C[Browser / local process] --> H[HTTP handler]
+    H --> G[Shared helper guards]
+    G --> OLD[RunManager]
+    G --> NEW[v0.6 services]
+    G --> FS[Contained static resolver]
+    G --> S[Connection semaphore]
+    OLD --> DB[(SQLite)]
+    NEW --> DB

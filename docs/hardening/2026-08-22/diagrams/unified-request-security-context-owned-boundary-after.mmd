@@ -1,0 +1,8 @@
+flowchart LR
+    C[Browser / local process] --> E[Unified request entry]
+    E --> A[Local session + Host authority]
+    A --> X[RequestSecurityContextV1]
+    X --> SR[Scoped repositories/services]
+    X --> FR[Contained static resolver]
+    X --> CL[Bounded connection/request lease]
+    SR --> DB[(SQLite with project/residency predicates)]

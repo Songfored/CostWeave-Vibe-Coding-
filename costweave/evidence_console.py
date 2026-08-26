@@ -14,13 +14,16 @@ from .evaluation_protocol import (
     SEED_TASK_SET_VERSION,
     load_seed_tasks,
 )
+from .event_store import RUNTIME_SCHEMA_VERSION
 from .offline_replay import public_offline_replay_policy
 from .outcome_dataset import OUTCOME_DATASET_SCHEMA_VERSION
 from .planning_contracts import PLANNING_POLICY_VERSION, PLANNING_SCHEMA_VERSION
 from .policy_registry import public_policy_registry_policy
 from .production_shadow import public_production_shadow_policy
 from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
     DEFAULT_PROJECT_ID,
+    normalize_data_residency,
     normalize_project_id,
     public_security_policy,
     redact_structure,
@@ -53,6 +56,16 @@ def _canonical_json(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _scoped_static_policy(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove process-global counters before embedding policy metadata."""
+
+    return {
+        str(key): item
+        for key, item in value.items()
+        if str(key) != "runtime_counts"
+    }
 
 
 def _safe_int(value: Any) -> int:
@@ -172,15 +185,6 @@ def _latest_event_at(events: list[dict[str, Any]]) -> str | None:
     return max(values) if values else None
 
 
-def _runtime_counts(manager: Any) -> tuple[dict[str, Any], dict[str, int]]:
-    health = dict(manager.health() or {})
-    kernel = getattr(manager, "control_kernel", None)
-    store_counts = (
-        dict(kernel.store.counts()) if kernel is not None else {}
-    )
-    return health, store_counts
-
-
 def _record_project(record: Any) -> str:
     request = getattr(record, "request", None)
     return normalize_project_id(
@@ -188,19 +192,47 @@ def _record_project(record: Any) -> str:
     )
 
 
-def _scoped_get(manager: Any, run_id: str, project_id: str) -> Any:
+def _record_residency(record: Any) -> str:
+    request = getattr(record, "request", None)
+    return normalize_data_residency(
+        getattr(request, "data_residency", DEFAULT_DATA_RESIDENCY)
+    )
+
+
+def _scoped_get(
+    manager: Any,
+    run_id: str,
+    project_id: str,
+    data_residency: str,
+) -> Any:
     try:
-        return manager.get(run_id, project_id=project_id)
+        return manager.get(
+            run_id,
+            project_id=project_id,
+            data_residency=data_residency,
+        )
     except TypeError:
         record = manager.get(run_id)
-        if record is not None and _record_project(record) != project_id:
-            return None
+        if record is not None:
+            if _record_project(record) != project_id:
+                return None
+            if _record_residency(record) != data_residency:
+                return None
         return record
 
 
-def _scoped_list(manager: Any, project_id: str) -> list[dict[str, Any]]:
+def _scoped_list(
+    manager: Any,
+    project_id: str,
+    data_residency: str,
+) -> list[dict[str, Any]]:
     try:
-        return list(manager.list(project_id=project_id))
+        return list(
+            manager.list(
+                project_id=project_id,
+                data_residency=data_residency,
+            )
+        )
     except TypeError:
         result = []
         for item in manager.list():
@@ -208,7 +240,13 @@ def _scoped_list(manager: Any, project_id: str) -> list[dict[str, Any]]:
             item_project = normalize_project_id(
                 request.get("project_id", DEFAULT_PROJECT_ID)
             )
-            if item_project == project_id:
+            item_residency = normalize_data_residency(
+                request.get("data_residency", DEFAULT_DATA_RESIDENCY)
+            )
+            if (
+                item_project == project_id
+                and item_residency == data_residency
+            ):
                 result.append(item)
         return result
 
@@ -216,15 +254,27 @@ def _scoped_list(manager: Any, project_id: str) -> list[dict[str, Any]]:
 def _scoped_ledger(
     manager: Any,
     project_id: str,
+    data_residency: str,
     *,
     run_id: str | None = None,
 ) -> list[dict[str, Any]]:
     try:
-        return list(manager.ledger(run_id=run_id, project_id=project_id))
+        return list(
+            manager.ledger(
+                run_id=run_id,
+                project_id=project_id,
+                data_residency=data_residency,
+            )
+        )
     except TypeError:
+        allowed = {
+            str(item.get("id"))
+            for item in _scoped_list(manager, project_id, data_residency)
+        }
         if run_id:
+            if run_id not in allowed:
+                return []
             return list(manager.ledger(run_id=run_id))
-        allowed = {str(item.get("id")) for item in _scoped_list(manager, project_id)}
         return [
             item for item in manager.ledger()
             if str(item.get("run_id")) in allowed
@@ -236,13 +286,19 @@ def build_evidence_console(
     *,
     run_id: str | None = None,
     project_id: str = DEFAULT_PROJECT_ID,
+    data_residency: str = DEFAULT_DATA_RESIDENCY,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Build a compact evidence snapshot without creating a second fact store."""
 
     captured_at = generated_at or utc_now()
     project = normalize_project_id(project_id)
-    record = _scoped_get(manager, run_id, project) if run_id else None
+    residency = normalize_data_residency(data_residency)
+    record = (
+        _scoped_get(manager, run_id, project, residency)
+        if run_id
+        else None
+    )
     if run_id and record is None:
         raise KeyError(run_id)
     run = record.snapshot() if record is not None else None
@@ -251,12 +307,24 @@ def build_evidence_console(
         if run_id
         else []
     )
-    health, store_counts = _runtime_counts(manager)
-    kernel = getattr(manager, "control_kernel", None)
-    scoped_runs = _scoped_list(manager, project)
+    scoped_runs = _scoped_list(manager, project, residency)
     run_count = len(scoped_runs)
-    event_count = _safe_int(store_counts.get("events", len(events)))
-    external_attempts = _safe_int(health.get("external_call_attempts"))
+    event_count = (
+        len(events)
+        if run_id
+        else sum(
+            len(
+                manager.events(
+                    str(item.get("id") or ""),
+                    after_revision=0,
+                    limit=MAX_EXPORTED_EVENTS,
+                )
+            )
+            for item in scoped_runs
+            if item.get("id")
+        )
+    )
+    external_attempts = None
     task_families = _task_families(run)
     planning = (run or {}).get("planning") or {}
     decision = planning.get("decision") or {}
@@ -264,24 +332,12 @@ def build_evidence_console(
     routing = plan.get("routing_summary") or {}
     metrics_block = (run or {}).get("metrics") or {}
     policy_snapshot = ((run or {}).get("runtime") or {}).get("policy_snapshot")
-    canary_counts = (
-        kernel.canary_store.counts() if kernel is not None else {}
+    ledger_entries = _scoped_ledger(
+        manager,
+        project,
+        residency,
+        run_id=run_id,
     )
-    registry_counts = (
-        kernel.policy_registry_store.counts() if kernel is not None else {}
-    )
-    shadow_counts = (
-        kernel.production_shadow_store.counts() if kernel is not None else {}
-    )
-    resilience_store = (
-        getattr(kernel, "resilience_store", None)
-        if kernel is not None
-        else None
-    )
-    resilience_counts = (
-        resilience_store.counts() if resilience_store is not None else {}
-    )
-    ledger_entries = _scoped_ledger(manager, project, run_id=run_id)
     placements = manager.placements(run_id) if run_id else []
     resources = manager.resources()
     actual_cost = round(
@@ -303,7 +359,7 @@ def build_evidence_console(
             "运行投影与事件流",
             evidence_kind="actual",
             evidence_level="E1",
-            version=str(health.get("runtime_schema") or "unavailable"),
+            version=RUNTIME_SCHEMA_VERSION,
             api_path=(
                 f"/api/v1/runs/{run_id}/events" if run_id else "/api/v1/runs"
             ),
@@ -376,10 +432,7 @@ def build_evidence_console(
             evidence_level="E1",
             version=OUTCOME_DATASET_SCHEMA_VERSION,
             api_path="/api/v1/outcomes/governance",
-            record_count=(
-                _safe_int(health.get("outcomes"))
-                + _safe_int(health.get("outcome_label_events"))
-            ),
+            record_count=0,
             captured_at=captured_at,
             definition="默认运行来自模拟执行器；真实标签不足时不能支持效果结论。",
         ),
@@ -401,7 +454,7 @@ def build_evidence_console(
             evidence_level="E1",
             version=public_production_shadow_policy()["schema_version"],
             api_path="/api/v1/shadow/policy",
-            record_count=_safe_int(shadow_counts.get("production_shadow_comparisons")),
+            record_count=0,
             captured_at=captured_at,
             definition="旁路控制记录的实际数量；只有明确的真实数据来源才能升级证据等级。",
         ),
@@ -412,7 +465,7 @@ def build_evidence_console(
             evidence_level="E1",
             version=public_policy_registry_policy()["schema_version"],
             api_path="/api/v1/policies/registry",
-            record_count=_safe_int(registry_counts.get("policy_registry_policies")),
+            record_count=0,
             captured_at=captured_at,
             definition="实际注册、门报告和状态机记录；注册表 Active 不等于真实路由 Active。",
         ),
@@ -423,7 +476,7 @@ def build_evidence_console(
             evidence_level="E1",
             version=public_canary_policy()["schema_version"],
             api_path="/api/v1/canary/policy",
-            record_count=_safe_int(canary_counts.get("canary_assignments")),
+            record_count=0,
             captured_at=captured_at,
             definition="运行时策略快照和回滚的控制记录；候选选择不等于 Provider 调用。",
         ),
@@ -434,9 +487,7 @@ def build_evidence_console(
             evidence_level="E1",
             version=public_security_policy()["schema_version"],
             api_path="/api/v1/security/policy",
-            record_count=_safe_int(
-                (health.get("security") or {}).get("external_side_effect_events")
-            ),
+            record_count=0,
             captured_at=captured_at,
             definition="项目隔离、密钥租约、网络许可和外部副作用合同的控制面记录。",
         ),
@@ -447,10 +498,7 @@ def build_evidence_console(
             evidence_level="E0",
             version=public_resilience_policy()["schema_version"],
             api_path="/api/v1/resilience/status",
-            record_count=(
-                _safe_int(resilience_counts.get("resilience_campaigns"))
-                + _safe_int(resilience_counts.get("resilience_observations"))
-            ),
+            record_count=0,
             captured_at=captured_at,
             definition=(
                 "离线故障注入、压力与恢复记录；默认不触发真实 Provider，"
@@ -477,12 +525,13 @@ def build_evidence_console(
             "外部 Provider 尝试",
             external_attempts,
             unit="attempts",
-            evidence_kind="actual",
-            evidence_level="E1",
+            evidence_kind="missing",
+            evidence_level="E0",
             source_id="runtime_events",
-            sample_size=external_attempts,
+            sample_size=0,
             task_families=task_families,
-            definition="受预算保护并实际写入的外部 Adapter 尝试数；零表示未产生外部尝试。",
+            definition="当前请求范围内受预算保护的外部 Adapter 尝试数。",
+            missing_reason="外部尝试账本尚未提供可证明的项目与驻留区联合范围计数。",
         ),
         _metric(
             "fixture_evaluation_cases",
@@ -550,19 +599,18 @@ def build_evidence_console(
         _metric(
             "resilience_campaigns",
             "离线韧性活动",
-            _safe_int(resilience_counts.get("resilience_campaigns")),
+            None,
             unit="campaigns",
-            evidence_kind="simulated",
+            evidence_kind="missing",
             evidence_level="E0",
             source_id="resilience_campaigns",
-            sample_size=_safe_int(
-                resilience_counts.get("resilience_observations")
-            ),
+            sample_size=0,
             task_families=[],
             definition=(
                 "持久化的离线压力、故障、迁移和恢复活动数量；"
                 "不计入真实效果样本。"
             ),
+            missing_reason="韧性存储当前仅支持本地项目维度，未提供驻留区联合范围计数。",
         ),
     ]
 
@@ -736,7 +784,7 @@ def build_evidence_console(
             "kind": "run" if run_id else "workspace",
             "run_id": run_id,
             "project_id": project,
-            "data_residency": "local",
+            "data_residency": residency,
         },
         "summary": {
             "evidence_level": "E0",
@@ -745,6 +793,7 @@ def build_evidence_console(
             "confidence_intervals_available": 0,
             "applicable_real_task_families": [],
             "external_provider_attempts": external_attempts,
+            "external_provider_attempts_scope_available": False,
             "policy_snapshot": policy_snapshot,
             "message": "控制机制可验证；真实质量、成本与时延收益仍缺少 E2+ 证据。",
         },
@@ -754,26 +803,28 @@ def build_evidence_console(
         "sources": sources,
         "controls": {
             "planning_schema": PLANNING_SCHEMA_VERSION,
-            "offline_replay": public_offline_replay_policy(),
+            "offline_replay": _scoped_static_policy(
+                public_offline_replay_policy()
+            ),
             "production_shadow": {
-                **public_production_shadow_policy(),
-                "runtime_counts": shadow_counts,
+                **_scoped_static_policy(public_production_shadow_policy()),
+                "scope_counts_available": False,
             },
             "policy_registry": {
-                **public_policy_registry_policy(),
-                "runtime_counts": registry_counts,
+                **_scoped_static_policy(public_policy_registry_policy()),
+                "scope_counts_available": False,
             },
             "bounded_canary": {
-                **public_canary_policy(),
-                "runtime_counts": canary_counts,
+                **_scoped_static_policy(public_canary_policy()),
+                "scope_counts_available": False,
             },
             "security_boundary": {
-                **public_security_policy(),
-                "runtime_counts": dict(health.get("security") or {}),
+                **_scoped_static_policy(public_security_policy()),
+                "scope_counts_available": False,
             },
             "resilience": {
-                **public_resilience_policy(),
-                "runtime_counts": resilience_counts,
+                **_scoped_static_policy(public_resilience_policy()),
+                "scope_counts_available": False,
             },
         },
     }
@@ -802,6 +853,7 @@ def build_evidence_export(
     *,
     run_id: str | None = None,
     project_id: str = DEFAULT_PROJECT_ID,
+    data_residency: str = DEFAULT_DATA_RESIDENCY,
     catalog_snapshot: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
@@ -809,13 +861,19 @@ def build_evidence_export(
 
     captured_at = generated_at or utc_now()
     project = normalize_project_id(project_id)
+    residency = normalize_data_residency(data_residency)
     console = build_evidence_console(
         manager,
         run_id=run_id,
         project_id=project,
+        data_residency=residency,
         generated_at=captured_at,
     )
-    record = _scoped_get(manager, run_id, project) if run_id else None
+    record = (
+        _scoped_get(manager, run_id, project, residency)
+        if run_id
+        else None
+    )
     if run_id and record is None:
         raise KeyError(run_id)
     events = (
@@ -825,16 +883,32 @@ def build_evidence_export(
     )
     records: dict[str, Any] = {
         "run": record.snapshot() if record is not None else None,
-        "run_summaries": _scoped_list(manager, project)[:MAX_EXPORTED_RUNS],
+        "run_summaries": _scoped_list(
+            manager, project, residency
+        )[:MAX_EXPORTED_RUNS],
         "events": events,
         "planning": manager.planning(run_id) if run_id else None,
         "placements": manager.placements(run_id) if run_id else [],
-        "cost_ledger": _scoped_ledger(manager, project, run_id=run_id),
+        "cost_ledger": _scoped_ledger(
+            manager,
+            project,
+            residency,
+            run_id=run_id,
+        ),
         "validations": manager.validations(run_id) if run_id else [],
         "failures": manager.failures(run_id) if run_id else [],
         "artifacts": manager.artifacts(run_id) if run_id else [],
         "forecast": manager.forecast(run_id) if run_id else None,
-        "runtime_health": manager.health(),
+        "runtime_health": {
+            "runtime_schema": RUNTIME_SCHEMA_VERSION,
+            "project_id": project,
+            "data_residency": residency,
+            "scoped_run_count": len(
+                _scoped_list(manager, project, residency)
+            ),
+            "exported_event_count": len(events),
+            "global_counts_included": False,
+        },
         "catalog_snapshot": dict(catalog_snapshot or {}),
     }
     safe_records = _redact_secrets(records)
@@ -845,9 +919,7 @@ def build_evidence_export(
         "manifest": {
             "console_schema_version": EVIDENCE_CONSOLE_SCHEMA_VERSION,
             "taxonomy_version": EVIDENCE_TAXONOMY_VERSION,
-            "runtime_schema_version": str(
-                (manager.health() or {}).get("runtime_schema") or "unavailable"
-            ),
+            "runtime_schema_version": RUNTIME_SCHEMA_VERSION,
             "source_count": len(console["sources"]),
             "metric_count": len(console["metrics"]),
             "record_count": _record_count(safe_records),
@@ -857,6 +929,7 @@ def build_evidence_export(
             "secrets_redacted": True,
             "raw_artifact_content_included": False,
             "project_isolated": True,
+            "data_residency_isolated": True,
             "logical_project_erasure": True,
             "physical_project_erasure": False,
         },
@@ -888,6 +961,20 @@ def validate_evidence_export(package: Mapping[str, Any]) -> None:
         raise EvidenceConsoleError("evidence console snapshot is missing")
     if console.get("schema_version") != EVIDENCE_CONSOLE_SCHEMA_VERSION:
         raise EvidenceConsoleError("console schema and export schema disagree")
+    scope = package.get("scope")
+    console_scope = console.get("scope")
+    if not isinstance(scope, Mapping) or scope != console_scope:
+        raise EvidenceConsoleError("console and export scope disagree")
+    try:
+        if (
+            normalize_project_id(scope.get("project_id"))
+            != scope.get("project_id")
+            or normalize_data_residency(scope.get("data_residency"))
+            != scope.get("data_residency")
+        ):
+            raise EvidenceConsoleError("evidence export scope is not canonical")
+    except (TypeError, ValueError) as exc:
+        raise EvidenceConsoleError("evidence export scope is invalid") from exc
     source_ids = {
         str(item.get("source_id"))
         for item in console.get("sources", [])
@@ -919,6 +1006,7 @@ def public_evidence_console_policy() -> dict[str, Any]:
         "export_secrets_redacted": True,
         "export_artifact_content_included": False,
         "project_isolation_required": True,
+        "data_residency_isolation_required": True,
         "logical_project_erasure_supported": True,
         "physical_project_erasure_supported": False,
     }

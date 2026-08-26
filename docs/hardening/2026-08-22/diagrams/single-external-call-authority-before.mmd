@@ -1,0 +1,10 @@
+flowchart LR
+    R[External request] --> A[Adapter]
+    A --> AP[Format-only approval]
+    A --> B[Experiment budget store]
+    A --> I[Security side-effect store]
+    A --> D[DNS validation]
+    D --> T[urllib re-resolves + transport]
+    T --> X[Format-only response redaction]
+    X --> B
+    X --> C[Caller / SQLite receipt]

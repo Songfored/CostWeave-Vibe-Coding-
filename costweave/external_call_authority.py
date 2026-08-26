@@ -27,6 +27,7 @@ from .security_boundary import (
     SecretReference,
     assess_prompt_security,
     normalize_data_residency,
+    normalize_project_id,
     prompt_approval_binding,
     require_prompt_admission,
     validate_endpoint,
@@ -58,6 +59,8 @@ class ExternalTransportCapabilityV1:
     capability_id: str
     external_call_id: str
     side_effect_id: str
+    project_id: str
+    data_residency: str
     endpoint: str
     request_hash: str
     provider_idempotency_key: str
@@ -69,6 +72,8 @@ class ExternalTransportCapabilityV1:
             "capability_id": self.capability_id,
             "external_call_id": self.external_call_id,
             "side_effect_id": self.side_effect_id,
+            "project_id": self.project_id,
+            "data_residency": self.data_residency,
             "destination_host": urlparse(self.endpoint).hostname,
             "request_hash": self.request_hash,
             "provider_idempotency_key": self.provider_idempotency_key,
@@ -206,8 +211,13 @@ class ExternalCallAuthorityV1:
         *,
         logical_values: Mapping[str, Any],
         project_id: str,
+        data_residency: str,
         adapter_id: str,
+        provider: str,
+        deployment_id: str,
         endpoint: str,
+        model_id: str,
+        adapter_revision: str,
         operation: str,
         provider_idempotency_key: str,
         request_hash: str,
@@ -220,15 +230,24 @@ class ExternalCallAuthorityV1:
                 mode="logical_replay",
             )
 
+        authority_nonce = secrets.token_urlsafe(48)
         try:
             side_effect, replayed = self.security_store.reserve_side_effect(
                 project_id=project_id,
+                data_residency=data_residency,
                 adapter_id=adapter_id,
+                provider=provider,
+                deployment_id=deployment_id,
+                endpoint=endpoint,
+                model_id=model_id,
+                adapter_revision=adapter_revision,
                 operation=operation,
                 idempotency_key=provider_idempotency_key,
                 request_hash=request_hash,
                 provider_idempotency_key=provider_idempotency_key,
                 compensation_strategy="not_required_idempotent",
+                origin_external_call_id=logical.external_call_id,
+                authority_nonce=authority_nonce,
             )
         except Exception:
             self.store.finalize(
@@ -255,6 +274,8 @@ class ExternalCallAuthorityV1:
             capability_id="external_cap_" + secrets.token_hex(24),
             external_call_id=logical.external_call_id,
             side_effect_id=side_effect_id,
+            project_id=normalize_project_id(project_id),
+            data_residency=normalize_data_residency(data_residency),
             endpoint=endpoint,
             request_hash=request_hash,
             provider_idempotency_key=provider_idempotency_key,
@@ -264,8 +285,14 @@ class ExternalCallAuthorityV1:
             self._capabilities[capability.capability_id] = {
                 "endpoint": endpoint,
                 "request_hash": request_hash,
+                "provider_idempotency_key": provider_idempotency_key,
+                "authority_nonce": authority_nonce,
                 "external_call_id": logical.external_call_id,
                 "side_effect_id": side_effect_id,
+                "project_id": normalize_project_id(project_id),
+                "data_residency": normalize_data_residency(data_residency),
+                "run_id": str(logical_values.get("run_id") or ""),
+                "task_id": str(logical_values.get("task_id") or ""),
                 "max_attempts": int(max_attempts),
                 "consumed_attempts": set(),
             }
@@ -285,29 +312,41 @@ class ExternalCallAuthorityV1:
         request_body: bytes,
     ) -> None:
         request_hash = hashlib.sha256(request_body).hexdigest()
-        with self._lock:
-            state = self._capabilities.get(capability.capability_id)
-            if state is None:
-                raise ExternalCallAuthorityError(
-                    "external transport capability is missing or closed"
+        with self.security_store.active_project_operation(
+            capability.project_id
+        ):
+            with self._lock:
+                state = self._require_active_capability_locked(capability)
+                if endpoint != state["endpoint"] or request_hash != state["request_hash"]:
+                    raise ExternalCallAuthorityError(
+                        "external transport capability does not match the admitted intent"
+                    )
+                logical = self.store.call(capability.external_call_id)
+                side_effect = self.security_store.side_effect(
+                    capability.side_effect_id
                 )
-            if (
-                capability.external_call_id != state["external_call_id"]
-                or capability.side_effect_id != state["side_effect_id"]
-                or endpoint != state["endpoint"]
-                or request_hash != state["request_hash"]
-            ):
-                raise ExternalCallAuthorityError(
-                    "external transport capability does not match the admitted intent"
-                )
-            if not 1 <= int(ordinal) <= int(state["max_attempts"]):
-                raise ExternalCallAuthorityError("external attempt is outside capability")
-            consumed = state["consumed_attempts"]
-            if ordinal in consumed:
-                raise ExternalCallAuthorityError(
-                    "external transport capability attempt was already consumed"
-                )
-            consumed.add(ordinal)
+                if logical is None or logical.get("status") != "reserved":
+                    raise ExternalCallAuthorityError(
+                        "external call is no longer transport-authorized"
+                    )
+                if side_effect is None or any(
+                    item.get("status")
+                    in {"completed", "failed", "ambiguous", "reconciled"}
+                    for item in side_effect.get("events", ())
+                ):
+                    raise ExternalCallAuthorityError(
+                        "external side effect is no longer transport-authorized"
+                    )
+                if not 1 <= int(ordinal) <= int(state["max_attempts"]):
+                    raise ExternalCallAuthorityError(
+                        "external attempt is outside capability"
+                    )
+                consumed = state["consumed_attempts"]
+                if ordinal in consumed:
+                    raise ExternalCallAuthorityError(
+                        "external transport capability attempt was already consumed"
+                    )
+                consumed.add(ordinal)
 
     def guard_response(
         self,
@@ -317,10 +356,7 @@ class ExternalCallAuthorityV1:
         response_body: bytes,
     ) -> None:
         with self._lock:
-            if capability.capability_id not in self._capabilities:
-                raise ExternalCallAuthorityError(
-                    "response arrived outside an active external capability"
-                )
+            self._require_active_capability_locked(capability)
         if secret_lease is not None:
             secret_lease.reject_if_exposed(response_body)
 
@@ -331,15 +367,81 @@ class ExternalCallAuthorityV1:
         status: str,
         detail: Mapping[str, Any],
     ) -> None:
-        self.security_store.record_side_effect_event(
-            capability.side_effect_id,
-            status=status,
-            detail=dict(detail),
-        )
+        if status not in {"completed", "failed", "ambiguous"}:
+            raise ExternalCallAuthorityError(
+                "capability cannot write this side-effect state"
+            )
+        with self.security_store.active_project_operation(
+            capability.project_id
+        ):
+            with self._lock:
+                state = self._require_active_capability_locked(capability)
+                consumed = bool(state["consumed_attempts"])
+                if status in {"completed", "ambiguous"} and not consumed:
+                    raise ExternalCallAuthorityError(
+                        "terminal side effect requires a consumed transport attempt"
+                    )
+                safe_detail = dict(detail)
+                safe_detail["external_call_id"] = state["external_call_id"]
+                safe_detail["transport_called"] = consumed
+                self.security_store.record_side_effect_event(
+                    capability.side_effect_id,
+                    status=status,
+                    detail=safe_detail,
+                    authority_nonce=state["authority_nonce"],
+                )
+                self._capabilities.pop(capability.capability_id, None)
+
+    def _require_active_capability_locked(
+        self, capability: ExternalTransportCapabilityV1
+    ) -> dict[str, Any]:
+        state = self._capabilities.get(capability.capability_id)
+        if state is None:
+            raise ExternalCallAuthorityError(
+                "external transport capability is missing or closed"
+            )
+        if (
+            capability.external_call_id != state["external_call_id"]
+            or capability.side_effect_id != state["side_effect_id"]
+            or capability.project_id != state["project_id"]
+            or capability.data_residency != state["data_residency"]
+            or capability.endpoint != state["endpoint"]
+            or capability.request_hash != state["request_hash"]
+            or capability.provider_idempotency_key
+            != state["provider_idempotency_key"]
+            or capability.max_attempts != state["max_attempts"]
+            or capability.schema_version != EXTERNAL_CALL_AUTHORITY_SCHEMA_VERSION
+        ):
+            raise ExternalCallAuthorityError(
+                "external transport capability does not match the admitted intent"
+            )
+        return state
 
     def close_capability(self, capability: ExternalTransportCapabilityV1) -> None:
         with self._lock:
             self._capabilities.pop(capability.capability_id, None)
+
+    def close_capabilities_for_request(
+        self,
+        *,
+        project_id: str,
+        data_residency: str,
+        run_id: str,
+        task_id: str,
+    ) -> None:
+        project = normalize_project_id(project_id)
+        residency = normalize_data_residency(data_residency)
+        with self._lock:
+            stale = [
+                capability_id
+                for capability_id, state in self._capabilities.items()
+                if state["project_id"] == project
+                and state["data_residency"] == residency
+                and state["run_id"] == str(run_id)
+                and state["task_id"] == str(task_id)
+            ]
+            for capability_id in stale:
+                self._capabilities.pop(capability_id, None)
 
     def active_capabilities(self) -> int:
         with self._lock:

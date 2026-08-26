@@ -15,7 +15,7 @@ from .intelligence.joint_search import (
     JointStrategySearcher,
 )
 from .joint_search_store import JointSearchStore
-from .security_boundary import normalize_project_id
+from .security_boundary import DEFAULT_DATA_RESIDENCY, normalize_project_id
 
 
 class JointSearchServiceError(ValueError):
@@ -36,6 +36,7 @@ class JointSearchService:
             "schema_version": JOINT_SEARCH_SCHEMA_VERSION,
             "policy_version": JOINT_SEARCH_POLICY_REVISION,
             "project_id": project,
+            "data_residency": DEFAULT_DATA_RESIDENCY,
             "available_searchers": list(JOINT_SEARCHERS),
             "runtime_authority": "advisory-only",
             "production_route_intervention": False,
@@ -46,7 +47,7 @@ class JointSearchService:
             "network_calls": 0,
             "commercial_claims_allowed": False,
             "training_allowed": False,
-            "counts": self.store.counts(),
+            "counts": self.store.counts(project_id=project),
         }
 
     @staticmethod

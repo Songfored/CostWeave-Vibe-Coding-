@@ -210,10 +210,13 @@ class ExecutionRecoveryStore:
             ).fetchall()
         return [self._decision_row(row) for row in rows]
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
             return {
-                table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                table: int(connection.execute(f"SELECT COUNT(*) FROM {table}{suffix}", params).fetchone()[0])
                 for table in (
                     "execution_beliefs_v064",
                     "execution_recovery_decisions_v064",

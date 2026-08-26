@@ -9,8 +9,11 @@ tests and never opens a socket.
 
 from __future__ import annotations
 
+import http.client
 import json
+import math
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -53,6 +56,55 @@ class OpenAICompatibleTransportError(OpenAICompatibleGatewayError):
     """Raised when an explicitly enabled local transport cannot complete."""
 
 
+def _gateway_remaining(deadline_monotonic: float) -> float:
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise OpenAICompatibleTransportError("absolute_timeout")
+    return max(0.001, remaining)
+
+
+def _gateway_set_stream_timeout(stream: Any, timeout_seconds: float) -> None:
+    current = stream
+    visited: set[int] = set()
+    for _ in range(6):
+        if current is None or id(current) in visited:
+            return
+        visited.add(id(current))
+        setter = getattr(current, "settimeout", None)
+        if callable(setter):
+            setter(timeout_seconds)
+            return
+        current = next(
+            (
+                getattr(current, name)
+                for name in ("fp", "raw", "_sock", "sock")
+                if getattr(current, name, None) is not None
+            ),
+            None,
+        )
+
+
+def _gateway_read_with_deadline(
+    stream: Any, *, maximum_bytes: int, deadline_monotonic: float
+) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = _gateway_remaining(deadline_monotonic)
+        _gateway_set_stream_timeout(stream, remaining)
+        size = min(64 * 1024, maximum_bytes + 1 - total)
+        if size <= 0:
+            raise OpenAICompatibleTransportError("response_too_large")
+        reader = getattr(stream, "read1", None)
+        chunk = reader(size) if callable(reader) else stream.read(size)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(bytes(chunk))
+        total += len(chunk)
+        if total > maximum_bytes:
+            raise OpenAICompatibleTransportError("response_too_large")
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAICompatibleGatewayConfig:
     """Explicit local endpoint configuration.
@@ -80,6 +132,8 @@ class OpenAICompatibleGatewayConfig:
             raise OpenAICompatibleGatewayError(str(exc)) from exc
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)):
             raise OpenAICompatibleGatewayError("timeout_seconds must be numeric")
+        if not math.isfinite(float(self.timeout_seconds)):
+            raise OpenAICompatibleGatewayError("timeout_seconds must be finite")
         if self.timeout_seconds <= 0 or self.timeout_seconds > 300:
             raise OpenAICompatibleGatewayError("timeout_seconds must be between 0 and 300")
         if isinstance(self.max_response_bytes, bool) or not isinstance(self.max_response_bytes, int):
@@ -189,42 +243,53 @@ class LocalGatewayHTTPTransport:
             validate_endpoint(url, deployment="local")
         except ValueError as exc:
             raise OpenAICompatibleTransportError(str(exc)) from exc
-        request = urllib.request.Request(
-            url,
-            data=body,
-            headers=dict(headers),
-            method="POST",
+        parsed = urlparse(url)
+        deadline = time.monotonic() + timeout_seconds
+        connection_class = (
+            http.client.HTTPSConnection
+            if parsed.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_class(
+            str(parsed.hostname),
+            int(parsed.port or (443 if parsed.scheme == "https" else 80)),
+            timeout=_gateway_remaining(deadline),
         )
         started = time.monotonic()
-        opener = urllib.request.build_opener(self._NoRedirect())
+        timer = threading.Timer(
+            _gateway_remaining(deadline), connection.close
+        )
+        timer.daemon = True
+        timer.start()
         try:
-            with opener.open(request, timeout=timeout_seconds) as response:
-                payload = response.read(max_response_bytes + 1)
-                if len(payload) > max_response_bytes:
-                    raise OpenAICompatibleTransportError("response_too_large")
-                return GatewayHTTPResponse(
-                    status_code=int(response.status),
-                    body=payload,
-                    headers=dict(response.headers.items()),
-                    elapsed_ms=round((time.monotonic() - started) * 1000),
-                )
-        except urllib.error.HTTPError as exc:
-            try:
-                payload = exc.read(max_response_bytes + 1)
-                if len(payload) > max_response_bytes:
-                    raise OpenAICompatibleTransportError("response_too_large")
-                return GatewayHTTPResponse(
-                    status_code=int(exc.code),
-                    body=payload,
-                    headers=dict(exc.headers.items()),
-                    elapsed_ms=round((time.monotonic() - started) * 1000),
-                )
-            finally:
-                exc.close()
+            connection.request(
+                "POST", parsed.path or "/", body=body, headers=dict(headers)
+            )
+            if connection.sock is not None:
+                connection.sock.settimeout(_gateway_remaining(deadline))
+            response = connection.getresponse()
+            payload = _gateway_read_with_deadline(
+                response,
+                maximum_bytes=max_response_bytes,
+                deadline_monotonic=deadline,
+            )
+            return GatewayHTTPResponse(
+                status_code=int(response.status),
+                body=payload,
+                headers=dict(response.getheaders()),
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+            )
         except OpenAICompatibleTransportError:
             raise
         except Exception as exc:
+            if time.monotonic() >= deadline:
+                raise OpenAICompatibleTransportError(
+                    "absolute_timeout"
+                ) from exc
             raise OpenAICompatibleTransportError("local_transport_error") from exc
+        finally:
+            timer.cancel()
+            connection.close()
 
 
 class FakeOpenAICompatibleServer:

@@ -16,6 +16,10 @@ from .evaluation_protocol import (
     EvaluationProtocolError,
     canonical_json,
 )
+from .security_boundary import (
+    normalize_data_residency,
+    normalize_project_id,
+)
 
 
 class EvaluationProtocolStore:
@@ -42,8 +46,34 @@ class EvaluationProtocolStore:
     def _hash(raw: str) -> str:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def record(self, report: ExperimentReport) -> bool:
-        payload = report.to_dict()
+    def record(
+        self,
+        report: ExperimentReport,
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
+    ) -> bool:
+        report_payload = report.to_dict()
+        if (project_id is None) != (data_residency is None):
+            raise EvaluationProtocolError(
+                "evaluation ownership requires project and data residency"
+            )
+        security_scope = (
+            {
+                "visibility": "project",
+                "project_id": normalize_project_id(str(project_id)),
+                "data_residency": normalize_data_residency(
+                    str(data_residency)
+                ),
+            }
+            if project_id is not None
+            else {
+                "visibility": "internal_evaluation_protocol",
+                "project_id": None,
+                "data_residency": None,
+            }
+        )
+        payload = {**report_payload, "security_scope": security_scope}
         raw = canonical_json(payload)
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -54,7 +84,16 @@ class EvaluationProtocolStore:
                     (report.report_id,),
                 ).fetchone()
                 if existing is not None:
-                    if canonical_json(json.loads(existing["result_json"])) != raw:
+                    existing_payload = json.loads(existing["result_json"])
+                    legacy_match = (
+                        "security_scope" not in existing_payload
+                        and canonical_json(existing_payload)
+                        == canonical_json(report_payload)
+                    )
+                    if (
+                        not legacy_match
+                        and canonical_json(existing_payload) != raw
+                    ):
                         raise EvaluationProtocolError(
                             "evaluation id was reused for different evidence"
                         )
@@ -68,6 +107,12 @@ class EvaluationProtocolStore:
                     if observation_count != len(report.observations):
                         raise EvaluationProtocolError(
                             "persisted evaluation observation matrix is incomplete"
+                        )
+                    if legacy_match:
+                        connection.execute(
+                            "UPDATE evaluation_runs SET result_json=? "
+                            "WHERE evaluation_id=?",
+                            (raw, report.report_id),
                         )
                     connection.execute("COMMIT")
                     return False

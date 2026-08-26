@@ -15,7 +15,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterable, Mapping
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote_to_bytes, urlparse
 
 
 SECURITY_SCHEMA_VERSION = "v0.5.8.2"
@@ -25,6 +25,9 @@ DEFAULT_DATA_RESIDENCY = "local"
 SECURITY_PROMPT_APPROVAL_KIND = "security-prompt-admission"
 MAX_SECRET_BYTES = 8_192
 MAX_RESPONSE_BYTES = 4_000_000
+MAX_SECRET_NORMALIZATION_DEPTH = 4
+MAX_SECRET_NORMALIZATION_CANDIDATES = 256
+MAX_SECRET_NORMALIZATION_BYTES = 32_000_000
 
 _PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _RESIDENCY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -417,10 +420,16 @@ class SecretLease:
             raise SecretLeaseError("secret lease is closed")
         raw = bytes(self._secret)
         text = raw.decode("utf-8")
+        standard_b64 = base64.b64encode(raw)
+        urlsafe_b64 = base64.urlsafe_b64encode(raw)
         variants = {
             raw,
-            base64.b64encode(raw),
-            base64.urlsafe_b64encode(raw),
+            standard_b64,
+            standard_b64.rstrip(b"="),
+            urlsafe_b64,
+            urlsafe_b64.rstrip(b"="),
+            raw.hex().encode("ascii"),
+            raw.hex().upper().encode("ascii"),
             quote(text, safe="").encode("ascii"),
             json.dumps(text, ensure_ascii=False)[1:-1].encode("utf-8"),
             json.dumps(text, ensure_ascii=True)[1:-1].encode("ascii"),
@@ -428,6 +437,112 @@ class SecretLease:
         return tuple(
             sorted((item for item in variants if item), key=len, reverse=True)
         )
+
+    @staticmethod
+    def _decoded_secret_candidates(payload: bytes) -> tuple[bytes, ...]:
+        """Bound reversible decoding so composed encodings cannot hide a secret."""
+
+        if len(payload) > MAX_RESPONSE_BYTES:
+            raise SecretLeaseError(
+                "provider response exceeded the secret inspection limit"
+            )
+        pending: list[tuple[bytes, int]] = [(payload, 0)]
+        candidates: list[bytes] = []
+        seen: set[bytes] = {hashlib.sha256(payload).digest()}
+        total_bytes = len(payload)
+
+        def add(candidate: bytes, depth: int) -> None:
+            nonlocal total_bytes
+            if not candidate:
+                return
+            if len(candidate) > MAX_RESPONSE_BYTES:
+                raise SecretLeaseError(
+                    "provider response exceeded the secret normalization limit"
+                )
+            fingerprint = hashlib.sha256(candidate).digest()
+            if fingerprint in seen:
+                return
+            if depth > MAX_SECRET_NORMALIZATION_DEPTH:
+                raise SecretLeaseError(
+                    "secret material inspection exceeded the normalization depth"
+                )
+            if (
+                len(seen) >= MAX_SECRET_NORMALIZATION_CANDIDATES
+                or total_bytes + len(candidate) > MAX_SECRET_NORMALIZATION_BYTES
+            ):
+                raise SecretLeaseError(
+                    "provider response exceeded the secret normalization budget"
+                )
+            seen.add(fingerprint)
+            total_bytes += len(candidate)
+            pending.append((candidate, depth))
+
+        while pending:
+            current, depth = pending.pop(0)
+            candidates.append(current)
+            next_depth = depth + 1
+            compact = re.sub(rb"[\x09\x0a\x0b\x0c\x0d\x20]+", b"", current)
+            if compact != current:
+                add(compact, next_depth)
+
+            if b"%" in current:
+                decoded = unquote_to_bytes(current)
+                if decoded != current:
+                    add(decoded, next_depth)
+
+            try:
+                parsed = json.loads(current.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                parsed = None
+            if parsed is not None:
+                stack = [parsed]
+                extracted = 0
+                while stack:
+                    item = stack.pop()
+                    if isinstance(item, str):
+                        add(item.encode("utf-8"), next_depth)
+                        extracted += 1
+                    elif isinstance(item, Mapping):
+                        stack.extend(item.keys())
+                        stack.extend(item.values())
+                    elif isinstance(item, (list, tuple)):
+                        stack.extend(item)
+                    if extracted > MAX_SECRET_NORMALIZATION_CANDIDATES:
+                        raise SecretLeaseError(
+                            "provider response exceeded the secret normalization budget"
+                        )
+
+            stripped = current.strip().strip(b'"\'')
+            encoded_tokens = [stripped]
+            encoded_tokens.extend(
+                match.group(0)
+                for match in re.finditer(
+                    rb"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{12,}={0,2}(?![A-Za-z0-9_+/-])",
+                    current,
+                )
+            )
+            for token in encoded_tokens:
+                padded = token + b"=" * ((-len(token)) % 4)
+                translated = padded.replace(b"-", b"+").replace(b"_", b"/")
+                try:
+                    decoded = base64.b64decode(translated, validate=True)
+                except (ValueError, TypeError):
+                    continue
+                if decoded != token:
+                    add(decoded, next_depth)
+
+            for match in re.finditer(
+                rb"(?<![0-9A-Fa-f])[0-9A-Fa-f]{16,}(?![0-9A-Fa-f])",
+                current,
+            ):
+                token = match.group(0)
+                if len(token) % 2:
+                    continue
+                try:
+                    add(bytes.fromhex(token.decode("ascii")), next_depth)
+                except ValueError:
+                    continue
+        return tuple(candidates)
 
     def reject_if_exposed(self, value: Any) -> None:
         """Fail closed if provider-controlled output contains this lease value."""
@@ -448,7 +563,14 @@ class SecretLease:
                 raise SecretLeaseError(
                     "provider response could not be checked for secret exposure"
                 ) from error
-        if any(variant in payload for variant in self._exposure_variants()):
+        variants = self._exposure_variants()
+        raw_hex = bytes(self._secret).hex().encode("ascii")
+        exposed = any(
+            any(variant in candidate for variant in variants)
+            or raw_hex in candidate.lower()
+            for candidate in self._decoded_secret_candidates(payload)
+        )
+        if exposed:
             raise SecretLeaseError(
                 "provider response contained current leased secret material"
             )

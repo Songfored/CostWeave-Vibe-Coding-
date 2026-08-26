@@ -1,0 +1,8 @@
+flowchart LR
+    R[External request] --> A[Adapter with shared helpers]
+    A --> AP[Verified ApprovalStore]
+    A --> B[Conservative budget store]
+    A --> I[Honored project idempotency]
+    A --> P[Pinned DNS transport]
+    P --> X[Exact-secret output guard]
+    X --> C[Caller / safe receipt]

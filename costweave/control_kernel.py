@@ -1,9 +1,11 @@
-"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.7."""
+"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.8."""
 
 from __future__ import annotations
 
 import os
+import math
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -90,12 +92,17 @@ from .canary_control import (
     CanaryDecision,
     CanaryDeployment,
     CanaryWindow,
-    assign_canary_policy,
     evaluate_canary_window,
 )
 from .canary_store import CanaryStore
 from .evidence_console_store import EvidenceConsoleStore
-from .security_store import SecurityStore
+from .security_store import SecurityStateConflictError, SecurityStore
+from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
+    DEFAULT_PROJECT_ID,
+    normalize_data_residency,
+    normalize_project_id,
+)
 from .resilience_store import ResilienceStore
 from .resilience import RecoveryPlanner
 from .release_store import ReleaseStore
@@ -178,6 +185,36 @@ class ControlKernel:
         record.control_kernel = self
         return record
 
+    @contextmanager
+    def _active_record_mutation(self, record: Any):
+        """Preserve the record -> kernel -> project revocation lock order."""
+
+        with record.lock, self._lock:
+            project, _residency = self._authoritative_record_scope(record)
+            with self.security_store.active_project_operation(project):
+                yield
+
+    def _authoritative_record_scope(self, record: Any) -> tuple[str, str]:
+        projection = self.store.get_projection(str(record.id))
+        request = projection.get("request") if isinstance(projection, dict) else None
+        if not isinstance(request, dict):
+            raise SecurityStateConflictError(
+                "run mutation requires an authoritative persisted scope"
+            )
+        project = normalize_project_id(str(request.get("project_id") or ""))
+        residency = normalize_data_residency(
+            str(request.get("data_residency") or DEFAULT_DATA_RESIDENCY)
+        )
+        if (
+            normalize_project_id(str(record.request.project_id)) != project
+            or normalize_data_residency(str(record.request.data_residency))
+            != residency
+        ):
+            raise SecurityStateConflictError(
+                "in-memory run scope does not match its persisted identity"
+            )
+        return project, residency
+
     def create_run(
         self,
         request: RunRequest,
@@ -186,17 +223,22 @@ class ControlKernel:
         retry_of: str | None = None,
         command_metadata: dict[str, Any] | None = None,
     ) -> tuple[Any, bool]:
-        self.security_store.ensure_project_active(request.project_id)
-        create_identity = (
-            f"create:{idempotency_key}"
-            if request.project_id == "local-default"
-            else f"create:{request.project_id}:{idempotency_key}"
+        project = self.security_store.ensure_project_active(request.project_id)
+        residency = normalize_data_residency(request.data_residency)
+        is_default_scope = (
+            project == DEFAULT_PROJECT_ID
+            and residency == DEFAULT_DATA_RESIDENCY
         )
-        storage_idempotency_key = (
-            idempotency_key
-            if request.project_id == "local-default"
-            else f"project:{request.project_id}:{idempotency_key}"
-        )
+        if is_default_scope:
+            create_identity = f"create:{idempotency_key}"
+            storage_idempotency_key = idempotency_key
+        elif residency == DEFAULT_DATA_RESIDENCY:
+            create_identity = f"create:{project}:{idempotency_key}"
+            storage_idempotency_key = f"project:{project}:{idempotency_key}"
+        else:
+            scope_identity = f"{project}:residency:{residency}"
+            create_identity = f"create:{scope_identity}:{idempotency_key}"
+            storage_idempotency_key = f"scope:{scope_identity}:{idempotency_key}"
         run_id = canonical_identifier("run", create_identity)
         command = CommandEnvelope.create(
             run_id,
@@ -226,9 +268,10 @@ class ControlKernel:
                 "runtime_metadata": dict(command_metadata or {}),
             },
         )
-        replay = self.store.replay_command(
-            command, idempotency_key=storage_idempotency_key
-        )
+        with self.security_store.active_project_operation(project):
+            replay = self.store.replay_command(
+                command, idempotency_key=storage_idempotency_key
+            )
         if replay is not None:
             snapshot = self.store.get_projection(run_id)
             if snapshot is None:
@@ -250,14 +293,15 @@ class ControlKernel:
             "control_kernel.create_run",
             {"trace_id": record.trace_id, "projection": projection},
         )
-        result = self.store.commit(
-            command,
-            [event],
-            idempotency_key=storage_idempotency_key,
-            expected_revision=0,
-            projection_updates=[ProjectionUpdate("run", run_id, projection)],
-            result={"run_id": run_id},
-        )
+        with self.security_store.active_project_operation(project):
+            result = self.store.commit(
+                command,
+                [event],
+                idempotency_key=storage_idempotency_key,
+                expected_revision=0,
+                projection_updates=[ProjectionUpdate("run", run_id, projection)],
+                result={"run_id": run_id},
+            )
         record.runtime_revision = result.revision
         return record, result.replayed
 
@@ -393,14 +437,18 @@ class ControlKernel:
         return_replayed: bool = False,
     ) -> Any:
         with record.lock:
+            project, residency = self._authoritative_record_scope(record)
             command = CommandEnvelope.create(
                 str(record.id),
                 CommandKind.CANCEL_RUN,
                 {"requested": True},
             )
-            replay = self.store.replay_command(
-                command, idempotency_key=idempotency_key
-            )
+            with self.security_store.active_project_operation(
+                project
+            ):
+                replay = self.store.replay_command(
+                    command, idempotency_key=idempotency_key
+                )
             if replay is not None:
                 return (record, True) if return_replayed else record
             if int(expected_revision) != record.runtime_revision:
@@ -415,6 +463,8 @@ class ControlKernel:
             record.status = RunStatus.CANCELLING
             next_revision = record.runtime_revision + 1
             projection = record_to_projection(record, revision=next_revision)
+            projection["request"]["project_id"] = project
+            projection["request"]["data_residency"] = residency
             event = EventEnvelope.create(
                 str(record.id),
                 "run.cancel.requested",
@@ -422,14 +472,17 @@ class ControlKernel:
                 {"projection": projection},
             )
             try:
-                committed = self.store.commit(
-                    command,
-                    [event],
-                    idempotency_key=idempotency_key,
-                    expected_revision=expected_revision,
-                    projection_updates=[ProjectionUpdate("run", str(record.id), projection)],
-                    result={"run_id": str(record.id), "status": "cancelling"},
-                )
+                with self.security_store.active_project_operation(
+                    project
+                ):
+                    committed = self.store.commit(
+                        command,
+                        [event],
+                        idempotency_key=idempotency_key,
+                        expected_revision=expected_revision,
+                        projection_updates=[ProjectionUpdate("run", str(record.id), projection)],
+                        result={"run_id": str(record.id), "status": "cancelling"},
+                    )
                 record.runtime_revision = committed.revision
             except Exception:
                 record.status = old_status
@@ -519,6 +572,10 @@ class ControlKernel:
         }
 
     def prepare_recovery(self, record: Any) -> dict[str, Any]:
+        with self._active_record_mutation(record):
+            return self._prepare_recovery_active(record)
+
+    def _prepare_recovery_active(self, record: Any) -> dict[str, Any]:
         tasks = []
         artifact_owner: dict[str, str] = {}
         if record.plan is not None:
@@ -557,6 +614,10 @@ class ControlKernel:
         return {"checkpoint": checkpoint, "receipt": receipt, "plan": plan.to_dict()}
 
     def compile_graph(self, record: Any) -> dict[str, Any]:
+        with self._active_record_mutation(record):
+            return self._compile_graph_active(record)
+
+    def _compile_graph_active(self, record: Any) -> dict[str, Any]:
         if record.plan is None:
             raise ValueError("cannot compile a run without a plan")
         graph = self.graph_compiler.compile(str(record.id), record.plan)
@@ -564,6 +625,12 @@ class ControlKernel:
         return graph.to_dict()
 
     def prepare_handoff(self, record: Any, task: Any) -> list[dict[str, Any]]:
+        with self._active_record_mutation(record):
+            return self._prepare_handoff_active(record, task)
+
+    def _prepare_handoff_active(
+        self, record: Any, task: Any
+    ) -> list[dict[str, Any]]:
         if record.plan is None:
             raise ValueError("cannot hand off a task without a plan")
         inputs = self.artifact_store.task_artifacts(
@@ -782,6 +849,19 @@ class ControlKernel:
         *,
         validated: bool,
     ) -> list[Artifact]:
+        with self._active_record_mutation(record):
+            return self._publish_task_artifacts_active(
+                record, task, result, validated=validated
+            )
+
+    def _publish_task_artifacts_active(
+        self,
+        record: Any,
+        task: Any,
+        result: dict[str, Any],
+        *,
+        validated: bool,
+    ) -> list[Artifact]:
         if record.plan is None:
             raise ValueError("cannot publish an artifact without a plan")
         status = (
@@ -833,26 +913,27 @@ class ControlKernel:
         *,
         reason: str,
     ) -> list[str]:
-        invalidated = self.artifact_store.mark_stale_for_tasks(
-            str(record.id), task_ids
-        )
-        if invalidated:
-            self._persist(
-                record,
-                kind=CommandKind.INVALIDATE_ARTIFACTS,
-                event_kind="artifact.invalidated",
-                source="control_kernel.invalidate_tasks",
-                payload={
-                    "artifact_ids": invalidated,
-                    "affected_tasks": sorted(task_ids),
-                    "reason": reason,
-                },
-                idempotency_key=(
-                    f"internal:{record.id}:invalidate:"
-                    f"{record.runtime_revision + 1}"
-                ),
+        with self._active_record_mutation(record):
+            invalidated = self.artifact_store.mark_stale_for_tasks(
+                str(record.id), task_ids
             )
-        return invalidated
+            if invalidated:
+                self._persist(
+                    record,
+                    kind=CommandKind.INVALIDATE_ARTIFACTS,
+                    event_kind="artifact.invalidated",
+                    source="control_kernel.invalidate_tasks",
+                    payload={
+                        "artifact_ids": invalidated,
+                        "affected_tasks": sorted(task_ids),
+                        "reason": reason,
+                    },
+                    idempotency_key=(
+                        f"internal:{record.id}:invalidate:"
+                        f"{record.runtime_revision + 1}"
+                    ),
+                )
+            return invalidated
 
     def artifacts(self, run_id: str, *, include_content: bool = False) -> list[dict[str, Any]]:
         return self.artifact_store.list_run(
@@ -947,8 +1028,9 @@ class ControlKernel:
             ),
         }
 
-    def record_forecast(self, forecast: Any) -> None:
-        self.outcome_store.record_forecast(forecast)
+    def record_forecast(self, record: Any, forecast: Any) -> None:
+        with self._active_record_mutation(record):
+            self.outcome_store.record_forecast(forecast)
 
     def calibrated_probability(self, task: Any) -> dict[str, Any]:
         candidates = self.outcome_store.capabilities.candidates(
@@ -965,7 +1047,8 @@ class ControlKernel:
         return self.outcome_store.forecast(run_id)
 
     def record_outcome(self, record: Any) -> dict[str, Any]:
-        return self.outcome_store.record_outcome(record).to_dict()
+        with self._active_record_mutation(record):
+            return self.outcome_store.record_outcome(record).to_dict()
 
     def outcomes(self) -> list[dict[str, Any]]:
         return self.outcome_store.outcomes()
@@ -973,8 +1056,21 @@ class ControlKernel:
     def evaluations(self) -> list[dict[str, Any]]:
         return self.outcome_store.evaluations()
 
-    def record_evaluation_report(self, report: Any) -> bool:
-        return self.evaluation_protocol_store.record(report)
+    def record_evaluation_report(
+        self,
+        report: Any,
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
+    ) -> bool:
+        if project_id is None:
+            return self.evaluation_protocol_store.record(report)
+        with self.security_store.active_project_operation(project_id):
+            return self.evaluation_protocol_store.record(
+                report,
+                project_id=project_id,
+                data_residency=data_residency,
+            )
 
     def evaluation_reports(self) -> list[dict[str, Any]]:
         return self.evaluation_protocol_store.list()
@@ -1178,30 +1274,20 @@ class ControlKernel:
     def assign_runtime_policy(self, record: Any, analysis: Any) -> dict[str, Any] | None:
         """Capture one immutable policy snapshot before runtime routing begins."""
 
-        if record.policy_snapshot is not None:
-            return dict(record.policy_snapshot)
-        persisted = self.canary_store.assignment_for_run(str(record.id))
-        if persisted is not None:
+        with self._active_record_mutation(record):
+            if record.policy_snapshot is not None:
+                return dict(record.policy_snapshot)
+            assignment = self.canary_store.assign_for_run(
+                run_id=str(record.id),
+                risk_level=str(getattr(analysis, "stakes", "high")),
+                task_families=tuple(getattr(analysis, "task_types", ())),
+            )
+            if assignment is None:
+                return None
             with record.lock:
-                record.policy_snapshot = dict(persisted)
-            return dict(persisted)
-        context = self.canary_store.assignment_context()
-        if context is None:
-            return None
-        deployment, stage_pct, exposure_enabled = context
-        assignment = assign_canary_policy(
-            deployment,
-            run_id=str(record.id),
-            stage_pct=stage_pct,
-            risk_level=str(getattr(analysis, "stakes", "high")),
-            task_families=tuple(getattr(analysis, "task_types", ())),
-            exposure_enabled=exposure_enabled,
-        )
-        self.canary_store.record_assignment(assignment)
-        with record.lock:
-            record.policy_snapshot = assignment.to_dict()
-        self.checkpoint(record, source="control_kernel.assign_runtime_policy")
-        return assignment.to_dict()
+                record.policy_snapshot = assignment.to_dict()
+            self.checkpoint(record, source="control_kernel.assign_runtime_policy")
+            return assignment.to_dict()
 
     def record_canary_window(
         self,
@@ -1214,21 +1300,51 @@ class ControlKernel:
         return decision
 
     def record_evidence_export(
-        self, package: dict[str, Any], *, project_id: str | None = None
+        self,
+        package: dict[str, Any],
+        *,
+        project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        return self.evidence_console_store.record_export(
-            package, project_id=project_id
-        )
+        if project_id is None:
+            return self.evidence_console_store.record_export(
+                package,
+                project_id=project_id,
+                data_residency=data_residency,
+            )
+        with self.security_store.active_project_operation(project_id):
+            return self.evidence_console_store.record_export(
+                package,
+                project_id=project_id,
+                data_residency=data_residency,
+            )
 
     def evidence_exports(
-        self, *, limit: int = 100, project_id: str | None = None
+        self,
+        *,
+        limit: int = 100,
+        project_id: str | None = None,
+        data_residency: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.evidence_console_store.list_exports(
-            limit=limit, project_id=project_id
+            limit=limit,
+            project_id=project_id,
+            data_residency=data_residency,
         )
 
     def project_status(self, project_id: str) -> dict[str, Any]:
         return self.security_store.project_status(project_id)
+
+    def record_project_status(self, record: Any) -> dict[str, Any]:
+        with record.lock, self._lock:
+            project, _residency = self._authoritative_record_scope(record)
+            return self.security_store.project_status(project)
+
+    def record_scope(self, record: Any) -> tuple[str, str]:
+        """Return persisted run ownership after detecting projection tampering."""
+
+        with record.lock, self._lock:
+            return self._authoritative_record_scope(record)
 
     def revoke_project(
         self,
@@ -1244,10 +1360,11 @@ class ControlKernel:
         )
 
     def ensure_media_project(self, record: Any) -> dict[str, Any] | None:
-        return self.media_runtime.ensure_project(
-            run_id=str(record.id),
-            goal=record.request.goal,
-        )
+        with self._active_record_mutation(record):
+            return self.media_runtime.ensure_project(
+                run_id=str(record.id),
+                goal=record.request.goal,
+            )
 
     def media_project(self, run_id: str) -> dict[str, Any] | None:
         return self.media_runtime.project(run_id)
@@ -1256,32 +1373,134 @@ class ControlKernel:
         return self.media_runtime.shots(run_id)
 
     def approve_media_shot(
-        self, shot_id: str, *, idempotency_key: str | None = None
+        self,
+        run_id: str,
+        shot_id: str,
+        *,
+        project_id: str = DEFAULT_PROJECT_ID,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        return self.media_runtime.approve_shot(
-            shot_id, idempotency_key=idempotency_key
-        )
+        with self.security_store.active_project_operation(project_id):
+            return self.media_runtime.approve_shot(
+                run_id, shot_id, idempotency_key=idempotency_key
+            )
 
     def approve_media_project(
-        self, run_id: str, *, idempotency_key: str | None = None
+        self,
+        run_id: str,
+        *,
+        project_id: str = DEFAULT_PROJECT_ID,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        return self.media_runtime.approve_project(
-            run_id, idempotency_key=idempotency_key
-        )
+        with self.security_store.active_project_operation(project_id):
+            return self.media_runtime.approve_project(
+                run_id, idempotency_key=idempotency_key
+            )
 
     def sync_placements(self, record: Any) -> int:
         if record.plan is None:
             return 0
-        return self.placement_store.sync_run(
-            str(record.id), record.plan.tasks
-        )
+        with self._active_record_mutation(record):
+            return self.placement_store.sync_run(
+                str(record.id), record.plan.tasks
+            )
 
-    def record_actual_cost(self, record: Any, task: Any) -> None:
-        self.placement_store.record_actual(
-            run_id=str(record.id),
-            task=task,
-            actual_total=task.estimated_cost,
-        )
+    def admit_scheduled_task(
+        self,
+        record: Any,
+        scheduler: Any,
+        task: Any,
+        worker: Any,
+    ) -> Any:
+        """Serialize approval and resource reservation against revocation."""
+
+        with self._active_record_mutation(record):
+            return scheduler.start_decision(record, task, worker)
+
+    def record_actual_cost(
+        self,
+        record: Any,
+        task: Any,
+        *,
+        actual_total: float | None = None,
+    ) -> None:
+        with self._active_record_mutation(record):
+            self.placement_store.record_actual(
+                run_id=str(record.id),
+                task=task,
+                actual_total=(
+                    task.estimated_cost
+                    if actual_total is None
+                    else actual_total
+                ),
+            )
+
+    def release_reservation(
+        self,
+        record: Any,
+        reservation_id: str,
+        *,
+        reason: str,
+        actual_cost: float | None = None,
+    ) -> bool:
+        """Settle a run reservation inside its revocation boundary."""
+
+        with self._active_record_mutation(record):
+            return self.reservations.release(
+                reservation_id,
+                reason=reason,
+                actual_cost=actual_cost,
+            )
+
+    def settle_task_reservation(
+        self,
+        record: Any,
+        task: Any,
+        reservation_id: str,
+        *,
+        reason: str,
+        actual_cost: float,
+        record_placement: bool,
+    ) -> None:
+        """Atomically fence cost settlement against project revocation."""
+
+        amount = float(actual_cost)
+        if not math.isfinite(amount) or amount < 0:
+            raise ValueError("reservation actual cost must be finite and non-negative")
+        with self._active_record_mutation(record):
+            released = self.reservations.release(
+                reservation_id,
+                reason=reason,
+                actual_cost=amount,
+            )
+            if not released:
+                raise SecurityStateConflictError(
+                    "task reservation was already terminal before settlement"
+                )
+            record.spent += amount
+            if record_placement:
+                self.placement_store.record_actual(
+                    run_id=str(record.id),
+                    task=task,
+                    actual_total=amount,
+                )
+
+    def extend_task_reservation(
+        self,
+        record: Any,
+        reservation_id: str,
+        *,
+        additional_cost: float,
+    ) -> float:
+        """Fund a retry before execution while respecting revocation and budget."""
+
+        with self._active_record_mutation(record):
+            return self.reservations.extend_cost(
+                reservation_id,
+                additional_cost=additional_cost,
+                budget=record.request.budget,
+                spent=record.spent,
+            )
 
     def placements(self, run_id: str) -> list[dict[str, Any]]:
         return self.placement_store.list_run(run_id)
@@ -1292,11 +1511,12 @@ class ControlKernel:
         return self.placement_store.ledger(run_id=run_id)
 
     def record_validation(self, record: Any, task: Any) -> str:
-        return self.evidence_store.record_validation(
-            run_id=str(record.id),
-            task=task,
-            validation=task.validation,
-        )
+        with self._active_record_mutation(record):
+            return self.evidence_store.record_validation(
+                run_id=str(record.id),
+                task=task,
+                validation=task.validation,
+            )
 
     def record_failure(
         self,
@@ -1308,15 +1528,16 @@ class ControlKernel:
         patch: Any = None,
         recovery_receipt: dict[str, Any] | None = None,
     ) -> None:
-        self.evidence_store.record_failure(
-            run_id=str(record.id),
-            task=task,
-            failure=failure,
-            decision=decision,
-            affected_task_ids=affected_task_ids,
-            patch=patch,
-            recovery_receipt=recovery_receipt,
-        )
+        with self._active_record_mutation(record):
+            self.evidence_store.record_failure(
+                run_id=str(record.id),
+                task=task,
+                failure=failure,
+                decision=decision,
+                affected_task_ids=affected_task_ids,
+                patch=patch,
+                recovery_receipt=recovery_receipt,
+            )
 
     def validations(self, run_id: str) -> list[dict[str, Any]]:
         return self.evidence_store.validations(run_id)
@@ -1334,29 +1555,37 @@ class ControlKernel:
         expected_revision: int,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        approval, replayed = self.approval_store.resolve(
-            approval_id,
-            decision=decision,
-            note=note,
-            expected_revision=expected_revision,
-            idempotency_key=idempotency_key,
-        )
-        if not replayed:
-            self._persist(
-                record,
-                kind=CommandKind.RECORD_EVENT,
-                event_kind="approval.resolved",
-                source="control_kernel.resolve_approval",
-                payload={
-                    "approval_id": approval_id,
-                    "decision": decision,
-                    "approval_revision": approval["revision"],
-                },
-                idempotency_key=(
-                    f"internal:{record.id}:approval:{approval_id}:"
-                    f"{approval['revision']}"
-                ),
+        # Preserve the global mutation lock order used by _persist:
+        # record -> kernel writer -> project/revocation boundary.  Taking the
+        # project lock first can deadlock with an engine event that already
+        # owns the record lock while an approval is resolved concurrently.
+        project, _residency = self._authoritative_record_scope(record)
+        with record.lock, self._lock, self.security_store.active_project_operation(
+            project
+        ):
+            approval, replayed = self.approval_store.resolve(
+                approval_id,
+                decision=decision,
+                note=note,
+                expected_revision=expected_revision,
+                idempotency_key=idempotency_key,
             )
+            if not replayed:
+                self._persist(
+                    record,
+                    kind=CommandKind.RECORD_EVENT,
+                    event_kind="approval.resolved",
+                    source="control_kernel.resolve_approval",
+                    payload={
+                        "approval_id": approval_id,
+                        "decision": decision,
+                        "approval_revision": approval["revision"],
+                    },
+                    idempotency_key=(
+                        f"internal:{record.id}:approval:{approval_id}:"
+                        f"{approval['revision']}"
+                    ),
+                )
         return approval
 
     def _runtime_backend_event(
@@ -1376,14 +1605,18 @@ class ControlKernel:
         from .event_store import RevisionConflictError
 
         with record.lock, self._lock:
+            project, residency = self._authoritative_record_scope(record)
             command = CommandEnvelope.create(
                 str(record.id),
                 CommandKind.CHECKPOINT,
                 {**dict(payload), "source": source},
             )
-            replay = self.store.replay_command(
-                command, idempotency_key=idempotency_key
-            )
+            with self.security_store.active_project_operation(
+                project
+            ):
+                replay = self.store.replay_command(
+                    command, idempotency_key=idempotency_key
+                )
             if replay is not None:
                 # A replay can refer to a command committed before later
                 # events.  Never move the in-memory revision backwards.
@@ -1411,6 +1644,8 @@ class ControlKernel:
                 record.cancel_requested = False
             next_revision = previous_revision + 1
             projection = record_to_projection(record, revision=next_revision)
+            projection["request"]["project_id"] = project
+            projection["request"]["data_residency"] = residency
             event = EventEnvelope.create(
                 str(record.id),
                 event_kind,
@@ -1418,20 +1653,23 @@ class ControlKernel:
                 {**dict(payload), "trace_id": str(record.trace_id), "projection": projection},
             )
             try:
-                committed = self.store.commit(
-                    command,
-                    [event],
-                    idempotency_key=idempotency_key,
-                    expected_revision=previous_revision,
-                    projection_updates=[
-                        ProjectionUpdate("run", str(record.id), projection)
-                    ],
-                    result={
-                        "run_id": str(record.id),
-                        "event_kind": event_kind,
-                        "checkpoint_id": payload.get("checkpoint_id"),
-                    },
-                )
+                with self.security_store.active_project_operation(
+                    project
+                ):
+                    committed = self.store.commit(
+                        command,
+                        [event],
+                        idempotency_key=idempotency_key,
+                        expected_revision=previous_revision,
+                        projection_updates=[
+                            ProjectionUpdate("run", str(record.id), projection)
+                        ],
+                        result={
+                            "run_id": str(record.id),
+                            "event_kind": event_kind,
+                            "checkpoint_id": payload.get("checkpoint_id"),
+                        },
+                    )
                 record.runtime_revision = committed.revision
             except Exception:
                 record.runtime_revision = previous_revision
@@ -1456,11 +1694,14 @@ class ControlKernel:
         # Runtime event writers already hold record.lock; the opposite order
         # here could deadlock with concurrent approval resolution.
         with record.lock, self._lock:
+            project, residency = self._authoritative_record_scope(record)
             payload = {**dict(payload), "trace_id": str(record.trace_id)}
             previous_revision = int(record.runtime_revision)
             next_revision = previous_revision + 1
             record.runtime_revision = next_revision
             projection = record_to_projection(record, revision=next_revision)
+            projection["request"]["project_id"] = project
+            projection["request"]["data_residency"] = residency
             command = CommandEnvelope.create(
                 str(record.id),
                 kind,
@@ -1479,16 +1720,17 @@ class ControlKernel:
                 task_id=command.task_id,
             )
             try:
-                committed = self.store.commit(
-                    command,
-                    [event],
-                    idempotency_key=idempotency_key,
-                    expected_revision=previous_revision,
-                    projection_updates=[
-                        ProjectionUpdate("run", str(record.id), projection)
-                    ],
-                    result={"run_id": str(record.id), "event_kind": event_kind},
-                )
+                with self.security_store.active_project_operation(project):
+                    committed = self.store.commit(
+                        command,
+                        [event],
+                        idempotency_key=idempotency_key,
+                        expected_revision=previous_revision,
+                        projection_updates=[
+                            ProjectionUpdate("run", str(record.id), projection)
+                        ],
+                        result={"run_id": str(record.id), "event_kind": event_kind},
+                    )
                 record.runtime_revision = committed.revision
             except Exception:
                 record.runtime_revision = previous_revision

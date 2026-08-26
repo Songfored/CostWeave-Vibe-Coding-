@@ -1,0 +1,10 @@
+flowchart LR
+    R[Normalized external intent] --> A[ExternalCallAuthorityV1]
+    A --> V[Approval + project + residency]
+    A --> L[Atomic budget + idempotency lease]
+    A --> N[Validated and pinned destination]
+    A --> C[One-shot ExternalCallCapabilityV1]
+    C --> P[Protocol-only Adapter/Transport]
+    P --> O[Exact-secret output guard]
+    O --> F[Authority finalize or quarantine]
+    F --> DB[(Unified call state + safe receipt)]

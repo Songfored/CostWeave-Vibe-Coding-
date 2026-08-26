@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import sqlite3
 import threading
@@ -13,10 +14,22 @@ from typing import Any, Mapping
 from .commands import validate_idempotency_key
 from .contracts_v4 import utc_now
 from .security_boundary import (
+    DEFAULT_DATA_RESIDENCY,
     SECURITY_SCHEMA_VERSION,
+    normalize_data_residency,
     normalize_project_id,
     redact_structure,
 )
+
+
+_PROJECT_OPERATION_REGISTRY_LOCK = threading.Lock()
+_PROJECT_OPERATION_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+
+
+def _project_operation_lock(path: Path, project_id: str) -> threading.RLock:
+    key = (str(path.resolve(strict=False)).casefold(), project_id)
+    with _PROJECT_OPERATION_REGISTRY_LOCK:
+        return _PROJECT_OPERATION_LOCKS.setdefault(key, threading.RLock())
 
 
 class SecurityStoreError(ValueError):
@@ -97,6 +110,20 @@ class SecurityStore:
             raise ProjectRevokedError("project access has been logically revoked")
         return project
 
+    @contextmanager
+    def active_project_operation(self, project_id: str):
+        """Serialize an authorized mutation with project revocation.
+
+        Callers must keep the context only around the final durable mutation.
+        A revocation either happens before the check (and the mutation fails) or
+        after the mutation has completed; it can no longer interleave between
+        authorization and commit.
+        """
+
+        project = normalize_project_id(project_id)
+        with _project_operation_lock(self.path, project):
+            yield self.ensure_project_active(project)
+
     def revoke_project(
         self,
         project_id: str,
@@ -139,7 +166,11 @@ class SecurityStore:
         }
         raw = _canonical_json(tombstone)
         digest = _digest(raw)
-        with self._lock, self._connection() as connection:
+        with (
+            _project_operation_lock(self.path, project),
+            self._lock,
+            self._connection() as connection,
+        ):
             connection.execute("BEGIN IMMEDIATE")
             try:
                 existing = connection.execute(
@@ -175,18 +206,44 @@ class SecurityStore:
         self,
         *,
         project_id: str,
+        data_residency: str,
         adapter_id: str,
+        provider: str,
+        deployment_id: str,
+        endpoint: str,
+        model_id: str,
+        adapter_revision: str,
         operation: str,
         idempotency_key: str,
         request_hash: str,
         provider_idempotency_key: str | None,
         compensation_strategy: str | None,
+        origin_external_call_id: str | None = None,
+        authority_nonce: str | None = None,
         created_at: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         project = self.ensure_project_active(project_id)
+        residency = normalize_data_residency(data_residency)
         key = validate_idempotency_key(idempotency_key)
+        scoped_key = (
+            key
+            if residency == DEFAULT_DATA_RESIDENCY
+            else f"residency:{residency}:{key}"
+        )
+        scoped_key_hash = _digest(scoped_key)
         if not re_safe_identity(adapter_id) or not re_safe_identity(operation):
             raise SecurityStoreError("side-effect adapter or operation identity is invalid")
+        destination = {
+            "provider": _contract_identity(provider, "provider"),
+            "deployment_id": _contract_identity(
+                deployment_id, "deployment_id"
+            ),
+            "endpoint": _contract_identity(endpoint, "endpoint", maximum=4096),
+            "model_id": _contract_identity(model_id, "model_id"),
+            "adapter_revision": _contract_identity(
+                adapter_revision, "adapter_revision"
+            ),
+        }
         if len(request_hash) != 64:
             raise SecurityStoreError("side-effect request hash is invalid")
         provider_key = provider_idempotency_key or None
@@ -203,9 +260,61 @@ class SecurityStore:
             "not_required_idempotent",
         }:
             raise SecurityStoreError("compensation strategy is invalid")
+        origin_call_id = (
+            None
+            if origin_external_call_id is None
+            else _contract_identity(
+                origin_external_call_id,
+                "origin_external_call_id",
+                maximum=192,
+            )
+        )
+        if origin_call_id is not None:
+            with self._connection() as connection:
+                origin = connection.execute(
+                    "SELECT provider,deployment_id,model_id,adapter_revision "
+                    "FROM external_calls WHERE external_call_id=?",
+                    (origin_call_id,),
+                ).fetchone()
+            if origin is None or any(
+                str(origin[key]) != destination[key]
+                for key in (
+                    "provider",
+                    "deployment_id",
+                    "model_id",
+                    "adapter_revision",
+                )
+            ):
+                raise SecurityStoreError(
+                    "side-effect origin call does not match the destination"
+                )
+        nonce_hash = None
+        if authority_nonce is not None:
+            nonce = _contract_identity(
+                authority_nonce, "authority_nonce", maximum=256
+            )
+            nonce_hash = _digest(nonce)
         side_effect_id = "side_effect_" + _digest(
-            {"project_id": project, "idempotency_key": key}
+            {
+                "project_id": project,
+                "data_residency": residency,
+                "idempotency_key": scoped_key,
+                **destination,
+            }
         )[:24]
+        expected_contract = {
+            "project_id": project,
+            "data_residency": residency,
+            "adapter_id": adapter_id,
+            **destination,
+            "operation": operation,
+            "request_hash": request_hash,
+            "provider_idempotency_forwarded": provider_key is not None,
+            "provider_idempotency_key_hash": (
+                _digest(provider_key) if provider_key is not None else None
+            ),
+            "compensation_strategy": compensation,
+        }
         with self._connection() as connection:
             existing = connection.execute(
                 "SELECT contract_json,contract_hash FROM external_side_effect_contracts WHERE side_effect_id=?",
@@ -216,13 +325,8 @@ class SecurityStore:
             if _digest(raw) != existing["contract_hash"]:
                 raise SecurityStoreError("side-effect contract integrity failed")
             persisted = json.loads(raw)
-            if (
-                persisted.get("project_id") != project
-                or persisted.get("adapter_id") != adapter_id
-                or persisted.get("operation") != operation
-                or persisted.get("request_hash") != request_hash
-                or persisted.get("provider_idempotency_forwarded") != (provider_key is not None)
-                or persisted.get("compensation_strategy") != compensation
+            if not _side_effect_contract_matches(
+                persisted, expected_contract
             ):
                 raise SecurityStateConflictError(
                     "side-effect idempotency key was reused for different content"
@@ -231,21 +335,39 @@ class SecurityStore:
         contract = {
             "side_effect_id": side_effect_id,
             "project_id": project,
+            "data_residency": residency,
             "adapter_id": adapter_id,
+            **destination,
             "operation": operation,
-            "idempotency_key_hash": _digest(key),
+            "idempotency_key_hash": scoped_key_hash,
             "request_hash": request_hash,
             "provider_idempotency_forwarded": provider_key is not None,
+            "provider_idempotency_key_hash": (
+                _digest(provider_key) if provider_key is not None else None
+            ),
             "compensation_strategy": compensation,
             "ambiguous_auto_replay": False,
+            "origin_external_call_id": origin_call_id,
+            "authority_nonce_hash": nonce_hash,
             "created_at": created_at or utc_now(),
             "schema_version": SECURITY_SCHEMA_VERSION,
         }
         raw = _canonical_json(contract)
         contract_hash = _digest(raw)
-        with self._lock, self._connection() as connection:
+        with (
+            _project_operation_lock(self.path, project),
+            self._lock,
+            self._connection() as connection,
+        ):
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if connection.execute(
+                    "SELECT 1 FROM security_project_tombstones WHERE project_id=?",
+                    (project,),
+                ).fetchone() is not None:
+                    raise ProjectRevokedError(
+                        "project access has been logically revoked"
+                    )
                 existing = connection.execute(
                     "SELECT contract_json,contract_hash FROM external_side_effect_contracts WHERE side_effect_id=?",
                     (side_effect_id,),
@@ -255,19 +377,30 @@ class SecurityStore:
                     if _digest(persisted_raw) != existing["contract_hash"]:
                         raise SecurityStoreError("side-effect contract integrity failed")
                     persisted = json.loads(persisted_raw)
-                    if (
-                        persisted.get("project_id") != project
-                        or persisted.get("adapter_id") != adapter_id
-                        or persisted.get("operation") != operation
-                        or persisted.get("request_hash") != request_hash
-                        or persisted.get("provider_idempotency_forwarded") != (provider_key is not None)
-                        or persisted.get("compensation_strategy") != compensation
+                    if not _side_effect_contract_matches(
+                        persisted, expected_contract
                     ):
                         raise SecurityStateConflictError(
                             "side-effect idempotency key was reused for different content"
                         )
                     connection.execute("COMMIT")
                     return persisted, True
+                keyed = connection.execute(
+                    "SELECT contract_json,contract_hash FROM "
+                    "external_side_effect_contracts "
+                    "WHERE project_id=? AND idempotency_key_hash=?",
+                    (project, scoped_key_hash),
+                ).fetchone()
+                if keyed is not None:
+                    keyed_raw = str(keyed["contract_json"])
+                    if _digest(keyed_raw) != keyed["contract_hash"]:
+                        raise SecurityStoreError(
+                            "side-effect contract integrity failed"
+                        )
+                    raise SecurityStateConflictError(
+                        "side-effect idempotency key was reused for a "
+                        "different destination or request"
+                    )
                 connection.execute(
                     "INSERT INTO external_side_effect_contracts(side_effect_id,project_id,adapter_id,operation,idempotency_key_hash,request_hash,provider_idempotency_forwarded,compensation_strategy,ambiguous_auto_replay,contract_json,contract_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
@@ -275,7 +408,7 @@ class SecurityStore:
                         project,
                         adapter_id,
                         operation,
-                        _digest(key),
+                        scoped_key_hash,
                         request_hash,
                         int(provider_key is not None),
                         compensation,
@@ -305,6 +438,7 @@ class SecurityStore:
         *,
         status: str,
         detail: Mapping[str, Any] | None = None,
+        authority_nonce: str | None = None,
         created_at: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if status not in {"completed", "failed", "ambiguous", "reconciled"}:
@@ -312,16 +446,82 @@ class SecurityStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                if connection.execute(
-                    "SELECT 1 FROM external_side_effect_contracts WHERE side_effect_id=?",
+                contract_row = connection.execute(
+                    "SELECT project_id,contract_json,contract_hash "
+                    "FROM external_side_effect_contracts WHERE side_effect_id=?",
                     (side_effect_id,),
-                ).fetchone() is None:
+                ).fetchone()
+                if contract_row is None:
                     raise SecurityStoreError("side-effect contract is missing")
+                contract_raw = str(contract_row["contract_json"])
+                if _digest(contract_raw) != contract_row["contract_hash"]:
+                    raise SecurityStoreError("side-effect contract integrity failed")
+                contract = json.loads(contract_raw)
+                expected_nonce_hash = str(
+                    contract.get("authority_nonce_hash") or ""
+                )
+                supplied_nonce_hash = (
+                    _digest(authority_nonce)
+                    if isinstance(authority_nonce, str) and authority_nonce
+                    else ""
+                )
+                if (
+                    not expected_nonce_hash
+                    or not hmac.compare_digest(
+                        expected_nonce_hash, supplied_nonce_hash
+                    )
+                ):
+                    raise SecurityStoreError(
+                        "side-effect terminal event lacks authority proof"
+                    )
+                if connection.execute(
+                    "SELECT 1 FROM security_project_tombstones WHERE project_id=?",
+                    (str(contract_row["project_id"]),),
+                ).fetchone() is not None:
+                    raise ProjectRevokedError(
+                        "project access has been logically revoked"
+                    )
+                safe_detail = redact_structure(dict(detail or {}))
+                self._validate_side_effect_source(
+                    connection,
+                    contract=contract,
+                    status=status,
+                    detail=safe_detail,
+                )
+                latest_row = connection.execute(
+                    "SELECT event_json,event_hash FROM external_side_effect_events "
+                    "WHERE side_effect_id=? ORDER BY rowid DESC LIMIT 1",
+                    (side_effect_id,),
+                ).fetchone()
+                if latest_row is None:
+                    raise SecurityStoreError("side-effect reservation event is missing")
+                latest_raw = str(latest_row["event_json"])
+                if _digest(latest_raw) != latest_row["event_hash"]:
+                    raise SecurityStoreError("side-effect event integrity failed")
+                latest = json.loads(latest_raw)
+                if latest.get("status") == status and latest.get("detail") == safe_detail:
+                    event, replayed = self._append_side_effect_event(
+                        connection,
+                        side_effect_id=side_effect_id,
+                        status=status,
+                        detail=safe_detail,
+                        created_at=created_at or utc_now(),
+                    )
+                    connection.execute("COMMIT")
+                    return event, replayed
+                allowed = {
+                    "reserved": {"completed", "failed", "ambiguous"},
+                    "ambiguous": {"reconciled"},
+                }
+                if status not in allowed.get(str(latest.get("status")), set()):
+                    raise SecurityStateConflictError(
+                        "side-effect terminal state transition is invalid"
+                    )
                 event, replayed = self._append_side_effect_event(
                     connection,
                     side_effect_id=side_effect_id,
                     status=status,
-                    detail=detail or {},
+                    detail=safe_detail,
                     created_at=created_at or utc_now(),
                 )
                 connection.execute("COMMIT")
@@ -330,6 +530,99 @@ class SecurityStore:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+
+    @staticmethod
+    def _validate_side_effect_source(
+        connection: sqlite3.Connection,
+        *,
+        contract: Mapping[str, Any],
+        status: str,
+        detail: Mapping[str, Any],
+    ) -> None:
+        origin_call_id = str(contract.get("origin_external_call_id") or "")
+        if not origin_call_id or detail.get("external_call_id") != origin_call_id:
+            raise SecurityStoreError(
+                "side-effect event is not bound to its origin external call"
+            )
+        transport_called = detail.get("transport_called")
+        if not isinstance(transport_called, bool):
+            raise SecurityStoreError(
+                "side-effect event requires authoritative transport state"
+            )
+        if status in {"completed", "ambiguous"} and not transport_called:
+            raise SecurityStoreError(
+                "side-effect terminal state requires a transport attempt"
+            )
+        source = connection.execute(
+            "SELECT external_call_id,provider,deployment_id,model_id,"
+            "adapter_revision,status,result_json,telemetry_json "
+            "FROM external_calls WHERE external_call_id=?",
+            (origin_call_id,),
+        ).fetchone()
+        if source is None or any(
+            str(source[key]) != str(contract.get(key) or "")
+            for key in (
+                "provider",
+                "deployment_id",
+                "model_id",
+                "adapter_revision",
+            )
+        ):
+            raise SecurityStoreError(
+                "side-effect source call does not match its immutable contract"
+            )
+        if status not in {"completed", "reconciled"}:
+            if source["status"] not in {"reserved", "failed", "cancelled"}:
+                raise SecurityStoreError(
+                    "side-effect failure state does not match its source call"
+                )
+            return
+        if source["status"] != "completed" or not source["result_json"] or not source["telemetry_json"]:
+            raise SecurityStoreError(
+                "completed side effect requires a completed durable source call"
+            )
+        try:
+            result = json.loads(str(source["result_json"]))
+            telemetry = json.loads(str(source["telemetry_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise SecurityStoreError(
+                "side-effect source receipt is malformed"
+            ) from error
+        expected = {
+            "external_call_id": origin_call_id,
+            "project_id": contract.get("project_id"),
+            "data_residency": contract.get("data_residency"),
+            "adapter_id": contract.get("adapter_id"),
+            "provider": contract.get("provider"),
+            "deployment_id": contract.get("deployment_id"),
+            "endpoint": contract.get("endpoint"),
+            "model_id": contract.get("model_id"),
+            "adapter_revision": contract.get("adapter_revision"),
+            "operation": contract.get("operation"),
+            "request_hash": contract.get("request_hash"),
+            "provider_idempotency_key_hash": contract.get(
+                "provider_idempotency_key_hash"
+            ),
+            "side_effect_id": contract.get("side_effect_id"),
+        }
+        if not isinstance(telemetry, Mapping) or any(
+            telemetry.get(key) != value for key, value in expected.items()
+        ):
+            raise SecurityStoreError(
+                "completed side-effect telemetry does not match its contract"
+            )
+        if (
+            not isinstance(result, Mapping)
+            or result.get("external_call_id") != origin_call_id
+            or not isinstance(result.get("telemetry"), Mapping)
+            or any(
+                result["telemetry"].get(key) != value
+                for key, value in expected.items()
+            )
+        ):
+            raise SecurityStoreError(
+                "completed side-effect result does not match its source receipt"
+            )
 
     def _append_side_effect_event(
         self,
@@ -413,6 +706,40 @@ def re_safe_identity(value: str) -> bool:
     import re
 
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,127}", str(value)))
+
+
+def _contract_identity(
+    value: str, name: str, *, maximum: int = 512
+) -> str:
+    if not isinstance(value, str):
+        raise SecurityStoreError(f"side-effect {name} must be text")
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > maximum
+        or any(ord(character) < 32 for character in normalized)
+    ):
+        raise SecurityStoreError(f"side-effect {name} is invalid")
+    return normalized
+
+
+def _side_effect_contract_matches(
+    persisted: Mapping[str, Any], expected: Mapping[str, Any]
+) -> bool:
+    try:
+        persisted_residency = normalize_data_residency(
+            str(
+                persisted.get("data_residency")
+                or DEFAULT_DATA_RESIDENCY
+            )
+        )
+    except ValueError:
+        return False
+    return persisted_residency == expected["data_residency"] and all(
+        persisted.get(key) == value
+        for key, value in expected.items()
+        if key != "data_residency"
+    )
 
 
 __all__ = [

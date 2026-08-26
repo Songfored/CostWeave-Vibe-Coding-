@@ -246,7 +246,15 @@ class OutcomeStore:
         return result
 
     def ensure_fixed_evaluation(self) -> dict[str, Any]:
-        result = run_fixed_benchmark()
+        result = {
+            **run_fixed_benchmark(),
+            "security_scope": {
+                "visibility": "global_fixture",
+                "project_id": None,
+                "data_residency": None,
+            },
+        }
+        result_raw = json.dumps(result, sort_keys=True)
         with self._lock, self._connection() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO evaluation_runs(evaluation_id,"
@@ -256,10 +264,15 @@ class OutcomeStore:
                     result["evaluation_id"],
                     result["revision"],
                     result["sample_size"],
-                    json.dumps(result, sort_keys=True),
+                    result_raw,
                     int(bool(result["passed"])),
                     utc_now(),
                 ),
+            )
+            connection.execute(
+                "UPDATE evaluation_runs SET result_json=? "
+                "WHERE evaluation_id=? AND revision=?",
+                (result_raw, result["evaluation_id"], result["revision"]),
             )
         return result
 

@@ -32,6 +32,35 @@ const state = {
   evidenceRequestSeq: 0,
 };
 
+function setupNavigation() {
+  const toggle = $("#nav-toggle");
+  const navigation = $("#primary-navigation");
+  if (!toggle || !navigation) return;
+
+  const setOpen = (open, { restoreFocus = false } = {}) => {
+    navigation.classList.toggle("is-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    const label = toggle.querySelector(".sr-only");
+    if (label) label.textContent = open ? "关闭功能导航" : "打开功能导航";
+    if (restoreFocus) toggle.focus();
+  };
+
+  toggle.addEventListener("click", () => {
+    setOpen(toggle.getAttribute("aria-expanded") !== "true");
+  });
+  navigation.addEventListener("click", (event) => {
+    if (event.target.closest("a") && window.innerWidth < 768) setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && toggle.getAttribute("aria-expanded") === "true") {
+      setOpen(false, { restoreFocus: true });
+    }
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth >= 768) setOpen(false);
+  });
+}
+
 const statusLabels = {
   created: "已创建",
   planning: "正在规划",
@@ -1356,11 +1385,18 @@ async function loadResilienceStatus() {
   const live = $("#resilience-live");
   if (!live) return;
   try {
-    const response = await fetch("/api/v1/resilience/status");
-    const data = await readJson(response);
+    const [response, projectResponse] = await Promise.all([
+      fetch("/api/v1/resilience/status"),
+      fetch("/api/v1/resilience/project-status"),
+    ]);
+    const [data, projectData] = await Promise.all([
+      readJson(response),
+      readJson(projectResponse),
+    ]);
     if (!response.ok) throw new Error(data.message || "无法读取韧性验收状态");
+    if (!projectResponse.ok) throw new Error(projectData.message || "无法读取项目韧性状态");
     const integrity = data.integrity || {};
-    const counts = data.counts || {};
+    const counts = projectData.counts || {};
     const runtime = data.runtime || {};
     const snapshot = runtime.logical_snapshot || {};
     $("#resilience-integrity").textContent = integrity.healthy ? "通过" : "异常";
@@ -1381,9 +1417,16 @@ async function loadStableReleaseStatus() {
   const live = $("#stable-release-live");
   if (!live) return;
   try {
-    const response = await fetch("/api/v1/release/status");
-    const data = await readJson(response);
+    const [response, projectResponse] = await Promise.all([
+      fetch("/api/v1/release/status"),
+      fetch("/api/v1/release/project-status"),
+    ]);
+    const [data, projectData] = await Promise.all([
+      readJson(response),
+      readJson(projectResponse),
+    ]);
     if (!response.ok) throw new Error(data.message || "无法读取稳定版状态");
+    if (!projectResponse.ok) throw new Error(projectData.message || "无法读取项目发布状态");
     const runtime = data.runtime || {};
     const replay = data.replay_audit || {};
     const gates = Array.isArray(data.gates) ? data.gates : [];
@@ -1398,7 +1441,7 @@ async function loadStableReleaseStatus() {
     $("#stable-release-status").textContent = ready
       ? "v0.5 工程稳定 · 生产证据待补"
       : "稳定版硬门未通过";
-    live.textContent = `${passed}/${gates.length} 个运行时硬门通过；不可变发布证明 ${Array.isArray(data.attestations) ? data.attestations.length : 0} 份。当前范围是离线单进程控制面，不代表真实 Provider 或世界领先性能。`;
+    live.textContent = `${passed}/${gates.length} 个运行时硬门通过；当前项目不可变发布证明 ${Array.isArray(projectData.attestations) ? projectData.attestations.length : 0} 份。当前范围是离线单进程控制面，不代表真实 Provider 或世界领先性能。`;
   } catch (error) {
     live.textContent = error instanceof Error ? error.message : "稳定版状态暂不可用";
   }
@@ -2065,6 +2108,7 @@ $("#run-joint-search-demo").addEventListener("click", runJointSearchDemo);
 $("#run-execution-recovery-demo").addEventListener("click", runExecutionRecoveryDemo);
 $("#run-safe-learning-demo").addEventListener("click", runSafeLearningDemo);
 
+setupNavigation();
 updateGoalCount();
 loadCatalog();
 loadPolicyRegistry();

@@ -343,13 +343,16 @@ class SafeLearningStore:
                 return kind, item
         return None
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, project_id: str | None = None) -> dict[str, int]:
+        project = self._project(project_id) if project_id is not None else None
         with self._connection() as connection:
+            suffix = " WHERE project_id=?" if project is not None else ""
+            params = (project,) if project is not None else ()
             return {
-                table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                table: int(connection.execute(f"SELECT COUNT(*) FROM {table}{suffix}", params).fetchone()[0])
                 for _, table, _, _, _ in _KINDS.values()
             } | {
-                "safe_learning_idempotency_v065": int(connection.execute("SELECT COUNT(*) FROM safe_learning_idempotency_v065").fetchone()[0])
+                "safe_learning_idempotency_v065": int(connection.execute("SELECT COUNT(*) FROM safe_learning_idempotency_v065" + suffix, params).fetchone()[0])
             }
 
 
