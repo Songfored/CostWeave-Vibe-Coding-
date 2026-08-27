@@ -34,6 +34,10 @@ from .approvals import ApprovalConflictError, ApprovalError
 from .compat_v4 import contract_health, runtime_v4_enabled
 from .domain import RunMode, RunRequest, WorkerProfile
 from .engine import RunManager
+from .decision_bridge import (
+    DECISION_BRIDGE_POLICY_VERSION,
+    DECISION_BRIDGE_SCHEMA_VERSION,
+)
 from .event_store import IdempotencyConflictError, RevisionConflictError
 from .runtime_maintenance import RuntimeMaintenance
 from .planning_contracts import (
@@ -742,6 +746,20 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "route_intervention": False,
                     "provider_calls": 0,
                     "network_calls": 0,
+                },
+                "decision_bridge": {
+                    "schema_version": DECISION_BRIDGE_SCHEMA_VERSION,
+                    "policy_version": DECISION_BRIDGE_POLICY_VERSION,
+                    "authority_status": "advisory-only",
+                    "module_count": 5,
+                    "management_depth_limit": 2,
+                    "formal_route_effects": 0,
+                    "budget_effects": 0,
+                    "task_status_effects": 0,
+                    "dag_mutations": 0,
+                    "provider_calls": 0,
+                    "network_calls": 0,
+                    "external_calls": 0,
                 },
                 "observability": public_observability_policy(),
                 "runtime_backend": public_runtime_backend_policy(),
@@ -1711,6 +1729,19 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     )
                     return
                 self._json(planning)
+                return
+            if suffix.endswith("/decision-bridge"):
+                run_id = suffix.removesuffix(
+                    "/decision-bridge"
+                ).strip("/")
+                envelope = self.manager.decision_bridge(run_id)
+                if envelope is None:
+                    self._json(
+                        {"error": "run_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json(envelope)
                 return
             if suffix.endswith("/economics"):
                 run_id = suffix.removesuffix(

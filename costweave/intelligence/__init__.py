@@ -1,4 +1,4 @@
-"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.8."""
+"""Decision-intelligence contracts introduced by CostWeave v0.6.0-v0.6.9."""
 
 from .safe_learning import (
     ALL_DATA_ORIGINS,

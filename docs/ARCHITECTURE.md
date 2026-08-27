@@ -1,6 +1,23 @@
-# CostWeave v0.6.8 架构说明
+# CostWeave v0.6.9 架构说明
 
-`v0.5.8.4` 是冻结的稳定工程基线；v0.6.0—v0.6.5 依次增加决策实验、MetaController、能力证据图、联合搜索、执行中恢复和安全学习；v0.6.6 增加 Gateway、持久运行时、可观测性和小预算 Shadow 边界；v0.6.7 恢复统一安全基础。v0.6.8 不改变权威路由合同，而是在最外层增加统一版本与干净交付边界。
+`v0.5.8.4` 是冻结的稳定工程基线；v0.6.0—v0.6.5 依次增加决策实验、MetaController、能力证据图、联合搜索、执行中恢复和安全学习；v0.6.6 增加 Gateway、持久运行时、可观测性和小预算 Shadow 边界；v0.6.7 恢复统一安全基础；v0.6.8 收口版本与交付。v0.6.9 不改变权威路由，而是把五个智能模块接入同一条只读影子决策链。
+
+```text
+RunRequest → 原 Planner / Router → baseline（唯一执行来源）
+                         │
+                         └→ 冻结任务/目录/价格/容量/预算
+                                  ↓
+                         DecisionOrchestratorV1
+                    ┌────────┬────────┬────────┬────────┐
+                    ↓        ↓        ↓        ↓        ↓
+                  Meta   Capability  Joint  Recovery  SafeLearning
+                    └────────┴────────┴────────┴────────┘
+                                  ↓
+                    AuthoritativeDecisionEnvelopeV1
+                  （只记录；路线/预算/状态/DAG 影响 0）
+```
+
+Envelope 随现有 Run JSON 投影保存，因此 Runtime Schema 仍为 `v6.5.0`、迁移数仍为 35。桥接器捕获单模块与整体构造异常，生成完整失败关闭信封；失败不会阻断 baseline。
 
 ```text
 costweave/version.py（唯一当前版本源）

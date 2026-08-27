@@ -1,13 +1,13 @@
 # CostWeave 后续版本路线图
 
-版本：Revision 7  
-更新日期：2026-08-26  
-当前基线：v0.6.8 Delivery & UX Convergence，E0 工程退出门通过，`production_ready=false`  
-依据：[v0.6.8 简短验收](ACCEPTANCE-v0.6.8.md)、[v0.6.8 发布说明](CHANGELOG-v0.6.8.md)、[v0.6.7 安全报告](SECURITY_REPORT-v0.6.7.md)
+版本：Revision 9  
+更新日期：2026-08-27  
+当前基线：v0.6.9 Authoritative Decision Bridge，E0 工程退出门通过，`production_ready=false`  
+依据：[v0.6 系列全面验收](ACCEPTANCE-v0.6-FULL.md)、[v0.6.9 发布说明](CHANGELOG-v0.6.9.md)、[v0.6.7 安全报告](SECURITY_REPORT-v0.6.7.md)、[v0.7 重构实施路线](V0.7_RECONSTRUCTED_ROADMAP.md)
 
 > 本文是从 v0.6.7 开始的权威实施顺序。旧路线图已经因编码损坏和现实状态变化而废止；`V0.6_COMPETITIVE_UPGRADE_PLAN.md` 中原定“v0.6.7 直接进入竞争证明与生产”的安排降为历史方案，不再作为下一版本依据。
 
-> 2026-08-26 状态：v0.6.7 安全复扫已封存；v0.6.8 的 1063 项全量回归、19 项干净安装发布门禁、390/768/1265/1920px 页面检查和三类发布归档卫生检查均通过。当前下一开发版本为 v0.6.9，真实外部调用和付费调用仍为 0。
+> 2026-08-27 状态：v0.6 系列全面验收已通过，v0.6.9 已把五个 advisory-only 模块接入每个新 Run 的统一影子决策信封。当前下一开发版本为 v0.7.0 Data-Ready Main Chain；v0.7 的施工细节与验收去重规则以[重构实施路线](V0.7_RECONSTRUCTED_ROADMAP.md)为准，真实外部调用和付费调用仍为 0。
 
 ## 1. 结论先行
 
@@ -27,7 +27,7 @@ CostWeave 当前不是缺少模块，而是缺少四条真正接通的链路：
   ↓
 统一决策桥（只观察）
   ↓
-主链受控激活（仍无付费）
+数据就绪主链（只激活规划拓扑，仍无付费）
   ↓
 真实小预算对账
   ↓
@@ -53,7 +53,7 @@ CostWeave 当前不是缺少模块，而是缺少四条真正接通的链路：
 | 执行恢复 | Recovery advisory 已存在 | 中途证据可以受控改变执行动作，并保留回滚与 Artifact 复用 |
 | 自我学习 | SafeLearning advisory 已存在 | 只生成候选策略；数据、信用、版本、晋级和回滚全部可追溯 |
 | 成本控制 | 有预算、账本和预测字段 | 失败、超时、重试、验证、返工、缓存和未知账单全部进入 Cost per Accepted Result |
-| 安全 | 默认关闭外呼，但存在 11 项有效发现 | 默认可达路径无未缓解高危/中危；真实外呼必须经过统一授权能力 |
+| 安全 | v0.6.7 修复后 E0 标准复扫无可报告发现，外呼仍默认关闭 | 保持既有安全不变量；只有新增攻击面或安全边界变更时触发对应风险门 |
 | 用户体验 | 主体可用 | 桌面/手机无导航裁切，版本和能力状态只有一个事实源 |
 | 商业证明 | 只有 E0 工程证据 | 完成 E2+ 真实对账和预注册公平基准后才允许效果声明 |
 
@@ -130,10 +130,10 @@ offline_candidate
 | v0.6.7 | Security Foundation Recovery | 关闭安全发布阻断 | E0 | 0 |
 | v0.6.8 | Delivery & UX Convergence | 收口页面、版本、仓库和构建 | E0 | 0 |
 | v0.6.9 | Authoritative Decision Bridge | 将五个 advisory 模块接入统一 Shadow 决策链 | E0 | 0 |
-| v0.7.0 | Controlled Main-Chain Activation | 一次激活一个决策点，仍使用模拟/本地执行 | E0/E1 | 0 |
-| v0.7.1 | Real Call Reconciliation | 完成 WP08 小预算真实对账 | E2 | 极小、显式授权 |
-| v0.7.2 | Calibrated Routing & Capacity | 用真实数据校准选模、升级与本地容量 | E2/E3 | 有界 Shadow |
-| v0.7.3 | Recovery & Safe Learning Loop | 让恢复和候选学习进入受控闭环 | E3 | 有界 Canary |
+| v0.7.0 | Data-Ready Main Chain | 一次建好决策点、证据、结果归因和策略补丁合同；仅激活规划拓扑 | E0/E1 | 0 |
+| v0.7.1 | Real Evidence Bridge | 用一个成熟网关适配器完成最小真实证据闭环与账单对账 | E2 | 极小、显式授权 |
+| v0.7.2 | Fast/Slow Calibrated Routing | 接入快路由、候选召回审计、能力校准与容量预判 | E2/E3 | 有界 Shadow |
+| v0.7.3 | Recovery & Safe Policy Loop | 依次激活恢复权与受限策略候选闭环 | E3 | 有界 Canary |
 | v0.7.4 | Competitive Proof | 与强基线和外部版本公平比较 | E4 | 预注册预算 |
 | v0.7.5 | Multimodal Economic Orchestration | 验证图片/视频工作流降本 | E2—E4 | 单独预算 |
 | v0.8.0 | Production Control Plane | 多用户、分布式、SLO、DR 与正式发布 | 生产证据 | 按政策 |
@@ -309,7 +309,19 @@ Envelope 必须保存：
 - 所有五个 advisory 模块都能被同一 Run ID 和 Trace ID 追溯；
 - 未出现新的第三层 Planner。
 
-## 8. v0.7.0：Controlled Main-Chain Activation
+### 7.5 完成状态
+
+- 五个既有 advisory 服务已通过 Adapter 接入同一 Run/Trace；
+- baseline 与 shadow 共用同一输入指纹，结构化 `input_diff` 为 0；
+- Envelope 保存四类快照、候选拓扑/模型组合、分布、预算、差异、模块版本、证据等级、选择概率和确定性指纹；
+- 影子链对正式路线、预算、任务状态、DAG、Provider、网络和外部调用的影响全部为 0；
+- 模块异常会生成完整失败关闭信封，baseline Run 仍可完成；
+- 决策信封可随运行投影持久化，并通过只读 API 和运行页面追踪；
+- 管理深度上限保持 2，v0.6.9 E0 工程退出门完成，`production_ready=false`。
+
+## 8. Revision 8 历史方案：v0.7.0 Controlled Main-Chain Activation
+
+> 本节至第 13 节保留用于解释旧方案的来源，不再作为施工依据。v0.7.0—v0.7.5 的当前工作包、依赖、停止条件和验收规则统一见[v0.7 重构实施路线](V0.7_RECONSTRUCTED_ROADMAP.md)。
 
 ### 8.1 目标
 
@@ -354,7 +366,7 @@ Expected Total Loss =
 - Handoff Defect Rate 目标不高于 3%；
 - 新路径没有净收益时自动退回旧 baseline。
 
-## 9. v0.7.1：Real Call Reconciliation
+## 9. Revision 8 历史方案：v0.7.1 Real Call Reconciliation
 
 ### 9.1 目标
 
@@ -387,7 +399,7 @@ Expected Total Loss =
 - 实验失败不会扩大预算或自动重放 ambiguous 副作用；
 - 本版最多形成 E2 方向性证据，不产生固定降本宣传。
 
-## 10. v0.7.2：Calibrated Routing & Capacity
+## 10. Revision 8 历史方案：v0.7.2 Calibrated Routing & Capacity
 
 ### 10.1 目标
 
@@ -422,7 +434,7 @@ Expected Total Loss =
 - 规划器和路由器的开销计入总成本后仍有净收益；
 - 任何单一任务族不能掩盖其他任务族的系统性失败。
 
-## 11. v0.7.3：Recovery & Safe Learning Loop
+## 11. Revision 8 历史方案：v0.7.3 Recovery & Safe Learning Loop
 
 ### 11.1 目标
 
@@ -465,7 +477,7 @@ Expected Total Loss =
 - 数据漂移、标签质量或校准恶化会冻结晋级；
 - 回滚可以恢复上一策略而不修改历史事实。
 
-## 12. v0.7.4：Competitive Proof
+## 12. Revision 8 历史方案：v0.7.4 Competitive Proof
 
 ### 12.1 目标
 
@@ -502,7 +514,7 @@ Expected Total Loss =
 
 这些是未来实验的预注册目标，不是当前产品成绩。
 
-## 13. v0.7.5：Multimodal Economic Orchestration
+## 13. Revision 8 历史方案：v0.7.5 Multimodal Economic Orchestration
 
 ### 13.1 目标
 
@@ -579,20 +591,16 @@ Expected Total Loss =
 | 容量 | 队列预测误差与 deadline miss | 判断本地高并发时是否应在开始前升级 |
 | 学习 | 候选晋级率、回滚率、漂移冻结率 | 不以“更新次数”冒充学习效果 |
 
-## 16. 每个版本固定交付物
+## 16. 分层交付与验收去重
 
-每一版必须同时交付：
+不再要求每个内部工作包重复交付全量回归、全仓安全复扫、隔离测试、双端截图和发布包。改为四级门：
 
-1. 实施规格；
-2. 数据和 API 合同；
-3. 迁移及兼容说明；
-4. 专项测试、全量测试和隔离测试结果；
-5. 安全影响与原攻击路径回归；
-6. 性能、内存和并发基线；
-7. 页面桌面/手机截图验收；
-8. clean install 与 wheel/hash；
-9. 已知限制、未测事实和禁止宣传；
-10. 下一版本是否获准启动的明确结论。
+1. **G0 持续快速门**：每次修改只跑语法、合同、安全不变量、确定性和受影响测试，并提交 `ChangeImpactManifest`；
+2. **G1 工作包增量门**：工作包完成时只跑受影响集成、回退/失效关闭、相关攻击路径，以及发生变化的性能或迁移测试；
+3. **G2 版本候选门**：每个公开 v0.7.x 候选版只做一次全量回归、发布门、构建/hash/clean install；隔离测试和双端页面验收按变更触发；
+4. **G3 风险触发门**：安全边界、外部网络、预算副作用、主链权力、持久化/并发或真实数据治理变化时，才追加对应专项安全验证。
+
+同一提交、配置、依赖锁、策略版本和环境指纹未改变时，可复用已有证据；任一指纹变化、测试失败或风险标签扩大时立即失效。完整矩阵见[v0.7 重构实施路线](V0.7_RECONSTRUCTED_ROADMAP.md)。
 
 ## 17. 低能力模型施工限制
 
@@ -616,14 +624,14 @@ Expected Total Loss =
 
 ## 18. 下一步唯一动作
 
-下一开发版本确定为 **v0.6.9 Authoritative Decision Bridge**。只建立统一的只读影子决策链，把 MetaController、CapabilityGraph、JointSearch、Recovery 和 SafeLearning 连接到同一 Run ID、Trace ID 和不可变 Envelope。
+下一开发版本确定为 **v0.7.0 Data-Ready Main Chain**。先并行完成 `WP00-A` 决策点与证据信封、`WP00-B` 结果归因与候选召回审计、`WP00-E` 影响清单与证据复用；合同稳定后再完成 `WP00-C` 回放和受限策略补丁，最后由 `WP00-D` 只激活规划拓扑。
 
-在 v0.6.9 完成前：
+在 v0.7.0 完成前：
 
-- 不把新桥接结果写入正式路线、预算或任务状态；
+- 除规划拓扑外，不把新桥接结果写入正式路线、预算或任务状态；
 - 不执行 V066-WP08 真实调用；
 - 不启用真实 Provider 或付费开关；
 - 不新增第三层 Planner；
 - 不把 E0 工程结果宣传为真实降本或世界领先。
 
-真正的效果证明仍从 v0.7.1 开始；v0.6 全部完成后再执行一次完整详细验收。
+真实效果证据从 v0.7.1 开始，竞争性结论只能在 v0.7.4 预注册证明门通过后提出。v0.7.0 属于零付费数据就绪工程，按 G0/G1/G2/G3 分层验收，不重复执行与变更无关的全仓验证。

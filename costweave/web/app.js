@@ -300,6 +300,7 @@ function render(run) {
 
   renderRunError(run);
   renderPlanning(run.planning);
+  renderDecisionBridge(run.decision_bridge);
   renderForecast(run.forecast);
   renderRecovery(run.recovery_control);
   renderMediaProject(run.media_project);
@@ -353,6 +354,42 @@ function render(run) {
   renderTimeline(run.events || []);
   const selected = run.plan.tasks.find((task) => task.id === state.selectedTaskId) || run.plan.tasks[0];
   renderContract(selected);
+}
+
+function renderDecisionBridge(envelope) {
+  const card = $("#decision-bridge-card");
+  if (!card) return;
+  if (!envelope || !envelope.fingerprint) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+  const effects = envelope.effects || {};
+  const receipts = Array.isArray(envelope.module_receipts) ? envelope.module_receipts : [];
+  const failed = receipts.filter((item) => item.status !== "ok");
+  const diff = envelope.structured_diff || {};
+  $("#decision-bridge-state").textContent = envelope.failure_closed ? "失败关闭 · 沿用基线" : "五模块已贯通";
+  $("#decision-bridge-state").dataset.failed = envelope.failure_closed ? "true" : "false";
+  $("#decision-bridge-note").textContent = envelope.failure_closed
+    ? "至少一个建议模块无效，系统已完整保留原路线；影子链没有改变预算、任务状态或外部调用。"
+    : "五个智能模块共享同一冻结输入；影子建议仅记录，不接管正式路线。";
+  $("#decision-bridge-metrics").innerHTML = [
+    ["输入差异", `${(diff.input_diff || []).length}`],
+    ["正式路线影响", `${Number(effects.formal_route || 0)}`],
+    ["预算影响", `${Number(effects.budget || 0)}`],
+    ["外部调用", `${Number(effects.external_calls || 0)}`],
+    ["管理深度", `${Number(envelope.management_depth_limit || 0)} 层`],
+    ["选择概率", `${Math.round(Number(envelope.selection_probability || 0) * 100)}%`],
+  ].map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("");
+  $("#decision-bridge-modules").innerHTML = receipts.map((item) => `
+    <span data-status="${escapeHtml(item.status || "unknown")}">
+      <b>${escapeHtml(String(item.module || "").replaceAll("_", " "))}</b>
+      <i>${item.status === "ok" ? "已记录" : "失败关闭"}</i>
+    </span>`).join("");
+  const routeDiff = Array.isArray(diff.route_diff) ? diff.route_diff : [];
+  $("#decision-bridge-diff").innerHTML = routeDiff.length
+    ? routeDiff.map((item) => `<p><b>${escapeHtml(item.field || "route")}</b>：${escapeHtml(String(item.baseline ?? "—"))} → ${escapeHtml(String(item.shadow ?? "—"))}</p>`).join("")
+    : `<p>输入差异 0；路线差异 ${routeDiff.length}；未应用影子建议。${failed.length ? ` ${failed.length} 个模块已失败关闭。` : ""}</p>`;
 }
 
 function renderPlanning(planning) {

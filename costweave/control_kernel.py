@@ -1,4 +1,4 @@
-"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.8."""
+"""Persistent command/event/projection owner shared by v0.5.8.4-v0.6.9."""
 
 from __future__ import annotations
 

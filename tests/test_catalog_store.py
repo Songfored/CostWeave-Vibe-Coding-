@@ -154,7 +154,7 @@ class CatalogStoreTests(unittest.TestCase):
         luna = next(model for model in MODELS if model.id == "gpt-5.6-luna")
         sonnet = next(model for model in MODELS if model.id == "claude-sonnet-5")
         self.assertEqual(["复杂任务能力低于 Sol"], luna.limitations)
-        self.assertEqual(["官方曾有阶段性优惠，目录使用长期标价"], sonnet.limitations)
+        self.assertEqual(["发布时的优惠价已转为长期标准价"], sonnet.limitations)
 
     def test_corrupt_persistent_catalog_falls_back_and_can_reset(self):
         self.path.write_text("{broken json", encoding="utf-8")

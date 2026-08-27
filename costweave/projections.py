@@ -104,6 +104,7 @@ def record_to_projection(record: Any, *, revision: int | None = None) -> dict[st
                     record.planning_deliberation
                 ),
             },
+            "decision_bridge": copy.deepcopy(record.decision_envelope),
             "runtime": {
                 "schema_version": PROJECTION_SCHEMA_VERSION,
                 "revision": record.runtime_revision if revision is None else int(revision),
@@ -228,6 +229,9 @@ def hydrate_run_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "planning_deliberation": copy.deepcopy(
             planning.get("deliberation")
+        ),
+        "decision_envelope": copy.deepcopy(
+            snapshot.get("decision_bridge")
         ),
         "worker_snapshot": copy.deepcopy(internal.get("worker_snapshot", [])),
     }

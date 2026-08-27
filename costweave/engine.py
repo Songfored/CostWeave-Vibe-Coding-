@@ -65,6 +65,7 @@ from .observability import (
     unregister_trace_recorder,
 )
 from .security_store import ProjectRevokedError, SecurityStateConflictError
+from .decision_bridge import DecisionOrchestratorV1, failure_closed_envelope
 
 
 @dataclass
@@ -99,6 +100,7 @@ class RunRecord:
     planning_proposals: list[dict[str, Any]] = field(default_factory=list)
     planning_deliberation: dict[str, Any] | None = None
     policy_snapshot: dict[str, Any] | None = None
+    decision_envelope: dict[str, Any] | None = None
     worker_snapshot: list[dict[str, Any]] = field(default_factory=list, repr=False)
     control_kernel: Any = field(default=None, repr=False)
     register_telemetry_on_init: bool = field(
@@ -112,6 +114,11 @@ class RunRecord:
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "request" and "request" in self.__dict__:
             raise AttributeError("run request identity is immutable")
+        if (
+            name == "decision_envelope"
+            and self.__dict__.get("decision_envelope") is not None
+        ):
+            raise AttributeError("authoritative decision envelope is immutable")
         super().__setattr__(name, value)
 
     def __post_init__(self) -> None:
@@ -244,6 +251,7 @@ class RunRecord:
                     "proposals": list(self.planning_proposals),
                     "deliberation": self.planning_deliberation,
                 },
+                "decision_bridge": self.decision_envelope,
                 "observability": self.telemetry.summary(),
                 "forecast": (
                     self.control_kernel.forecast(str(self.id))
@@ -345,6 +353,11 @@ class OrchestrationEngine:
         self.forecaster = DagMonteCarlo()
         self.executor = SimulatedExecutor()
         self.control_kernel = control_kernel
+        self.decision_orchestrator = (
+            DecisionOrchestratorV1(control_kernel)
+            if control_kernel is not None
+            else None
+        )
         self.graph_compiler = GraphCompiler()
         self.scheduler = (
             ParallelScheduler(control_kernel)
@@ -354,6 +367,7 @@ class OrchestrationEngine:
 
     async def run(self, record: RunRecord) -> None:
         record.started_at = utc_now()
+        shadow_envelope = None
         try:
             self._raise_if_cancelled(record)
             set_run_status(
@@ -571,6 +585,16 @@ class OrchestrationEngine:
                         },
                     )
             self._recalculate_probability(record)
+            try:
+                shadow_envelope = (
+                    self.decision_orchestrator.build(record)
+                    if self.decision_orchestrator is not None
+                    else failure_closed_envelope(
+                        record, "persistent control kernel unavailable"
+                    )
+                )
+            except Exception as exc:
+                shadow_envelope = failure_closed_envelope(record, exc)
             self._record_completion_checkpoint(
                 record, "plan_validated"
             )
@@ -589,6 +613,7 @@ class OrchestrationEngine:
             await self._execute_dag(record, run_router)
             self._raise_if_cancelled(record)
             if all(task.status in {TaskStatus.VALIDATED, TaskStatus.INVALIDATED} for task in record.plan.tasks):
+                self._attach_decision_envelope(record, shadow_envelope)
                 set_run_status(
                     record,
                     RunStatus.COMPLETED,
@@ -623,7 +648,50 @@ class OrchestrationEngine:
                 )
                 self._event(record, "failed", f"运行失败：{exc}")
         finally:
+            if (
+                record.decision_envelope is None
+                and shadow_envelope is not None
+                and not self._project_revoked(record)
+            ):
+                self._attach_decision_envelope(
+                    record, shadow_envelope, emit_event=False
+                )
             self._finalize_run(record)
+
+    def _attach_decision_envelope(
+        self,
+        record: RunRecord,
+        envelope: Any,
+        *,
+        emit_event: bool = True,
+    ) -> None:
+        if envelope is None or record.decision_envelope is not None:
+            return
+        public = envelope.to_dict()
+        record.decision_envelope = public
+        if not emit_event:
+            return
+        self._event(
+            record,
+            "decision_bridge_recorded",
+            (
+                "v0.6.9 统一影子决策链已失败关闭到原路线"
+                if envelope.failure_closed
+                else "v0.6.9 五模块统一影子决策链已记录"
+            ),
+            detail={
+                "fingerprint": envelope.fingerprint,
+                "trace_id": envelope.trace_id,
+                "module_count": len(envelope.module_receipts),
+                "failure_closed": envelope.failure_closed,
+                "formal_route_effects": envelope.formal_route_effects,
+                "budget_effects": envelope.budget_effects,
+                "external_calls": envelope.external_calls,
+                "input_diff_count": len(
+                    public["structured_diff"]["input_diff"]
+                ),
+            },
+        )
 
     def _finalize_run(self, record: RunRecord) -> None:
         """Finish a background run without leaking a revocation race."""
@@ -2383,6 +2451,21 @@ class RunManager:
                 "proposals": list(record.planning_proposals),
                 "deliberation": record.planning_deliberation,
             }
+
+    def decision_bridge(self, run_id: str) -> dict[str, Any] | None:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        with record.lock:
+            if record.decision_envelope is None:
+                return {
+                    "run_id": str(record.id),
+                    "trace_id": str(record.trace_id),
+                    "schema_version": "v0.6.9",
+                    "status": "pending",
+                    "authority_status": "advisory-only",
+                }
+            return dict(record.decision_envelope)
 
     def evaluations(self) -> list[dict[str, Any]]:
         if self.control_kernel is None:

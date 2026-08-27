@@ -175,7 +175,7 @@ class StableReleaseContractTests(unittest.TestCase):
 
     def test_public_policy_separates_verified_and_unverified_scope(self) -> None:
         policy = public_release_policy()
-        self.assertEqual("v0.6.8", policy["schema_version"])
+        self.assertEqual("v0.6.9", policy["schema_version"])
         self.assertIn("EventLog-only projection replay", policy["verified_scope"])
         self.assertIn(
             "real cost reduction percentage", policy["unverified_claims"]

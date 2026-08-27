@@ -4,24 +4,24 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.8-blue.svg)](costweave/version.py)
-[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.8.md)
+[![Version](https://img.shields.io/badge/version-0.6.9-blue.svg)](costweave/version.py)
+[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.9.md)
 
 ## 项目状态
 
-CostWeave 当前处于 **v0.6.8 交付与体验收口阶段**。
+CostWeave 当前处于 **v0.6.9 权威决策桥阶段**。
 
 | 项目 | 当前结论 |
 |---|---|
 | 稳定工程基线 | v0.5.8.4 |
-| 当前开发版本 | v0.6.8 Delivery & UX Convergence（候选版） |
+| 当前开发版本 | v0.6.9 Authoritative Decision Bridge（候选版） |
 | 工程就绪 | 仅在全部发布门禁通过时为 `true` |
 | 生产就绪 | `false` |
 | 证据等级 | E0：离线、模拟与确定性夹具证据 |
 | 默认外部调用 | 0；外部适配器和付费调用默认关闭 |
-| 当前工作树验收证据 | 1063/1063 全量回归、19/19 干净安装发布门禁、四个目标宽度页面检查通过；归档违规 0；真实外部调用 0 |
+| 当前工作树验收证据 | v0.6 全面验收：全量 `1070/1070`、隔离全量 `1070/1070`、严格资源检查 `54/54`、发布门禁 `19/19`；真实外部调用 0 |
 
-v0.6.8 不新增路由算法，而是把“用户实际拿到的产品”收口为同一事实：网页、健康接口、CLI、包元数据和发布清单共用一个版本源；移动端使用完整折叠菜单；发布物只从白名单 staging 生成，并检查数据库、日志、秘密、本地代理目录和历史构建物。v0.6.7 的安全复扫结论继续作为本版安全基线，但不等于真实供应商质量、账单、生产并发容量或生产可靠性已验证。详见[v0.6.8 验收报告](docs/ACCEPTANCE-v0.6.8.md)、[发布说明](docs/CHANGELOG-v0.6.8.md)与[数据卡](docs/DATA_CARD-v0.6.8.md)。
+v0.6.9 用统一、不可变、可追踪的 Envelope 把 MetaController、CapabilityGraph、JointSearch、ExecutionRecovery 与 SafeLearning 接入每个 Run。五个模块共享同一份任务、目录、价格、容量和预算快照，但全部保持 `advisory-only`：正式路线、预算、任务状态、DAG 和外部调用影响均为 0；任一模块异常时自动失败关闭到原 baseline。它仍不等于真实供应商质量、账单、生产并发容量或生产可靠性已验证。详见[v0.6.9 简短验收](docs/ACCEPTANCE-v0.6.9.md)、[发布说明](docs/CHANGELOG-v0.6.9.md)与[数据卡](docs/DATA_CARD-v0.6.9.md)。
 
 ## 它解决什么问题
 
@@ -100,6 +100,8 @@ MetaController ── 判断：直接处理 / Planner / MultiPlanner / 升级
 
 模型目录可编辑，也支持 JSON/CSV 导入。价格和能力不是写死在路由器里的常量；更新后的数据仍需来源、时间与验证状态，避免“最新”但不可信的数据直接改变生产决策。
 
+当前内置目录已核验到 **2026-08-27**，覆盖 20 个代表性本地/云端条目，并把官方参数、独立排行榜和厂商自报成绩分层保存。具体价格口径、模型版本与证据边界见[模型目录与评测证据快照](docs/MODEL_CATALOG.md)。
+
 ### 4. 联合计划、路由与调度
 
 CostWeave 不把“先定计划、再给每个节点找最便宜模型”当作两个孤立问题。候选计划的并行度、关键路径、交接数量、模型容量和失败恢复成本会共同影响最终选择。
@@ -162,6 +164,7 @@ CostWeave 不把“先定计划、再给每个节点找最便宜模型”当作�
 | v0.6.6 | Gateway / Runtime / Observability / Shadow | 建立真实接入前所需的供应商中立边界、持久运行时、追踪与小预算 Shadow |
 | v0.6.7 | Security Foundation Recovery | 统一本地请求与外部调用安全边界；修复后标准复扫覆盖 12/12 威胁面，0 项可报告发现 |
 | v0.6.8 | Delivery & UX Convergence | 统一版本源、响应式导航、仓库边界和干净发布流水线 |
+| v0.6.9 | Authoritative Decision Bridge | 五个智能模块共享同一 Run/Trace 与冻结输入，形成零执行权的完整影子决策链 |
 
 ## v0.6.6 工作包
 
@@ -199,6 +202,16 @@ WP07 只允许影子指标进入证据链，不允许改变基线路由、晋升
 - `costweave-package` 在 `work/` 的干净 staging 中构建，不读取根目录旧 `build/`；
 - wheel、sdist、源码 zip、发布清单与 SHA256 清单均经过归档内容检查；
 - 当前 `.git` 元数据不是有效仓库，未擅自覆盖，恢复步骤见[Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)。
+
+## v0.6.9 权威决策桥
+
+- 每个新 Run 在原路由冻结后生成 `AuthoritativeDecisionEnvelopeV1`；
+- 统一保存任务/目录/价格/容量快照、候选管理拓扑、候选模型组合、分布、预算和 baseline/shadow 差异；
+- 五个现有智能服务通过 Adapter 接入，同用 Run ID、Trace ID 与输入指纹；
+- 影子链不写任务状态、不改 DAG、不占正式预算、不调用 Provider、不晋级策略；
+- 任一模块异常都生成完整失败关闭信封，原 baseline 继续执行；
+- `GET /api/v1/runs/{run_id}/decision-bridge` 与运行页面提供只读追踪入口；
+- 管理深度仍固定最多两层，没有新增第三层 Planner。
 
 ## 快速开始
 
@@ -336,7 +349,7 @@ python -B tests/run_isolated.py
 python -B -m costweave.release_cli --pretty
 ```
 
-安装和冻结证据的详细步骤见[v0.6.8 复现指南](docs/INSTALL_REPRODUCE-v0.6.8.md)。测试通过只说明已经定义的工程合同得到满足，不会自动把 E0 证据提升为生产证据。
+安装和冻结证据的详细步骤见[v0.6.9 复现指南](docs/INSTALL_REPRODUCE-v0.6.9.md)。测试通过只说明已经定义的工程合同得到满足，不会自动把 E0 证据提升为生产证据。
 
 ## 项目结构
 
@@ -352,6 +365,7 @@ costweave/
 ├── joint_search_service.py      # 计划－路由－调度联合搜索
 ├── execution_recovery_service.py# 执行中信念与恢复决策
 ├── safe_learning_service.py     # 信用分配与安全学习
+├── decision_bridge.py           # v0.6.9 五模块统一影子决策信封
 ├── runtime_backend.py           # 持久化运行时边界
 ├── small_budget_shadow.py       # 小预算 Shadow 控制平面
 ├── observability.py             # 追踪、脱敏与导出
@@ -364,13 +378,19 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 
 ## 重要文档
 
-- [后续版本路线图（Revision 4，当前权威排期）](docs/REMAINING_ROADMAP.md)
+- [模型目录与评测证据快照（2026-08-27）](docs/MODEL_CATALOG.md)
+- [后续版本路线图（Revision 9，跨系列权威排期）](docs/REMAINING_ROADMAP.md)
+- [v0.7 重构实施路线（当前 v0.7 施工依据）](docs/V0.7_RECONSTRUCTED_ROADMAP.md)
+- [v0.6 系列全面验收报告](docs/ACCEPTANCE-v0.6-FULL.md)
 - [2026-08-22 安全加固组合](docs/hardening/2026-08-22/hardening.md)
-- [v0.6.8 简短验收报告](docs/ACCEPTANCE-v0.6.8.md)
-- [v0.6.8 发布说明](docs/CHANGELOG-v0.6.8.md)
-- [v0.6.8 安全边界](docs/SECURITY_REPORT-v0.6.8.md)
-- [v0.6.8 安装与复现](docs/INSTALL_REPRODUCE-v0.6.8.md)
-- [v0.6.8 迁移说明](docs/V0.6.8_MIGRATION.md)
+- [v0.6.9 简短验收报告](docs/ACCEPTANCE-v0.6.9.md)
+- [v0.6.9 发布说明](docs/CHANGELOG-v0.6.9.md)
+- [v0.6.9 数据卡](docs/DATA_CARD-v0.6.9.md)
+- [v0.6.9 模型卡](docs/MODEL_CARD-v0.6.9.md)
+- [v0.6.9 策略卡](docs/POLICY_CARD-v0.6.9.md)
+- [v0.6.9 安全边界](docs/SECURITY_REPORT-v0.6.9.md)
+- [v0.6.9 安装与复现](docs/INSTALL_REPRODUCE-v0.6.9.md)
+- [v0.6.9 迁移说明](docs/V0.6.9_MIGRATION.md)
 - [v0.6.8 Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)
 - [总体架构](docs/ARCHITECTURE.md)
 - [v0.6 竞争升级计划](docs/V0.6_COMPETITIVE_UPGRADE_PLAN.md)
@@ -385,7 +405,7 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 在得到真实证据前，请不要把以下内容当作已完成能力：
 
 - 尚未用真实供应商响应、真实账单和真实质量标签证明成本下降比例；
-- v0.6.1–v0.6.5 的 MetaController、能力路由、联合搜索、执行恢复与安全学习目前是独立的 advisory-only 实验服务，尚未接管 `/api/v1/runs` 的权威执行路径；
+- v0.6.1–v0.6.5 的五个智能模块已进入 `/api/v1/runs` 的统一影子决策链，但仍为 advisory-only，尚未接管权威执行路径；
 - 默认任务运行仍使用 `SimulatedExecutor`；Gateway 与 Shadow 已建立受控接入边界，但不是开箱即用的真实模型执行链；
 - 尚未证明生产并发、跨进程协调、灾难恢复、P50/P95 延迟和长期稳定性；
 - 当前持久层以单机 SQLite 为主，不是分布式调度数据库；
@@ -398,14 +418,14 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 
 ## 下一步
 
-v0.6.8 完成后，下一开发版本是 **v0.6.9 Authoritative Decision Bridge**。它会把现有 advisory-only 智能模块接入同一条可追踪的影子决策链，但仍不接管正式执行。后续按以下门禁顺序推进：
+v0.6 全面验收完成后，下一开发版本是 **v0.7.0 Data-Ready Main Chain**。先把未来真实数据可以直接接入和反哺的底层合同一次建好，再按决策面逐步激活：
 
-1. **v0.6.9**：把 advisory-only 智能模块接入统一决策桥，但只运行 Shadow，不接管真实执行；
-2. **v0.7.0**：逐个决策点受控启用，并为每次启用配置预算、回退和 Kill Switch；
-3. **v0.7.1～v0.7.3**：再用极小预算完成真实调用对账、能力校准、容量预判、恢复与安全学习闭环；
-4. **v0.7.4 以后**：在预注册基准上比较单模型、人工路由、静态规则与 CostWeave，最后扩展多模态和生产控制面。
+1. **v0.7.0**：建立统一决策点、证据信封、结果归因、候选召回审计、回放和受限策略补丁；只激活规划拓扑，保持零付费；
+2. **v0.7.1**：通过一个成熟网关适配器，以极小显式预算打通真实响应、账单、质量标签和重试对账；
+3. **v0.7.2～v0.7.3**：依次校准快慢路由、本地容量、恢复权和安全策略候选，开发可并行，决策权只能串行激活；
+4. **v0.7.4 以后**：完成预注册竞争证明，再扩展多模态经济编排和生产控制面。
 
-在真实样本量、置信区间、回滚条件和竞品基线满足前，不宣称固定节省比例，也不跳过安全与主链融合阶段直接开始付费调用。详细退出门和停止条件见[后续版本路线图](docs/REMAINING_ROADMAP.md)。
+验收采用持续快速门、工作包增量门、版本候选门和风险触发门；不再为每个小工作包重复跑全仓安全复扫和全量回归。在真实样本量、置信区间、回滚条件和竞品基线满足前，不宣称固定节省比例。详细施工顺序见[v0.7 重构实施路线](docs/V0.7_RECONSTRUCTED_ROADMAP.md)。
 
 ## 许可证
 

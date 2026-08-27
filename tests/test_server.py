@@ -69,13 +69,17 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.6.8", health["version"])
+        self.assertEqual("0.6.9", health["version"])
         self.assertNotIn("development_version", health)
-        self.assertEqual("v0.6.8", health["version_line"]["active_development"])
+        self.assertEqual("v0.6.9", health["version_line"]["active_development"])
         self.assertEqual(
-            "Delivery & UX Convergence",
+            "Authoritative Decision Bridge",
             health["version_line"]["active_work_package"],
         )
+        self.assertEqual("v0.6.9", health["decision_bridge"]["schema_version"])
+        self.assertEqual(5, health["decision_bridge"]["module_count"])
+        self.assertEqual(0, health["decision_bridge"]["formal_route_effects"])
+        self.assertEqual(0, health["decision_bridge"]["external_calls"])
         self.assertEqual("v4.1", health["contract_schema"])
         self.assertTrue(health["features"]["contracts_v4"])
         self.assertTrue(health["contract_trace_persistent"])
@@ -202,9 +206,9 @@ class ServerTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             page = response.read().decode("utf-8")
-        self.assertIn("v0.6.8", page)
-        self.assertIn("Delivery & UX Convergence", page)
-        self.assertIn("/styles.css?v=0.6.8", page)
+        self.assertIn("v0.6.9", page)
+        self.assertIn("Authoritative Decision Bridge", page)
+        self.assertIn("/styles.css?v=0.6.9", page)
         self.assertNotIn("{{COSTWEAVE_", page)
 
     def test_unified_evidence_console_and_export_receipt(self):
@@ -528,6 +532,34 @@ class ServerTests(unittest.TestCase):
             "planning-escalation",
             [task["id"] for task in current["plan"]["tasks"]],
         )
+
+    def test_run_exposes_complete_read_only_decision_bridge(self):
+        status, run = self.request_json(
+            "/api/v1/runs",
+            {"goal": "实现一个带验收标准的本地组件", "budget": 1},
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": "server-decision-bridge-v069-0001",
+            },
+            method="POST",
+        )
+        self.assertEqual(202, status)
+        envelope = None
+        for _ in range(150):
+            status, envelope = self.fetch_json(
+                f"/api/v1/runs/{run['id']}/decision-bridge"
+            )
+            if envelope.get("fingerprint"):
+                break
+            time.sleep(0.03)
+        self.assertEqual(200, status)
+        self.assertEqual("v0.6.9", envelope["schema_version"])
+        self.assertEqual(run["id"], envelope["run_id"])
+        self.assertEqual(5, len(envelope["module_receipts"]))
+        self.assertEqual([], envelope["structured_diff"]["input_diff"])
+        self.assertEqual(0, envelope["effects"]["formal_route"])
+        self.assertEqual(0, envelope["effects"]["budget"])
+        self.assertEqual(0, envelope["effects"]["external_calls"])
 
     def test_catalog_crud_and_revision_conflict(self):
         _, catalog = self.fetch_json("/api/catalog")

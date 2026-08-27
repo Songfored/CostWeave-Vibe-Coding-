@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-08-27",
+  "scope": "CostWeave 可路由目录所覆盖的代表性通用、多模态、编码和代理模型",
+  "methodology": {
+    "source_priority": [
+      "厂商官方模型文档与价格页",
+      "独立且公开方法的排行榜",
+      "厂商自报评测（只作补充，不作为独立结论）"
+    ],
+    "grain": "模型版本和推理档位是评测最小粒度；不同档位不得合并成一个排行榜名次",
+    "unknown_policy": "未公开的参数量、固定输出上限或独立成绩记为 null，不进行猜测",
+    "routing_policy": "catalog 中的 0-1 能力值是归一化路由先验，不是本文件中的原始评测成绩",
+    "pricing_policy": "单位为每 100 万 tokens；阶梯价、区域价、峰谷价在 notes 中保留"
+  },
+  "independent_sources": [
+    {
+      "id": "lmarena-text-2026-08-21",
+      "name": "LMArena Text Arena Overall",
+      "source_url": "https://arena.ai/leaderboard/text?style=false",
+      "leaderboard_date": "2026-08-21",
+      "retrieved_at": "2026-08-27",
+      "method": "约 790.6 万次盲选投票；分数带置信区间，排名区间可能重叠",
+      "status": "independent"
+    },
+    {
+      "id": "artificial-analysis-intelligence-2026-08-27",
+      "name": "Artificial Analysis Intelligence Index",
+      "source_url": "https://artificialanalysis.ai/leaderboards/models",
+      "leaderboard_date": "2026-08-27",
+      "retrieved_at": "2026-08-27",
+      "method": "复合智能指数；必须保留模型变体和推理档位",
+      "status": "independent"
+    }
+  ],
+  "official_sources": [
+    {"provider": "openai", "url": "https://developers.openai.com/api/docs/models/compare", "retrieved_at": "2026-08-27"},
+    {"provider": "anthropic", "url": "https://platform.claude.com/docs/en/models/overview", "retrieved_at": "2026-08-27"},
+    {"provider": "anthropic", "url": "https://platform.claude.com/docs/en/about-claude/pricing", "retrieved_at": "2026-08-27"},
+    {"provider": "google", "url": "https://ai.google.dev/gemini-api/docs/models", "retrieved_at": "2026-08-27"},
+    {"provider": "google", "url": "https://ai.google.dev/gemini-api/docs/pricing", "retrieved_at": "2026-08-27"},
+    {"provider": "deepseek", "url": "https://api-docs.deepseek.com/quick_start/pricing/", "retrieved_at": "2026-08-27"},
+    {"provider": "xai", "url": "https://docs.x.ai/developers/models/grok-4.6", "retrieved_at": "2026-08-27"},
+    {"provider": "mistral", "url": "https://docs.mistral.ai/inference/pricing", "retrieved_at": "2026-08-27"},
+    {"provider": "alibaba", "url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max", "retrieved_at": "2026-08-27"},
+    {"provider": "moonshot", "url": "https://platform.kimi.com/", "retrieved_at": "2026-08-27"},
+    {"provider": "moonshot", "url": "https://github.com/MoonshotAI/Kimi-K3", "retrieved_at": "2026-08-27"},
+    {"provider": "minimax", "url": "https://platform.minimax.io/docs/guides/pricing-paygo", "retrieved_at": "2026-08-27"}
+  ],
+  "models": {
+    "local-rule-core": {
+      "fact_status": "project_internal",
+      "parameters": null,
+      "notes": ["确定性代码模块，不是大语言模型"]
+    },
+    "gpt-oss-20b-local": {
+      "fact_status": "official",
+      "parameters": {"total_billions": 21, "active_billions": 3.6},
+      "context_tokens": 131072,
+      "max_output_tokens": 131072,
+      "license": "Apache-2.0",
+      "notes": ["本地运行成本与硬件、量化和吞吐有关，不能按 API token 价格视为真正零成本"]
+    },
+    "gpt-5.6-luna": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 0.2, "cached_input": 0.02, "output": 1.2},
+      "benchmark_refs": ["lmarena:gpt-5.6-luna-xhigh", "aa:gpt-5.6-luna-low"],
+      "notes": ["独立评测结果与推理档位绑定"]
+    },
+    "gpt-5.6-terra": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 2.0, "cached_input": 0.2, "output": 12.0},
+      "benchmark_refs": ["lmarena:gpt-5.6-terra-xhigh"]
+    },
+    "gpt-5.6-sol": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 4.0, "cached_input": 0.4, "output": 20.0},
+      "benchmark_refs": ["lmarena:gpt-5.6-sol-xhigh", "aa:gpt-5.6-sol-max"]
+    },
+    "claude-haiku-4.5": {
+      "fact_status": "official",
+      "parameters": null,
+      "context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "price": {"currency": "USD", "input": 1.0, "cached_input": 0.1, "output": 5.0}
+    },
+    "claude-sonnet-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 2.0, "cached_input": 0.2, "output": 10.0},
+      "benchmark_refs": ["lmarena:claude-sonnet-5-high"]
+    },
+    "claude-opus-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 5.0, "cached_input": 0.5, "output": 25.0},
+      "benchmark_refs": ["lmarena:claude-opus-5-high", "lmarena:claude-opus-5-max", "aa:claude-opus-5-max"]
+    },
+    "claude-fable-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {"currency": "USD", "input": 10.0, "cached_input": 1.0, "output": 50.0},
+      "benchmark_refs": ["lmarena:claude-fable-5", "aa:claude-fable-5-max"]
+    },
+    "gemini-3.5-flash-lite": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 65536,
+      "price": {"currency": "USD", "input": 0.3, "cached_input": 0.03, "output": 2.5},
+      "benchmark_refs": ["lmarena:gemini-3.5-flash-lite"],
+      "notes": ["目录采用标准实时价；Batch/Flex 为 $0.15 输入/$1.25 输出"]
+    },
+    "gemini-3.7-flash": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 65536,
+      "price": {"currency": "USD", "input": 0.75, "cached_input": null, "output": 3.75},
+      "benchmark_refs": ["lmarena:gemini-3.7-flash-high"],
+      "notes": ["官方说明该导入价有效至 2026-12-31，之后计划调整"]
+    },
+    "gemini-3.1-pro-preview": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1048576,
+      "max_output_tokens": 65536,
+      "price": {"currency": "USD", "input": 2.0, "cached_input": 0.2, "output": 12.0},
+      "benchmark_refs": ["lmarena:gemini-3.1-pro-preview"],
+      "notes": ["<=200K 输入价；>200K 为 $4 输入/$18 输出", "预览型号，生产稳定性需另行校验"]
+    },
+    "deepseek-v4-flash": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "price": {"currency": "USD", "input": 0.44, "cached_input": 0.014, "output": 1.32},
+      "benchmark_refs": ["lmarena:deepseek-v4-flash"],
+      "notes": ["采用峰时缓存未命中输入和峰时输出价；非峰时约为一半"]
+    },
+    "deepseek-v4-pro": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "price": {"currency": "USD", "input": 1.32, "cached_input": 0.044, "output": 3.96},
+      "benchmark_refs": ["lmarena:deepseek-v4-pro", "lmarena:deepseek-v4-pro-high-20260813"],
+      "notes": ["采用峰时缓存未命中输入和峰时输出价；非峰时约为一半"]
+    },
+    "grok-4.6": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 500000,
+      "max_output_tokens": null,
+      "price": {"currency": "USD", "input": 2.0, "cached_input": 0.5, "output": 6.0},
+      "benchmark_refs": ["lmarena:grok-4.6-high", "aa:grok-4.6-high"],
+      "notes": ["标准价格适用于 <=200K；更长上下文价格翻倍", "官方页面写明文本输出无固定上限"]
+    },
+    "mistral-small-4": {
+      "fact_status": "official",
+      "parameters": {"total_billions": 119, "active_billions": 6.5},
+      "context_tokens": 256000,
+      "max_output_tokens": null,
+      "license": "Apache-2.0",
+      "price": {"currency": "USD", "input": 0.15, "cached_input": 0.015, "output": 0.6}
+    },
+    "mistral-large-3": {
+      "fact_status": "official",
+      "parameters": {"total_billions": 675, "active_billions": 41},
+      "context_tokens": 256000,
+      "max_output_tokens": null,
+      "license": "Apache-2.0",
+      "price": {"currency": "USD", "input": 0.5, "cached_input": 0.05, "output": 1.5}
+    },
+    "qwen3.8-max": {
+      "fact_status": "official_plus_independent",
+      "parameters": {"total_billions": 2400, "active_billions": null},
+      "context_tokens": 1000000,
+      "max_output_tokens": 131072,
+      "price": {"currency": "USD", "input": 2.0, "cached_input": 0.25, "output": 6.0},
+      "benchmark_refs": ["lmarena:qwen3.8-max", "aa:qwen3.8-2.4t-a95b"],
+      "notes": ["价格采用阿里云国际区；中国内地与全球区域定价不同"]
+    },
+    "kimi-k3": {
+      "fact_status": "official_plus_independent",
+      "parameters": {"total_billions": 2800, "active_billions": 104},
+      "context_tokens": 1048576,
+      "max_output_tokens": null,
+      "license": "Kimi K3 License",
+      "price": {"currency": "CNY", "input": 20.0, "cached_input": 2.0, "output": 100.0},
+      "benchmark_refs": ["lmarena:kimi-k3-max", "aa:kimi-k3-max"],
+      "notes": ["人民币中国站价；未设置汇率快照前不可与 USD 价格直接比较"]
+    },
+    "minimax-m2.7": {
+      "fact_status": "official_plus_vendor_benchmark",
+      "parameters": null,
+      "context_tokens": 204800,
+      "max_output_tokens": null,
+      "price": {"currency": "USD", "input": 0.3, "cached_input": 0.06, "output": 1.2},
+      "benchmark_refs": ["vendor:minimax-m2.7-2026-08"],
+      "notes": ["官网约 60 tokens/s 属厂商标称；并非本项目实测"]
+    }
+  },
+  "benchmark_snapshots": {
+    "lmarena": [
+      {"model_variant": "claude-fable-5", "rank": 1, "score": 1508, "uncertainty": 5, "votes": 24331},
+      {"model_variant": "claude-opus-5-high", "rank": 7, "score": 1493, "uncertainty": 5, "votes": 27610},
+      {"model_variant": "gemini-3.7-flash-high", "rank": 9, "score": 1490, "uncertainty": 8, "votes": 5718, "preliminary": true},
+      {"model_variant": "kimi-k3-max", "rank": 10, "score": 1489, "uncertainty": 6, "votes": 15054},
+      {"model_variant": "claude-opus-5-max", "rank": 12, "score": 1487, "uncertainty": 6, "votes": 13403},
+      {"model_variant": "gemini-3.1-pro-preview", "rank": 14, "score": 1486, "uncertainty": 3, "votes": 99182},
+      {"model_variant": "gpt-5.6-sol-xhigh", "rank": 16, "score": 1482, "uncertainty": 5, "votes": 19541},
+      {"model_variant": "qwen3.8-max", "rank": 19, "score": 1481, "uncertainty": 7, "votes": 9955},
+      {"model_variant": "gpt-5.6-terra-xhigh", "rank": 44, "score": 1465, "uncertainty": 5, "votes": 20216},
+      {"model_variant": "claude-sonnet-5-high", "rank": 45, "score": 1461, "uncertainty": 5, "votes": 27366},
+      {"model_variant": "grok-4.6-high", "rank": 46, "score": 1461, "uncertainty": 10, "votes": 3473, "preliminary": true},
+      {"model_variant": "deepseek-v4-pro-high-20260813", "rank": 50, "score": 1459, "uncertainty": 10, "votes": 3621},
+      {"model_variant": "deepseek-v4-pro", "rank": 52, "score": 1458, "uncertainty": 4, "votes": 54263},
+      {"model_variant": "gemini-3.5-flash-lite", "rank": 54, "score": 1457, "uncertainty": 6, "votes": 17985},
+      {"model_variant": "gpt-5.6-luna-xhigh", "rank": 63, "score": 1451, "uncertainty": 5, "votes": 20693},
+      {"model_variant": "deepseek-v4-flash", "rank": 86, "score": 1436, "uncertainty": 4, "votes": 49001}
+    ],
+    "artificial_analysis": [
+      {"model_variant": "claude-opus-5-max", "intelligence_index": 63, "rank_tie_note": "榜首档"},
+      {"model_variant": "claude-fable-5-max-fallback", "intelligence_index": 62},
+      {"model_variant": "gpt-5.6-sol-max", "intelligence_index": 61},
+      {"model_variant": "grok-4.6-high", "intelligence_index": 61},
+      {"model_variant": "kimi-k3-max", "intelligence_index": 60, "open_weights": true},
+      {"model_variant": "qwen3.8-2.4t-a95b", "intelligence_index": 58, "open_weights": true}
+    ],
+    "vendor_reported": [
+      {
+        "model_variant": "minimax-m2.7",
+        "source_url": "https://platform.minimaxi.com/docs/guides/text-generation",
+        "retrieved_at": "2026-08-27",
+        "scores": {"SWE-Pro": 56.22, "VIBE-Pro": 55.6, "Terminal-Bench-2": 57.0, "GDPval-AA-Elo": 1495},
+        "warning": "厂商自报；没有当作独立排行榜结果"
+      }
+    ]
+  }
+}
