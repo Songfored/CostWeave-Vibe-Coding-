@@ -9,7 +9,8 @@ from __future__ import annotations
 from .domain import WorkerProfile
 
 SNAPSHOT_DATE = "2026-08-27"
-EVIDENCE_REGISTRY = "benchmarks/model_evidence_2026-08-27.json"
+EVIDENCE_SNAPSHOT_DATE = "2026-09-18"
+EVIDENCE_REGISTRY = "benchmarks/model_evidence_2026-09-18.json"
 SOURCES = {
     "openai": "https://developers.openai.com/api/docs/models/compare",
     "anthropic": "https://platform.claude.com/docs/en/models/overview",
@@ -241,11 +242,12 @@ MODELS: tuple[WorkerProfile, ...] = (
 def catalog_metadata() -> dict:
     return {
         "snapshot_date": SNAPSHOT_DATE,
+        "capability_evidence_date": EVIDENCE_SNAPSHOT_DATE,
         "pricing_unit": "每 100 万 tokens；每个模型显式记录币种",
         "pricing_policy": "区间价写入普通档或保守峰值；例外见 limitations 和证据库",
         "capability_notice": "能力分是可编辑路由先验，不是排行榜原始成绩。",
         "evidence_registry": EVIDENCE_REGISTRY,
-        "evidence_notice": "官方事实、独立评测和厂商自报成绩分层保存；未知值不猜测。",
+        "evidence_notice": "评测证据已更新至 2026-09-18；官方硬参数仍为 2026-08-27 快照。独立评测与厂商自报分列，未改路由先验或真实后验。",
         "execution_notice": "目录不会发起模型调用；真实可用性由网关和凭据决定。",
         "sources": SOURCES,
     }

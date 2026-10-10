@@ -4,6 +4,7 @@ from .base import AdapterCapabilities, ProviderAdapter
 from .mock import MockProvider, MockScenario
 from .http import (
     AdapterRuntimePolicy,
+    DeepSeekChatHTTPAdapter,
     ExperimentalAdapterConfig,
     ExternalCallReceipt,
     ExternalExecutionRequest,
@@ -86,6 +87,7 @@ from ..gateway_local import (
 __all__ = [
     "AdapterCapabilities",
     "AdapterRuntimePolicy",
+    "DeepSeekChatHTTPAdapter",
     "ExperimentalAdapterConfig",
     "ExternalCallReceipt",
     "ExternalExecutionRequest",

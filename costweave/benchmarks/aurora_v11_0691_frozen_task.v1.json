@@ -1,0 +1,1027 @@
+{
+  "authorized_budget_cny": null,
+  "billing_calibration": {
+    "account_currency": "CNY",
+    "observed_at": "2026-09-02T00:00:00+08:00",
+    "providers": {
+      "deepseek-official": {
+        "confidence": "medium",
+        "method": "official_time_band_then_empirical_cny",
+        "relative_error_fraction": 0.025
+      },
+      "traveltoken-claude": {
+        "confidence": "high",
+        "method": "reference_numeric_multiplier",
+        "relative_error_fraction": 0.01
+      },
+      "traveltoken-gpt": {
+        "confidence": "high",
+        "method": "reference_numeric_multiplier",
+        "relative_error_fraction": 0.002
+      }
+    },
+    "revision": "2026-09-02-user-invoice-reconciliation-v1",
+    "schema_version": "costweave-billing-calibration-v1"
+  },
+  "cny_hard_cap_reference_multiplier": 6.759094,
+  "created_at": "2026-09-02T07:59:41.298285Z",
+  "experiment_id": "experiment_aurora_real_pilot_20260902_v11_r3_0691_frozen",
+  "fresh_replay_required": true,
+  "old_answers_allowed": false,
+  "old_checkpoints_allowed": false,
+  "paid_execution_authorized": false,
+  "pilot_schema_version": "pre-v0.7-aurora-real-pilot-11-r3-planner-billing-1",
+  "provider_balance_snapshot_cny": {
+    "deepseek_official": 18.18,
+    "traveltoken_gpt_and_claude_combined": 18.73
+  },
+  "release_version": "0.6.9.1",
+  "result_file": "work/local-data/real-eval/aurora-real-pilot-v11-r3-0691-frozen-result.json",
+  "routes": {
+    "all_premium": {
+      "allocator_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "allocator_patch": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "capacity_admission": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "code_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "contract_truth": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "deployment_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "deployment_plan_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "final_assembly": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "financial_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "financial_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "handoff_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "incident_replan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_package": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "meta_decision": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "plan_merge": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_a": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_b": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "provider_selection": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "provider_selection_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "requirements_extract": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "residency_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "rollback_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_policy_patch": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      }
+    },
+    "costweave_dynamic": {
+      "allocator_analysis": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "allocator_patch": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "capacity_admission": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "code_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "contract_truth": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "deployment_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "deployment_plan_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "final_assembly": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "financial_review": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "financial_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "handoff_review": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "incident_replan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_analysis": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "media_package": {
+        "reasoning_effort": "medium",
+        "slot": "claude"
+      },
+      "media_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "meta_decision": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "plan_merge": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_a": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_b": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "provider_selection": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "provider_selection_v2": {
+        "reasoning_effort": "medium",
+        "slot": "claude"
+      },
+      "requirements_extract": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "residency_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "rollback_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_policy_patch": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      }
+    },
+    "manual_static": {
+      "allocator_analysis": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "allocator_patch": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "capacity_admission": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "code_review": {
+        "reasoning_effort": "low",
+        "slot": "gpt"
+      },
+      "contract_truth": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "deployment_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "deployment_plan_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "final_assembly": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "financial_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "financial_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "handoff_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "incident_replan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_analysis": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "media_package": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "media_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "meta_decision": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "plan_merge": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_a": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "planner_b": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "provider_selection": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "provider_selection_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "requirements_extract": {
+        "reasoning_effort": "low",
+        "slot": "deepseek"
+      },
+      "residency_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "rollback_plan": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "security_review_v2": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_analysis": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      },
+      "tenant_policy_patch": {
+        "reasoning_effort": "high",
+        "slot": "claude"
+      }
+    }
+  },
+  "routes_sha256": "3ca19cf1456c4fcb2f28bb31e4dda0638316095422a87255aa13eafa76c5bfff",
+  "run_id": "run_aurora_real_pilot_20260902_v11_r3_0691_frozen",
+  "runtime_database": "work/local-data/aurora-real-pilot-v11-r3-0691-frozen.sqlite3",
+  "schema_version": "costweave-v0691-frozen-task-v1",
+  "task": {
+    "external_calls": 0,
+    "incident_commitment_sha256": "12715dd8c59793f8e4458008174fb22fc92b9ced50fecbe3dadf2026019a86b1",
+    "initial_task": {
+      "incident_commitment_sha256": "12715dd8c59793f8e4458008174fb22fc92b9ced50fecbe3dadf2026019a86b1",
+      "incident_release_stage": 7,
+      "local_capacity": {
+        "accelerator": "A800",
+        "queue_p95_seconds": 45,
+        "slots_available": 0,
+        "used_pct": 94
+      },
+      "media_requirements": {
+        "forbidden_claims": [
+          "zero latency",
+          "0 latency",
+          "100% accurate",
+          "absolutely secure",
+          "零延迟",
+          "百分之百准确",
+          "绝对安全"
+        ],
+        "max_new_keyframes": 3,
+        "required_fields": [
+          "shot_id",
+          "prompt",
+          "negative_prompt",
+          "duration_seconds",
+          "asset_id",
+          "new_keyframe",
+          "reuse_asset_ids",
+          "character_anchor",
+          "style_anchor",
+          "source_ids"
+        ],
+        "shot_count": 8
+      },
+      "nodes": [
+        {
+          "dependencies": [],
+          "difficulty": 9,
+          "node_id": "meta_decision",
+          "preferred_role": "meta_planner",
+          "required_keys": [
+            "topology",
+            "planner_count",
+            "management_levels",
+            "confidence",
+            "reasons"
+          ],
+          "risk": "high",
+          "stage": 1
+        },
+        {
+          "dependencies": [
+            "meta_decision"
+          ],
+          "difficulty": 8,
+          "node_id": "planner_a",
+          "preferred_role": "planner",
+          "required_keys": [
+            "plan_id",
+            "stages",
+            "parallel_groups",
+            "critical_path",
+            "success_conditions"
+          ],
+          "risk": "high",
+          "stage": 2
+        },
+        {
+          "dependencies": [
+            "meta_decision"
+          ],
+          "difficulty": 8,
+          "node_id": "planner_b",
+          "preferred_role": "planner",
+          "required_keys": [
+            "plan_id",
+            "conflicts",
+            "failure_modes",
+            "recovery_boundaries",
+            "success_conditions"
+          ],
+          "risk": "high",
+          "stage": 2
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 4,
+          "node_id": "requirements_extract",
+          "preferred_role": "extractor",
+          "required_keys": [
+            "deadline_hours",
+            "implementation_budget_usd",
+            "regional_peak_rpm",
+            "total_peak_rpm",
+            "p95_limit_seconds",
+            "deliverables"
+          ],
+          "risk": "normal",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 7,
+          "node_id": "allocator_analysis",
+          "preferred_role": "code_analyst",
+          "required_keys": [
+            "root_causes",
+            "guards",
+            "invariants",
+            "algorithm_family",
+            "tie_breaker"
+          ],
+          "risk": "high",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 8,
+          "node_id": "tenant_analysis",
+          "preferred_role": "security_analyst",
+          "required_keys": [
+            "root_cause",
+            "same_tenant_required",
+            "allowed_roles",
+            "empty_tenant_rejected",
+            "threat"
+          ],
+          "risk": "critical",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 5,
+          "node_id": "contract_truth",
+          "preferred_role": "contract_analyst",
+          "required_keys": [
+            "authoritative_source",
+            "setup_costs_usd",
+            "rejected_source",
+            "conflict_resolved"
+          ],
+          "risk": "high",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 8,
+          "node_id": "residency_analysis",
+          "preferred_role": "residency_analyst",
+          "required_keys": [
+            "region_provider_allowlist",
+            "forbidden_routes",
+            "violations"
+          ],
+          "risk": "critical",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 7,
+          "node_id": "capacity_admission",
+          "preferred_role": "capacity_analyst",
+          "required_keys": [
+            "local_usable",
+            "action",
+            "queue_p95_seconds",
+            "slots_available",
+            "required_peak_rpm",
+            "reason"
+          ],
+          "risk": "high",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b"
+          ],
+          "difficulty": 5,
+          "node_id": "media_analysis",
+          "preferred_role": "media_planner",
+          "required_keys": [
+            "shot_count",
+            "max_new_keyframes",
+            "required_anchors",
+            "forbidden_claims",
+            "reuse_required"
+          ],
+          "risk": "normal",
+          "stage": 3
+        },
+        {
+          "dependencies": [
+            "planner_a",
+            "planner_b",
+            "requirements_extract",
+            "allocator_analysis",
+            "tenant_analysis",
+            "contract_truth",
+            "residency_analysis",
+            "capacity_admission",
+            "media_analysis"
+          ],
+          "difficulty": 9,
+          "node_id": "plan_merge",
+          "preferred_role": "plan_merger",
+          "required_keys": [
+            "selected_topology",
+            "dag_nodes",
+            "parallel_groups",
+            "critical_path",
+            "resolved_conflicts",
+            "management_levels"
+          ],
+          "risk": "critical",
+          "stage": 4
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "allocator_analysis"
+          ],
+          "difficulty": 8,
+          "node_id": "allocator_patch",
+          "preferred_role": "code_executor",
+          "required_keys": [
+            "implementation_id",
+            "guards",
+            "tie_breaker",
+            "invariant"
+          ],
+          "risk": "high",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "tenant_analysis"
+          ],
+          "difficulty": 9,
+          "node_id": "tenant_policy_patch",
+          "preferred_role": "security_executor",
+          "required_keys": [
+            "policy_id",
+            "same_tenant_required",
+            "allowed_roles",
+            "reject_empty_tenant"
+          ],
+          "risk": "critical",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "contract_truth",
+            "requirements_extract"
+          ],
+          "difficulty": 7,
+          "node_id": "provider_selection",
+          "preferred_role": "cost_planner",
+          "required_keys": [
+            "authoritative_source",
+            "selected_providers",
+            "setup_costs_usd",
+            "total_setup_usd",
+            "within_budget"
+          ],
+          "risk": "high",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "provider_selection",
+            "residency_analysis",
+            "capacity_admission"
+          ],
+          "difficulty": 9,
+          "node_id": "deployment_plan",
+          "preferred_role": "deployment_planner",
+          "required_keys": [
+            "regional_routes",
+            "total_capacity_rpm",
+            "p95_seconds",
+            "residency_violations",
+            "rollback_supported"
+          ],
+          "risk": "critical",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "media_analysis",
+            "requirements_extract"
+          ],
+          "difficulty": 6,
+          "node_id": "media_package",
+          "preferred_role": "media_executor",
+          "required_keys": [
+            "shots",
+            "new_keyframe_count",
+            "traceable_claims",
+            "estimated_generation_calls"
+          ],
+          "risk": "normal",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "plan_merge",
+            "allocator_patch",
+            "tenant_policy_patch",
+            "deployment_plan"
+          ],
+          "difficulty": 7,
+          "node_id": "rollback_plan",
+          "preferred_role": "release_planner",
+          "required_keys": [
+            "versioned",
+            "steps",
+            "triggers",
+            "preserved_data",
+            "maximum_minutes"
+          ],
+          "risk": "high",
+          "stage": 5
+        },
+        {
+          "dependencies": [
+            "allocator_patch",
+            "tenant_policy_patch"
+          ],
+          "difficulty": 9,
+          "node_id": "code_review",
+          "preferred_role": "deterministic_validator",
+          "required_keys": [
+            "allocator_tests_passed",
+            "tenant_tests_passed",
+            "test_count",
+            "independent",
+            "accepted"
+          ],
+          "risk": "critical",
+          "stage": 6
+        },
+        {
+          "dependencies": [
+            "tenant_policy_patch",
+            "deployment_plan",
+            "residency_analysis"
+          ],
+          "difficulty": 10,
+          "node_id": "security_review",
+          "preferred_role": "security_reviewer",
+          "required_keys": [
+            "tenant_isolation_passed",
+            "residency_passed",
+            "violations",
+            "independent",
+            "accepted"
+          ],
+          "risk": "critical",
+          "stage": 6
+        },
+        {
+          "dependencies": [
+            "provider_selection",
+            "contract_truth",
+            "requirements_extract"
+          ],
+          "difficulty": 8,
+          "node_id": "financial_review",
+          "preferred_role": "financial_reviewer",
+          "required_keys": [
+            "authoritative_source",
+            "recomputed_total_usd",
+            "within_budget",
+            "marketing_prices_rejected",
+            "accepted"
+          ],
+          "risk": "high",
+          "stage": 6
+        },
+        {
+          "dependencies": [
+            "allocator_patch",
+            "tenant_policy_patch",
+            "provider_selection",
+            "deployment_plan",
+            "media_package",
+            "rollback_plan"
+          ],
+          "difficulty": 8,
+          "node_id": "handoff_review",
+          "preferred_role": "handoff_reviewer",
+          "required_keys": [
+            "schema_valid",
+            "missing_artifacts",
+            "provenance_complete",
+            "version_consistent",
+            "accepted"
+          ],
+          "risk": "high",
+          "stage": 6
+        },
+        {
+          "dependencies": [
+            "media_package",
+            "media_analysis"
+          ],
+          "difficulty": 7,
+          "node_id": "media_review",
+          "preferred_role": "media_reviewer",
+          "required_keys": [
+            "shot_count_valid",
+            "anchors_consistent",
+            "reuse_valid",
+            "claims_valid",
+            "accepted"
+          ],
+          "risk": "high",
+          "stage": 6
+        },
+        {
+          "dependencies": [
+            "provider_selection",
+            "deployment_plan",
+            "security_review",
+            "financial_review"
+          ],
+          "difficulty": 10,
+          "node_id": "incident_replan",
+          "preferred_role": "incident_commander",
+          "required_keys": [
+            "affected_nodes",
+            "preserved_nodes",
+            "provider_plan_v2",
+            "deployment_plan_v2",
+            "security_review_v2",
+            "financial_review_v2"
+          ],
+          "risk": "critical",
+          "stage": 7
+        },
+        {
+          "dependencies": [
+            "code_review",
+            "security_review",
+            "financial_review",
+            "handoff_review",
+            "media_review",
+            "incident_replan"
+          ],
+          "difficulty": 10,
+          "node_id": "final_assembly",
+          "preferred_role": "final_assembler",
+          "required_keys": [
+            "status",
+            "deliverables",
+            "final_setup_usd",
+            "total_capacity_rpm",
+            "p95_seconds",
+            "hard_gates_passed",
+            "traceability"
+          ],
+          "risk": "critical",
+          "stage": 8
+        }
+      ],
+      "oracle_included": false,
+      "providers": {
+        "A": {
+          "capacity_rpm": 1100,
+          "marketing_setup_usd": 210,
+          "name": "Northstar",
+          "p95_seconds": 2.1,
+          "regions": [
+            "CN"
+          ],
+          "signed_setup_usd": 260
+        },
+        "B": {
+          "capacity_rpm": 800,
+          "marketing_setup_usd": 240,
+          "name": "BlueRiver",
+          "p95_seconds": 2.4,
+          "regions": [
+            "EU"
+          ],
+          "signed_setup_usd": 300
+        },
+        "C": {
+          "capacity_rpm": 900,
+          "marketing_setup_usd": 310,
+          "name": "Canyon",
+          "p95_seconds": 2.8,
+          "regions": [
+            "EU",
+            "US"
+          ],
+          "signed_setup_usd": 380
+        },
+        "D": {
+          "capacity_rpm": 800,
+          "marketing_setup_usd": 350,
+          "name": "Bridge",
+          "p95_seconds": 3.2,
+          "regions": [
+            "EU",
+            "US"
+          ],
+          "signed_setup_usd": 420
+        }
+      },
+      "requirements": {
+        "data_residency": {
+          "CN": "CN",
+          "EU": "EU",
+          "US": "US"
+        },
+        "deadline_hours": 48,
+        "deliverables": [
+          "technical_plan",
+          "allocator_patch",
+          "tenant_policy_patch",
+          "deterministic_tests",
+          "deployment_plan",
+          "provider_cost_table",
+          "risk_table",
+          "rollback_plan",
+          "eight_shot_media_package",
+          "incident_replan",
+          "traceability_table"
+        ],
+        "implementation_budget_usd": 1450,
+        "independent_review_for_high_risk": true,
+        "p95_limit_seconds": 3.5,
+        "regional_peak_rpm": {
+          "CN": 1000,
+          "EU": 700,
+          "US": 500
+        },
+        "total_peak_rpm": 2200
+      },
+      "schema_version": "pre-v0.7-aurora-offline-1",
+      "software_fixtures": {
+        "allocator": {
+          "contract": [
+            "total_nonnegative",
+            "weights_nonempty",
+            "weights_nonnegative",
+            "positive_weight_exists",
+            "exact_total_preserved",
+            "deterministic_tie_break"
+          ],
+          "implementation": "scale = total_points / sum(weights); return [round(weight * scale) for weight in weights]"
+        },
+        "tenant_export": {
+          "contract": [
+            "same_tenant_required",
+            "role_allowlist_required",
+            "empty_tenant_rejected"
+          ],
+          "implementation": "return role in {'admin', 'analyst'}"
+        }
+      },
+      "stages": [
+        [
+          "meta_decision"
+        ],
+        [
+          "planner_a",
+          "planner_b"
+        ],
+        [
+          "requirements_extract",
+          "allocator_analysis",
+          "tenant_analysis",
+          "contract_truth",
+          "residency_analysis",
+          "capacity_admission",
+          "media_analysis"
+        ],
+        [
+          "plan_merge"
+        ],
+        [
+          "allocator_patch",
+          "tenant_policy_patch",
+          "provider_selection",
+          "deployment_plan",
+          "media_package",
+          "rollback_plan"
+        ],
+        [
+          "code_review",
+          "security_review",
+          "financial_review",
+          "handoff_review",
+          "media_review"
+        ],
+        [
+          "incident_replan"
+        ],
+        [
+          "final_assembly"
+        ]
+      ],
+      "task_version": "aurora-release-rescue-v1"
+    },
+    "initial_task_sha256": "94ef952f1c6b1d67ab574c233e2d1847202d418d4c5618966a23f3801bb8a13c",
+    "oracle_commitment_sha256": "178310e6f8498e15e7cae57177bb9f5fcf8cd251f730d55595ef50da6efe77eb",
+    "revealed_task_sha256": "4c63cfb4dd6d37c88d84e12e627aba27f784e17798326d4a40cdddd0d4580d47",
+    "schema_version": "pre-v0.7-aurora-offline-1",
+    "task_version": "aurora-release-rescue-v1"
+  },
+  "task_sha256": "e5e1293ee13916bd2da20884e210fe619b2f9618ac470245d32d105adf3215ba"
+}

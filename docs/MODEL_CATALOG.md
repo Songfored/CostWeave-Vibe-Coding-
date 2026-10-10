@@ -1,74 +1,100 @@
 # CostWeave 模型目录与评测证据快照
 
-核验日期：**2026-08-27**。本快照覆盖 CostWeave 当前需要参与路由比较的 20 个代表性条目；它不是对全世界所有模型的穷举。
+评测证据更新：**2026-09-18**。官方参数与价格基线仍为 **2026-08-27**，本次没有重新核价。
 
-## 本次重导入结果
+## 本次更新位置与使用边界
 
-- 运行目录：`costweave/model_catalog.py`
-- 原始证据库：`costweave/benchmarks/model_evidence_2026-08-27.json`
-- 持久化目录：`~/.costweave/model_catalog.json`
-- 价格单位：每 100 万 tokens；币种逐模型记录
-- 能力字段：CostWeave 可编辑路由先验，不是排行榜原始分数
-- 未公开字段：明确保存为 `null`，不靠猜测补齐
+- 运行目录：`costweave/model_catalog.py`，元数据指向新证据库。
+- 当前证据库：`costweave/benchmarks/model_evidence_2026-09-18.json`。
+- 历史证据库：`costweave/benchmarks/model_evidence_2026-08-27.json`，原样保留，并在新文件中记录 SHA256。
+- 原有 20 个目录项全部保留；新增观察型号保存在 `observed_models`，没有凭榜单名直接注册 API 或启用路由。
+- 持久化模型目录、价格、人工编辑、0—1 路由先验、真实 Outcome 后验均未覆盖。已有持久化目录加载时仍优先保留用户记录。
+- 本次更新的是公开能力证据，不是自动学习或新策略上线。程序的目录元数据可定位新文件；网页暂不直接展示这些榜单明细。
 
-| 模型 | 输入 / 缓存 / 输出 | 上下文 | 状态或特别说明 |
+## 证据类型与日期
+
+| 来源 | 本次采用口径 | 榜单日期 | 抓取日期 |
+|---|---|---|---|
+| [Artificial Analysis](https://artificialanalysis.ai/leaderboards/models) | Intelligence Index v4.3，保留推理档位及 fallback | 页面未单独给出 | 2026-09-18 |
+| [Arena Text](https://arena.ai/leaderboard/text) | Overall 文本偏好 | 2026-09-13 | 2026-09-18 |
+| [Arena Code](https://arena.ai/leaderboard/code) | WebDev Overall，含框架标签 | 2026-09-11 | 2026-09-18 |
+| [Arena Vision](https://arena.ai/leaderboard/vision) | Overall 视觉理解偏好 | 2026-09-13 | 2026-09-18 |
+| [DeepSeek 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | 厂商自报，最大推理档；保留工具/框架 | 发布说明为 2026-09-10；模型卡当前页 | 2026-09-18 |
+
+只收录当前任务相关的代表性行，不声称穷举。Arena 保存 URL 默认页面；文本提取没有确认各 UI 开关是否选中，不能与其他过滤视图混算。JSON 中保留投票数、排名区间、误差和 Preliminary 标志。下面是便于查看的摘录，完整字段以 JSON 为准。
+
+## 综合能力摘录
+
+AA 当前[方法](https://artificialanalysis.ai/methodology/intelligence-benchmarking)为 v4.3。旧快照没有记录指数版本，不能由数字下降断言模型退步，也不能直接转成成功概率。该指数主要覆盖英语文本，不用于填补中文与视觉能力。
+
+| 评测变体 | AA v4.3 指数 |
+|---|---:|
+| Claude Fable 5.1 (max with fallback) | 53 |
+| GPT-6 Astra (max) | 53 |
+| GPT-6 Astra (medium) | 50 |
+| Claude Opus 5 (max) | 51 |
+| GPT-5.6 Sol (max) | 47 |
+| Qwen3.8 Max (0902) | 45 |
+
+`*` 原样保留来源标记，本次未把其解释为完整评测覆盖。不同推理档位单独记录；fallback 配置不等于普通单模型调用。
+
+## 文本偏好摘录
+
+| 评测变体 | 排名 | 分数 ± 来源误差 | Preliminary |
 |---|---:|---:|---|
-| GPT-5.6 Luna | $0.20 / $0.02 / $1.20 | 1.05M | 经济型 |
-| GPT-5.6 Terra | $2 / $0.20 / $12 | 1.05M | 平衡型 |
-| GPT-5.6 Sol | $4 / $0.40 / $20 | 1.05M | 前沿型 |
-| GPT-OSS 20B（本地） | API 账单 $0 | 131K | 21B/3.6B 激活；本地硬件成本另计 |
-| Claude Haiku 4.5 | $1 / $0.10 / $5 | 200K | 快速批处理 |
-| Claude Sonnet 5 | $2 / $0.20 / $10 | 1M | 平衡型代理编码 |
-| Claude Opus 5 | $5 / $0.50 / $25 | 1M | 前沿复杂任务 |
-| Claude Fable 5 | $10 / $1 / $50 | 1M | 高成本长周期智能体 |
-| Gemini 3.5 Flash-Lite | $0.30 / $0.03 / $2.50 | 1M | 标准实时价；Batch/Flex 为 $0.15/$1.25 |
-| Gemini 3.7 Flash | $0.75 / — / $3.75 | 1M | 2026 年底前阶段性价格 |
-| Gemini 3.1 Pro Preview | $2 / $0.20 / $12 | 1.048M | 预览；>200K 有阶梯价 |
-| DeepSeek V4 Flash | $0.44 / $0.014 / $1.32 | 1M | 采用峰时保守价 |
-| DeepSeek V4 Pro | $1.32 / $0.044 / $3.96 | 1M | 采用峰时保守价 |
-| Grok 4.6 | $2 / $0.50 / $6 | 500K | >200K 价格翻倍 |
-| Mistral Small 4 | $0.15 / $0.015 / $0.60 | 256K | 119B/6.5B 激活，Apache 2.0 |
-| Mistral Large 3 | $0.50 / $0.05 / $1.50 | 256K | 675B/41B 激活，Apache 2.0 |
-| Qwen 3.8 Max | $2 / $0.25 / $6 | 1M | 国际区 USD 价；2.4T MoE |
-| Kimi K3 | CNY 20 / 2 / 100 | 1.048M | 2.8T/104B 激活；无汇率快照时不参与 USD 路由 |
-| MiniMax M2.7 | $0.30 / $0.06 / $1.20 | 204.8K | 速度与基准主要为厂商自报 |
-| 本地规则核心 | 0 | 64K | 确定性模块，不是 LLM |
+| claude-fable-5-high | 1 | 1506 ± 5 | 未标注 |
+| claude-fable-5.1-max | 5 | 1498 ± 8 | 未标注 |
+| gemini-3.8-flash-high | 9 | 1493 ± 9 | 是 |
+| claude-opus-5-high | 10 | 1493 ± 4 | 未标注 |
+| gemini-3.7-flash-high | 12 | 1490 ± 8 | 是 |
 
-## 评测数据如何进入系统
+## Web 开发摘录
 
-证据库按来源等级分开保存：
+| 评测变体 | 排名 | 分数 ± 来源误差 | Preliminary |
+|---|---:|---:|---|
+| gpt-6-astra-max | 1 | 1800 ± 16 | 未标注 |
+| claude-fable-5.1-max | 2 | 1758 ± 14 | 未标注 |
+| claude-opus-5-max | 3 | 1687 ± 7 | 未标注 |
+| qwen3.8-max-0902 | 4 | 1681 ± 15 | 是 |
+| kimi-k3-max | 5 | 1674 ± 11 | 未标注 |
 
-1. **官方事实**：型号、上下文、最大输出、模态、工具、参数量、许可证和价格。
-2. **独立评测**：当前保存 LMArena 2026-08-21 Text Arena 与 Artificial Analysis 2026-08-27 Intelligence Index 快照。
-3. **厂商自报**：例如 MiniMax M2.7 的 SWE-Pro、Terminal-Bench 2 等成绩；明确标注后只作冷启动参考。
+## 视觉理解摘录
 
-排行榜的最小粒度是“模型版本 + 推理档位”。例如 `gpt-5.6-sol-xhigh`、`claude-opus-5-max` 和普通档并不是一个可互换的观测。LMArena 的分数带统计不确定性，排名区间重叠时不能声称存在确定胜负；预览或投票较少的条目也保留 `preliminary` 标记。
+| 评测变体 | 排名 | 分数 ± 来源误差 | Preliminary |
+|---|---:|---:|---|
+| claude-fable-5-high | 1 | 1310 ± 8 | 未标注 |
+| qwen3.8-max | 2 | 1302 ± 8 | 未标注 |
+| claude-opus-5-high | 10 | 1289 ± 8 | 未标注 |
+| claude-fable-5.1-max | 11 | 1289 ± 12 | 未标注 |
+| gpt-5.6-sol-xhigh | 14 | 1286 ± 8 | 未标注 |
 
-公开排行榜只用于新模型冷启动和交叉检查。它不能替代 CostWeave 自己按任务类型、难度、提示词、工具、时延、失败返工与实际账单采集的 Outcome 数据，因此不会直接覆盖真实能力后验。
+名次不代表确定胜负，需结合 JSON 中的排名区间与投票数。WebDev 不能代替仓库修复或测试正确率；codex-harness 成绩不能视为任意中转站同名模型的裸调用表现。
 
-## 价格口径
+## DeepSeek V4.1 Flash：当前资源相关的新记录
 
-- DeepSeek 存在峰谷价格，目录采用峰时缓存未命中输入与峰时输出价，避免预算低估。
-- Grok 4.6 超过 200K 上下文时价格翻倍；目录主字段保存普通档，限制字段保留阶梯价。
-- Gemini 3.1 Pro Preview 的主字段保存不超过 200K 输入档；更长输入为 $4/$18。
-- Gemini 3.7 Flash 当前价格有效期有限，过期前应再次刷新。
-- Qwen 使用国际区 USD 价格；Kimi 使用中国站 CNY 价格。没有带时间戳的汇率快照时，Kimi 被标记为不可参与美元预算路由，避免跨币种伪比较。
-- 本地模型的 API 价格可以为 0，但电力、GPU 占用、排队、显存和运维成本不是 0，后续必须由资源经济模型计算。
+[官方更新日志](https://api-docs.deepseek.com/updates/)确认 V4.1 Flash 支持原生视觉，官方 API 使用 `deepseek-flash`；历史 `deepseek-v4-flash` 名称已作为兼容别名转向新后端。旧 V4 的历史成绩不随别名自动变成 V4.1 成绩。校内或中转部署是否跟随升级仍需单独确认。
 
-## 主要来源
+模型卡自报成绩单列在 `vendor_reported`，含科学推理、终端任务、代码修复、自动化和视觉工具任务；保留推理档位、框架、metric 与采样设置。未将 Base 模型成绩混入 Instruct 成绩。
 
-- [OpenAI 模型比较](https://developers.openai.com/api/docs/models/compare)
-- [Anthropic 模型总览](https://platform.claude.com/docs/en/models/overview)与[价格](https://platform.claude.com/docs/en/about-claude/pricing)
-- [Google Gemini 模型](https://ai.google.dev/gemini-api/docs/models)与[价格](https://ai.google.dev/gemini-api/docs/pricing)
-- [DeepSeek 模型与价格](https://api-docs.deepseek.com/quick_start/pricing/)
-- [xAI Grok 4.6](https://docs.x.ai/developers/models/grok-4.6)
-- [Mistral 价格](https://docs.mistral.ai/inference/pricing)
-- [Alibaba Cloud Qwen 3.8 Max](https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max)
-- [Moonshot Kimi API](https://platform.kimi.com/)与[Kimi K3 开放权重资料](https://github.com/MoonshotAI/Kimi-K3)
-- [MiniMax 按量价格](https://platform.minimax.io/docs/guides/pricing-paygo)
-- [LMArena Text Arena](https://arena.ai/leaderboard/text?style=false)
-- [Artificial Analysis 模型排行榜](https://artificialanalysis.ai/leaderboards/models)
+NL2Repo-Bench 存在厂商材料冲突：更新日志为 65.4，模型卡为 64.0。新证据库同时保存两项来源，采用值为 null，不选较高值也不求平均。
+
+## 新型号与真实可用性
+
+新增观察覆盖 GPT-6 Astra、Claude Fable 5.1、DeepSeek V4.1 Flash、Qwen3.8 Max 0902、GLM-5.3/Flash、Gemini 3.8 Flash、Qwen3.8-Flash-Next、GPT-5.3 Codex、MiniMax-M3。
+
+[GPT-6 Astra 官方模型页](https://developers.openai.com/api/docs/models/gpt-6-astra)确认了 API 名称、上下文与输出上限；其余只有榜单身份的条目不猜测 API ID。榜单可见不代表用户账户或中转站可用。
+
+官方渠道、校内点数渠道与中转站必须分别核对模型后端、限流和成本。校内 bge 嵌入模型不能用上述聊天模型榜单评分。本次没有足够信息更新 GPU 可部署能力或本机吞吐。
+
+## 未取得或不能直接采用的数据
+
+- [SWE-bench](https://www.swebench.com/)本次取得方法说明，但网页提取没有当前分数行。
+- [Terminal-Bench 旧入口](https://www.tbench.ai/?version=2.0)返回含 4.0 描述的页面，未取得独立分数行。没有以厂商自报或二手汇总冒充独立成绩。
+- Arena Vision 取得页面未找到 DeepSeek 行；这表示本次没有相应独立视觉证据，不代表不支持视觉。
+- 本轮没有专门中文评测、embedding 检索、图片/视频生成评测，不凭综合榜分数补数。
 
 ## 后续更新规则
 
-少量改动可在页面编辑；批量更新使用 JSON/CSV 导入。每次更新必须同时保存来源 URL、核验日期、币种、价格口径与预览状态。删除或替换型号前先导出备份；导入后运行目录测试和路由回归。真实 Outcome 仍进入 Capability Posterior，不反写成“官方能力分”。
+每条能力观测记录来源、抓取日、榜单日、模型变体、推理档位、任务范围及 agent 框架。原始分数分榜保存；未知为 null。公开证据只用于冷启动参考，不覆盖按任务采集的真实能力后验。
+
+旧价格与硬参数见保留的 2026-08-27 JSON；它们不是今日价格承诺。本次没有重新配置模型、改变实验计费、启动真实调用或使用历史预算。

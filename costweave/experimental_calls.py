@@ -19,6 +19,7 @@ from .evaluation_protocol import canonical_json
 
 EXPERIMENTAL_CALL_SCHEMA_VERSION = "v0.5.6.3"
 EXPERIMENTAL_CALL_POLICY_REVISION = "external-call-policy-v1"
+USAGE_ONLY_POLICY_REVISION = "external-call-usage-only-v1"
 REAL_UNVALIDATED_EVIDENCE = "E2-real-unvalidated"
 
 
@@ -53,13 +54,22 @@ class ExperimentBudget:
     created_at: str = ""
     expires_at: str | None = None
     revision: str = EXPERIMENTAL_CALL_POLICY_REVISION
+    accounting_mode: str = "priced"
 
     def __post_init__(self) -> None:
+        if self.accounting_mode not in {"priced", "usage_only"}:
+            raise ExperimentalCallError("invalid accounting mode")
+        if self.accounting_mode == "usage_only":
+            if self.total_cost_limit_usd != 0 or any(self.provider_cost_limits_usd.values()):
+                raise ExperimentalCallError("usage-only budgets must not claim monetary limits")
+            object.__setattr__(self, "revision", USAGE_ONLY_POLICY_REVISION)
+        elif self.revision == USAGE_ONLY_POLICY_REVISION:
+            raise ExperimentalCallError("usage-only revision requires explicit accounting mode")
         if not self.experiment_id.startswith("experiment_"):
             raise ExperimentalCallError("experiment id is invalid")
         if (
             not math.isfinite(float(self.total_cost_limit_usd))
-            or self.total_cost_limit_usd <= 0
+            or (self.total_cost_limit_usd <= 0 and self.accounting_mode != "usage_only")
         ):
             raise ExperimentalCallError("experiment budget must be positive")
         if not self.provider_cost_limits_usd:
@@ -71,12 +81,12 @@ class ExperimentBudget:
             for key, value in self.provider_cost_limits_usd.items()
         ):
             raise ExperimentalCallError("provider budget is invalid")
-        if (
-            sum(float(v) for v in self.provider_cost_limits_usd.values())
-            > self.total_cost_limit_usd + 1e-9
+        if any(
+            float(value) > self.total_cost_limit_usd + 1e-9
+            for value in self.provider_cost_limits_usd.values()
         ):
             raise ExperimentalCallError(
-                "provider limits cannot exceed the experiment total"
+                "a provider limit cannot exceed the experiment total"
             )
         if self.max_logical_calls <= 0 or self.max_attempts_per_call <= 0:
             raise ExperimentalCallError("call and attempt limits are required")
@@ -91,6 +101,8 @@ class ExperimentBudget:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        if self.accounting_mode == "priced":
+            result.pop("accounting_mode")  # Preserve existing registration hashes.
         result["provider_cost_limits_usd"] = {
             key: float(value)
             for key, value in sorted(
@@ -273,6 +285,7 @@ class ExperimentalCallStore:
         request_fingerprint: Mapping[str, Any],
         worst_case_cost_per_attempt_usd: float,
         max_attempts: int,
+        accounting_mode: str = "priced",
     ) -> CallReservation:
         if not idempotency_key.strip() or len(idempotency_key) > 240:
             raise ExternalIdempotencyError("bounded idempotency key is required")
@@ -296,6 +309,11 @@ class ExperimentalCallStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                policy_row = connection.execute("SELECT revision FROM external_experiments WHERE experiment_id=?", (experiment_id,)).fetchone()
+                if policy_row is not None:
+                    expected_mode = "usage_only" if policy_row["revision"] == USAGE_ONLY_POLICY_REVISION else "priced"
+                    if accounting_mode != expected_mode:
+                        raise ExternalBudgetExceededError("adapter and experiment accounting modes disagree")
                 existing = connection.execute(
                     "SELECT * FROM external_calls WHERE experiment_id=? "
                     "AND idempotency_key=?",
@@ -317,6 +335,11 @@ class ExperimentalCallStore:
                     raise ExternalBudgetExceededError(
                         "experiment budget is not registered"
                     )
+                mode = "usage_only" if experiment["revision"] == USAGE_ONLY_POLICY_REVISION else "priced"
+                if accounting_mode != mode:
+                    raise ExternalBudgetExceededError("adapter and experiment accounting modes disagree")
+                if mode == "usage_only" and (reserved_cost != 0 or max_attempts != 1):
+                    raise ExternalBudgetExceededError("usage-only calls require zero price placeholders and no retries")
                 if experiment["status"] != "active":
                     raise ExternalBudgetExceededError(
                         "experiment is not active"
@@ -612,6 +635,7 @@ class ExperimentalCallStore:
                 "WHERE external_call_id=? ORDER BY ordinal",
                 (external_call_id,),
             ).fetchall()
+            policy = connection.execute("SELECT revision FROM external_experiments WHERE experiment_id=?", (row["experiment_id"],)).fetchone()
         item = dict(row)
         item["result"] = (
             json.loads(item.pop("result_json"))
@@ -624,6 +648,10 @@ class ExperimentalCallStore:
             else None
         )
         item["attempts"] = [dict(attempt) for attempt in attempts]
+        if policy["revision"] == USAGE_ONLY_POLICY_REVISION:
+            item.update(accounting_mode="usage_only", actual_cost=None, reserved_cost=None)
+            for attempt in item["attempts"]:
+                attempt["actual_cost"] = None
         return item
 
     def experiment_summary(self, experiment_id: str) -> dict[str, Any]:
@@ -647,7 +675,7 @@ class ExperimentalCallStore:
             )
             bucket["calls"] += 1
             bucket["actual_cost_usd"] += float(row["actual_cost"])
-        return {
+        summary = {
             "experiment_id": experiment_id,
             "status": experiment["status"],
             "logical_calls": len(rows),
@@ -663,6 +691,118 @@ class ExperimentalCallStore:
                 10,
             ),
             "providers": provider,
+        }
+        if experiment["revision"] == USAGE_ONLY_POLICY_REVISION:
+            summary.update(accounting_mode="usage_only", actual_cost_usd=None, active_reserved_cost_usd=None)
+            for bucket in provider.values():
+                bucket["actual_cost_usd"] = None
+        return summary
+
+    def complete_experiment(self, experiment_id: str) -> bool:
+        """Close a normally finished experiment after every call is terminal.
+
+        Completion is idempotent.  A frozen experiment remains immutable, and
+        an active reservation prevents closure so reports cannot claim a clean
+        finish while a provider call is still outstanding.
+        """
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                experiment = connection.execute(
+                    "SELECT status FROM external_experiments WHERE experiment_id=?",
+                    (experiment_id,),
+                ).fetchone()
+                if experiment is None:
+                    raise ExperimentalCallError("experiment does not exist")
+                status = str(experiment["status"])
+                if status == "completed":
+                    connection.execute("COMMIT")
+                    return False
+                if status != "active":
+                    raise ExperimentalCallError(
+                        f"experiment in {status} state cannot be completed"
+                    )
+                active = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM external_calls "
+                        "WHERE experiment_id=? AND status='reserved'",
+                        (experiment_id,),
+                    ).fetchone()[0]
+                )
+                if active:
+                    raise ExperimentalCallError(
+                        "experiment has active call reservations"
+                    )
+                connection.execute(
+                    "UPDATE external_experiments SET status='completed' "
+                    "WHERE experiment_id=? AND status='active'",
+                    (experiment_id,),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return True
+
+    def budget_headroom(
+        self, experiment_id: str, *, provider: str
+    ) -> dict[str, Any]:
+        """Return a conservative read-only budget snapshot for route choice.
+
+        This snapshot is advisory: ``reserve`` remains the atomic authority and
+        repeats every check, so a concurrent call cannot overspend based on a
+        stale fallback decision.
+        """
+
+        with self._connection() as connection:
+            experiment = connection.execute(
+                "SELECT * FROM external_experiments WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchone()
+            if experiment is None:
+                raise ExperimentalCallError("experiment does not exist")
+            provider_limits = json.loads(experiment["provider_limits_json"])
+            if provider not in provider_limits:
+                raise ExternalBudgetExceededError(
+                    "provider has no explicit experiment budget"
+                )
+            rows = connection.execute(
+                "SELECT provider,status,reserved_cost,actual_cost "
+                "FROM external_calls WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchall()
+        committed = lambda row: float(
+            row["reserved_cost"]
+            if row["status"] == "reserved"
+            else row["actual_cost"]
+        )
+        total_committed = sum(committed(row) for row in rows)
+        provider_committed = sum(
+            committed(row) for row in rows if row["provider"] == provider
+        )
+        total_limit = float(experiment["total_cost_limit"])
+        provider_limit = float(provider_limits[provider])
+        logical_limit = int(experiment["max_logical_calls"])
+        if experiment["revision"] == USAGE_ONLY_POLICY_REVISION:
+            return {"experiment_id": experiment_id, "provider": provider,
+                    "experiment_status": str(experiment["status"]), "accounting_mode": "usage_only",
+                    "total_remaining_usd": None, "provider_remaining_usd": None,
+                    "logical_calls_remaining": max(0, logical_limit - len(rows)),
+                    "authoritative_at_reserve": True}
+        return {
+            "experiment_id": experiment_id,
+            "provider": provider,
+            "experiment_status": str(experiment["status"]),
+            "total_remaining_usd": round(
+                max(0.0, total_limit - total_committed), 10
+            ),
+            "provider_remaining_usd": round(
+                max(0.0, provider_limit - provider_committed), 10
+            ),
+            "logical_calls_remaining": max(0, logical_limit - len(rows)),
+            "authoritative_at_reserve": True,
         }
 
     def counts(

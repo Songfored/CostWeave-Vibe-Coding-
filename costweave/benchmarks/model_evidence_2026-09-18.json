@@ -1,0 +1,2192 @@
+{
+  "schema_version": 2,
+  "snapshot_date": "2026-09-18",
+  "scope": "既有目录的公开能力证据更新，以及新增观察型号；不更新价格、路由先验或真实能力后验",
+  "methodology": {
+    "source_priority": [
+      "厂商官方模型文档与价格页",
+      "独立且公开方法的排行榜",
+      "厂商自报评测（只作补充，不作为独立结论）"
+    ],
+    "grain": "模型版本和推理档位是评测最小粒度；不同档位不得合并成一个排行榜名次",
+    "unknown_policy": "未公开的参数量、固定输出上限或独立成绩记为 null，不进行猜测",
+    "routing_policy": "catalog 中的 0-1 能力值是归一化路由先验，不是本文件中的原始评测成绩",
+    "pricing_policy": "本次没有刷新 2026-08-27 的价格；榜单价格不替换预算计费参数。",
+    "comparability": "只在同一榜单、版本、任务集合、模型修订、推理档位、agent harness 和统计口径内比较；无跨榜总分。",
+    "index_version_policy": "本次 AA Intelligence Index 为 v4.3；旧快照未记版本，不计算跨期分数差。",
+    "date_policy": "snapshot_date 是本次证据整理日期，不是所有事实的新核验日期；榜单日期与抓取日期分列。",
+    "coverage_policy": "定点摘录原有目录与主要新型号，非全榜镜像；未收录或未找到不代表能力为零。",
+    "mapping_policy": "catalog_id 只关联模型家族供检索，不证明相同部署；model_variant 和 harness 必须保留。"
+  },
+  "independent_sources": [
+    {
+      "id": "aa-v43",
+      "name": "Artificial Analysis Intelligence Index v4.3",
+      "source_url": "https://artificialanalysis.ai/leaderboards/models",
+      "leaderboard_date": null,
+      "retrieved_at": "2026-09-18",
+      "method": "文本为主、英语为主的复合指数；非成功概率；当前日期榜单未单独展示。",
+      "status": "independent",
+      "selection": "curated_subset",
+      "filter_state": "URL default; UI toggle selection not certified"
+    },
+    {
+      "id": "arena-text",
+      "name": "Arena Text Overall",
+      "source_url": "https://arena.ai/leaderboard/text",
+      "leaderboard_date": "2026-09-13",
+      "retrieved_at": "2026-09-18",
+      "method": "人类偏好；保留分数不确定性、排名区间和投票数；不是事实正确率。",
+      "status": "independent",
+      "selection": "curated_subset",
+      "filter_state": "URL default; UI toggle selection not certified"
+    },
+    {
+      "id": "arena-code",
+      "name": "Arena Code WebDev Overall",
+      "source_url": "https://arena.ai/leaderboard/code",
+      "leaderboard_date": "2026-09-11",
+      "retrieved_at": "2026-09-18",
+      "method": "Web 开发偏好评测；不是通用代码单测通过率；保留 codex-harness 标签。",
+      "status": "independent",
+      "selection": "curated_subset",
+      "filter_state": "URL default; UI toggle selection not certified"
+    },
+    {
+      "id": "arena-vision",
+      "name": "Arena Vision Overall",
+      "source_url": "https://arena.ai/leaderboard/vision",
+      "leaderboard_date": "2026-09-13",
+      "retrieved_at": "2026-09-18",
+      "method": "视觉理解偏好；不是图像生成质量。",
+      "status": "independent",
+      "selection": "curated_subset",
+      "filter_state": "URL default; UI toggle selection not certified"
+    }
+  ],
+  "official_sources": [
+    {
+      "provider": "openai",
+      "url": "https://developers.openai.com/api/docs/models/compare",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "anthropic",
+      "url": "https://platform.claude.com/docs/en/models/overview",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "anthropic",
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "google",
+      "url": "https://ai.google.dev/gemini-api/docs/models",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "google",
+      "url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "deepseek",
+      "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "xai",
+      "url": "https://docs.x.ai/developers/models/grok-4.6",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "mistral",
+      "url": "https://docs.mistral.ai/inference/pricing",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "alibaba",
+      "url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "moonshot",
+      "url": "https://platform.kimi.com/",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "moonshot",
+      "url": "https://github.com/MoonshotAI/Kimi-K3",
+      "retrieved_at": "2026-08-27"
+    },
+    {
+      "provider": "minimax",
+      "url": "https://platform.minimax.io/docs/guides/pricing-paygo",
+      "retrieved_at": "2026-08-27"
+    }
+  ],
+  "models": {
+    "local-rule-core": {
+      "fact_status": "project_internal",
+      "parameters": null,
+      "notes": [
+        "确定性代码模块，不是大语言模型"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "benchmark_refs": [],
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    },
+    "gpt-oss-20b-local": {
+      "fact_status": "official",
+      "parameters": {
+        "total_billions": 21,
+        "active_billions": 3.6
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 131072,
+      "license": "Apache-2.0",
+      "notes": [
+        "本地运行成本与硬件、量化和吞吐有关，不能按 API token 价格视为真正零成本"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "benchmark_refs": [],
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    },
+    "gpt-5.6-luna": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 0.2,
+        "cached_input": 0.02,
+        "output": 1.2
+      },
+      "benchmark_refs": [
+        "arena-text:gpt-5.6-luna-xhigh",
+        "arena-code:gpt-5.6-luna-xhigh (codex-harness)",
+        "arena-vision:gpt-5.6-luna-xhigh",
+        "aa-v43:GPT-5.6 Luna (max)",
+        "aa-v43:GPT-5.6 Luna (low)"
+      ],
+      "notes": [
+        "独立评测结果与推理档位绑定"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "gpt-5.6-terra": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 2.0,
+        "cached_input": 0.2,
+        "output": 12.0
+      },
+      "benchmark_refs": [
+        "arena-text:gpt-5.6-terra-xhigh",
+        "arena-code:gpt-5.6-terra-xhigh (codex-harness)",
+        "arena-vision:gpt-5.6-terra-xhigh",
+        "aa-v43:GPT-5.6 Terra (max)"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "gpt-5.6-sol": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 4.0,
+        "cached_input": 0.4,
+        "output": 20.0
+      },
+      "benchmark_refs": [
+        "arena-text:gpt-5.6-sol-xhigh",
+        "arena-code:gpt-5.6-sol-xhigh (codex-harness)",
+        "arena-vision:gpt-5.6-sol-xhigh",
+        "aa-v43:GPT-5.6 Sol (max)"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "claude-haiku-4.5": {
+      "fact_status": "official",
+      "parameters": null,
+      "context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "price": {
+        "currency": "USD",
+        "input": 1.0,
+        "cached_input": 0.1,
+        "output": 5.0
+      },
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "benchmark_refs": [],
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    },
+    "claude-sonnet-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 2.0,
+        "cached_input": 0.2,
+        "output": 10.0
+      },
+      "benchmark_refs": [
+        "arena-text:claude-sonnet-5-high",
+        "arena-code:claude-sonnet-5-high",
+        "arena-vision:claude-sonnet-5-high",
+        "aa-v43:Claude Sonnet 5 (max)"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "claude-opus-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 5.0,
+        "cached_input": 0.5,
+        "output": 25.0
+      },
+      "benchmark_refs": [
+        "arena-text:claude-opus-5-high",
+        "arena-code:claude-opus-5-max",
+        "arena-vision:claude-opus-5-high",
+        "aa-v43:Claude Opus 5 (max)"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "claude-fable-5": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "price": {
+        "currency": "USD",
+        "input": 10.0,
+        "cached_input": 1.0,
+        "output": 50.0
+      },
+      "benchmark_refs": [
+        "arena-text:claude-fable-5-high",
+        "arena-vision:claude-fable-5-high"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "gemini-3.5-flash-lite": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 65536,
+      "price": {
+        "currency": "USD",
+        "input": 0.3,
+        "cached_input": 0.03,
+        "output": 2.5
+      },
+      "benchmark_refs": [
+        "arena-vision:gemini-3.5-flash-lite",
+        "aa-v43:Gemini 3.5 Flash-Lite"
+      ],
+      "notes": [
+        "目录采用标准实时价；Batch/Flex 为 $0.15 输入/$1.25 输出"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "gemini-3.7-flash": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 65536,
+      "price": {
+        "currency": "USD",
+        "input": 0.75,
+        "cached_input": null,
+        "output": 3.75
+      },
+      "benchmark_refs": [
+        "arena-text:gemini-3.7-flash-high"
+      ],
+      "notes": [
+        "官方说明该导入价有效至 2026-12-31，之后计划调整"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "gemini-3.1-pro-preview": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1048576,
+      "max_output_tokens": 65536,
+      "price": {
+        "currency": "USD",
+        "input": 2.0,
+        "cached_input": 0.2,
+        "output": 12.0
+      },
+      "benchmark_refs": [
+        "arena-text:gemini-3.1-pro-preview",
+        "arena-vision:gemini-3.1-pro-preview",
+        "aa-v43:Gemini 3.1 Pro Preview"
+      ],
+      "notes": [
+        "<=200K 输入价；>200K 为 $4 输入/$18 输出",
+        "预览型号，生产稳定性需另行校验"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "deepseek-v4-flash": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "price": {
+        "currency": "USD",
+        "input": 0.44,
+        "cached_input": 0.014,
+        "output": 1.32
+      },
+      "benchmark_refs": [
+        "arena-text:deepseek-v4-flash"
+      ],
+      "notes": [
+        "采用峰时缓存未命中输入和峰时输出价；非峰时约为一半"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "deepseek-v4-pro": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": 384000,
+      "price": {
+        "currency": "USD",
+        "input": 1.32,
+        "cached_input": 0.044,
+        "output": 3.96
+      },
+      "benchmark_refs": [
+        "arena-text:deepseek-v4-pro-high-20260813",
+        "aa-v43:DeepSeek V4 Pro 0813 (max)"
+      ],
+      "notes": [
+        "采用峰时缓存未命中输入和峰时输出价；非峰时约为一半"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "grok-4.6": {
+      "fact_status": "official_plus_independent",
+      "parameters": null,
+      "context_tokens": 500000,
+      "max_output_tokens": null,
+      "price": {
+        "currency": "USD",
+        "input": 2.0,
+        "cached_input": 0.5,
+        "output": 6.0
+      },
+      "benchmark_refs": [
+        "arena-code:grok-4.6-high",
+        "arena-vision:grok-4.6-high",
+        "aa-v43:Grok 4.6 (high)"
+      ],
+      "notes": [
+        "标准价格适用于 <=200K；更长上下文价格翻倍",
+        "官方页面写明文本输出无固定上限"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "mistral-small-4": {
+      "fact_status": "official",
+      "parameters": {
+        "total_billions": 119,
+        "active_billions": 6.5
+      },
+      "context_tokens": 256000,
+      "max_output_tokens": null,
+      "license": "Apache-2.0",
+      "price": {
+        "currency": "USD",
+        "input": 0.15,
+        "cached_input": 0.015,
+        "output": 0.6
+      },
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "benchmark_refs": [],
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    },
+    "mistral-large-3": {
+      "fact_status": "official",
+      "parameters": {
+        "total_billions": 675,
+        "active_billions": 41
+      },
+      "context_tokens": 256000,
+      "max_output_tokens": null,
+      "license": "Apache-2.0",
+      "price": {
+        "currency": "USD",
+        "input": 0.5,
+        "cached_input": 0.05,
+        "output": 1.5
+      },
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "benchmark_refs": [],
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    },
+    "qwen3.8-max": {
+      "fact_status": "official_plus_independent",
+      "parameters": {
+        "total_billions": 2400,
+        "active_billions": null
+      },
+      "context_tokens": 1000000,
+      "max_output_tokens": 131072,
+      "price": {
+        "currency": "USD",
+        "input": 2.0,
+        "cached_input": 0.25,
+        "output": 6.0
+      },
+      "benchmark_refs": [
+        "arena-text:qwen3.8-max",
+        "arena-code:qwen3.8-max",
+        "arena-vision:qwen3.8-max"
+      ],
+      "notes": [
+        "价格采用阿里云国际区；中国内地与全球区域定价不同"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "kimi-k3": {
+      "fact_status": "official_plus_independent",
+      "parameters": {
+        "total_billions": 2800,
+        "active_billions": 104
+      },
+      "context_tokens": 1048576,
+      "max_output_tokens": null,
+      "license": "Kimi K3 License",
+      "price": {
+        "currency": "CNY",
+        "input": 20.0,
+        "cached_input": 2.0,
+        "output": 100.0
+      },
+      "benchmark_refs": [
+        "arena-text:kimi-k3-max",
+        "arena-code:kimi-k3-max",
+        "aa-v43:Kimi K3 (max)"
+      ],
+      "notes": [
+        "人民币中国站价；未设置汇率快照前不可与 USD 价格直接比较"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "observed"
+    },
+    "minimax-m2.7": {
+      "fact_status": "official_plus_vendor_benchmark",
+      "parameters": null,
+      "context_tokens": 204800,
+      "max_output_tokens": null,
+      "price": {
+        "currency": "USD",
+        "input": 0.3,
+        "cached_input": 0.06,
+        "output": 1.2
+      },
+      "benchmark_refs": [],
+      "notes": [
+        "官网约 60 tokens/s 属厂商标称；并非本项目实测"
+      ],
+      "facts_verified_at": "2026-08-27",
+      "facts_status_this_refresh": "carried_forward_not_reverified",
+      "capability_evidence_checked_at": "2026-09-18",
+      "capability_evidence_status": "no_new_observation_in_selected_sources"
+    }
+  },
+  "benchmark_snapshots": {
+    "lmarena": [
+      {
+        "id": "arena-text:claude-fable-5-high",
+        "model_variant": "claude-fable-5-high",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5",
+        "rank": 1,
+        "score": 1506,
+        "uncertainty": 5,
+        "rank_range": [
+          1,
+          7
+        ],
+        "votes": 30057,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:claude-fable-5.1-max",
+        "model_variant": "claude-fable-5.1-max",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5.1",
+        "rank": 5,
+        "score": 1498,
+        "uncertainty": 8,
+        "rank_range": [
+          1,
+          15
+        ],
+        "votes": 5783,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gemini-3.8-flash-high",
+        "model_variant": "gemini-3.8-flash-high",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.8-flash",
+        "rank": 9,
+        "score": 1493,
+        "uncertainty": 9,
+        "rank_range": [
+          1,
+          24
+        ],
+        "votes": 5076,
+        "metric": "arena_rating",
+        "preliminary": true
+      },
+      {
+        "id": "arena-text:claude-opus-5-high",
+        "model_variant": "claude-opus-5-high",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-opus-5",
+        "rank": 10,
+        "score": 1493,
+        "uncertainty": 4,
+        "rank_range": [
+          4,
+          19
+        ],
+        "votes": 42617,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gemini-3.7-flash-high",
+        "model_variant": "gemini-3.7-flash-high",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.7-flash",
+        "rank": 12,
+        "score": 1490,
+        "uncertainty": 8,
+        "rank_range": [
+          3,
+          27
+        ],
+        "votes": 5640,
+        "metric": "arena_rating",
+        "preliminary": true
+      },
+      {
+        "id": "arena-text:gemini-3.1-pro-preview",
+        "model_variant": "gemini-3.1-pro-preview",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.1-pro-preview",
+        "rank": 15,
+        "score": 1487,
+        "uncertainty": 3,
+        "rank_range": [
+          7,
+          24
+        ],
+        "votes": 106951,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:kimi-k3-max",
+        "model_variant": "kimi-k3-max",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "kimi-k3",
+        "rank": 17,
+        "score": 1485,
+        "uncertainty": 5,
+        "rank_range": [
+          7,
+          30
+        ],
+        "votes": 20987,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gpt-5.6-sol-xhigh",
+        "model_variant": "gpt-5.6-sol-xhigh",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-sol",
+        "rank": 18,
+        "score": 1483,
+        "uncertainty": 5,
+        "rank_range": [
+          9,
+          32
+        ],
+        "votes": 27069,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:glm-5.3-max",
+        "model_variant": "glm-5.3-max",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3",
+        "rank": 19,
+        "score": 1483,
+        "uncertainty": 6,
+        "rank_range": [
+          7,
+          37
+        ],
+        "votes": 10960,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:qwen3.8-max",
+        "model_variant": "qwen3.8-max",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-max",
+        "rank": 22,
+        "score": 1481,
+        "uncertainty": 6,
+        "rank_range": [
+          10,
+          39
+        ],
+        "votes": 16670,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gpt-6-astra-max",
+        "model_variant": "gpt-6-astra-max",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-6-astra",
+        "rank": 24,
+        "score": 1480,
+        "uncertainty": 12,
+        "rank_range": [
+          5,
+          51
+        ],
+        "votes": 2693,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gpt-5.6-terra-xhigh",
+        "model_variant": "gpt-5.6-terra-xhigh",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-terra",
+        "rank": 45,
+        "score": 1466,
+        "uncertainty": 5,
+        "rank_range": [
+          28,
+          59
+        ],
+        "votes": 28119,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:deepseek-v4-pro-high-20260813",
+        "model_variant": "deepseek-v4-pro-high-20260813",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "deepseek-v4-pro",
+        "rank": 50,
+        "score": 1463,
+        "uncertainty": 7,
+        "rank_range": [
+          28,
+          68
+        ],
+        "votes": 9008,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:claude-sonnet-5-high",
+        "model_variant": "claude-sonnet-5-high",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-sonnet-5",
+        "rank": 51,
+        "score": 1461,
+        "uncertainty": 5,
+        "rank_range": [
+          41,
+          68
+        ],
+        "votes": 35301,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:gpt-5.6-luna-xhigh",
+        "model_variant": "gpt-5.6-luna-xhigh",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-luna",
+        "rank": 67,
+        "score": 1452,
+        "uncertainty": 5,
+        "rank_range": [
+          50,
+          79
+        ],
+        "votes": 28547,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-text:deepseek-v4-flash",
+        "model_variant": "deepseek-v4-flash",
+        "source_id": "arena-text",
+        "source_url": "https://arena.ai/leaderboard/text",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "deepseek-v4-flash",
+        "rank": 92,
+        "score": 1436,
+        "uncertainty": 4,
+        "rank_range": [
+          79,
+          108
+        ],
+        "votes": 48887,
+        "metric": "arena_rating",
+        "preliminary": false
+      }
+    ],
+    "arena_code": [
+      {
+        "id": "arena-code:gpt-6-astra-max",
+        "model_variant": "gpt-6-astra-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-6-astra",
+        "rank": 1,
+        "score": 1800,
+        "uncertainty": 16,
+        "rank_range": [
+          1,
+          1
+        ],
+        "votes": 2281,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:claude-fable-5.1-max",
+        "model_variant": "claude-fable-5.1-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5.1",
+        "rank": 2,
+        "score": 1758,
+        "uncertainty": 14,
+        "rank_range": [
+          2,
+          2
+        ],
+        "votes": 3036,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:claude-opus-5-max",
+        "model_variant": "claude-opus-5-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-opus-5",
+        "rank": 3,
+        "score": 1687,
+        "uncertainty": 7,
+        "rank_range": [
+          3,
+          6
+        ],
+        "votes": 12087,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:qwen3.8-max-0902",
+        "model_variant": "qwen3.8-max-0902",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-max-0902",
+        "rank": 4,
+        "score": 1681,
+        "uncertainty": 15,
+        "rank_range": [
+          3,
+          7
+        ],
+        "votes": 2262,
+        "metric": "arena_rating",
+        "preliminary": true
+      },
+      {
+        "id": "arena-code:kimi-k3-max",
+        "model_variant": "kimi-k3-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "kimi-k3",
+        "rank": 5,
+        "score": 1674,
+        "uncertainty": 11,
+        "rank_range": [
+          3,
+          8
+        ],
+        "votes": 4547,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:qwen3.8-max",
+        "model_variant": "qwen3.8-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-max",
+        "rank": 6,
+        "score": 1671,
+        "uncertainty": 12,
+        "rank_range": [
+          3,
+          8
+        ],
+        "votes": 3221,
+        "metric": "arena_rating",
+        "preliminary": true
+      },
+      {
+        "id": "arena-code:grok-4.6-high",
+        "model_variant": "grok-4.6-high",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "grok-4.6",
+        "rank": 13,
+        "score": 1618,
+        "uncertainty": 10,
+        "rank_range": [
+          9,
+          17
+        ],
+        "votes": 4282,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:gpt-5.6-sol-xhigh (codex-harness)",
+        "model_variant": "gpt-5.6-sol-xhigh (codex-harness)",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": "codex-harness",
+        "model_record_id": "gpt-5.6-sol",
+        "rank": 14,
+        "score": 1617,
+        "uncertainty": 7,
+        "rank_range": [
+          9,
+          17
+        ],
+        "votes": 11916,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:glm-5.3-max",
+        "model_variant": "glm-5.3-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3",
+        "rank": 15,
+        "score": 1614,
+        "uncertainty": 11,
+        "rank_range": [
+          9,
+          17
+        ],
+        "votes": 3725,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:deepseek-v4.1-flash-max",
+        "model_variant": "deepseek-v4.1-flash-max",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "deepseek-v4.1-flash",
+        "rank": 16,
+        "score": 1614,
+        "uncertainty": 17,
+        "rank_range": [
+          9,
+          20
+        ],
+        "votes": 1361,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:glm-5.3-flash",
+        "model_variant": "glm-5.3-flash",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3-flash",
+        "rank": 17,
+        "score": 1607,
+        "uncertainty": 12,
+        "rank_range": [
+          11,
+          20
+        ],
+        "votes": 2925,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:gemini-3.8-flash-high",
+        "model_variant": "gemini-3.8-flash-high",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.8-flash",
+        "rank": 23,
+        "score": 1568,
+        "uncertainty": 12,
+        "rank_range": [
+          20,
+          27
+        ],
+        "votes": 2732,
+        "metric": "arena_rating",
+        "preliminary": true
+      },
+      {
+        "id": "arena-code:claude-sonnet-5-high",
+        "model_variant": "claude-sonnet-5-high",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-sonnet-5",
+        "rank": 33,
+        "score": 1537,
+        "uncertainty": 7,
+        "rank_range": [
+          28,
+          34
+        ],
+        "votes": 9296,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:gpt-5.6-terra-xhigh (codex-harness)",
+        "model_variant": "gpt-5.6-terra-xhigh (codex-harness)",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": "codex-harness",
+        "model_record_id": "gpt-5.6-terra",
+        "rank": 35,
+        "score": 1521,
+        "uncertainty": 8,
+        "rank_range": [
+          34,
+          43
+        ],
+        "votes": 7694,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:gpt-5.6-luna-xhigh (codex-harness)",
+        "model_variant": "gpt-5.6-luna-xhigh (codex-harness)",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": "codex-harness",
+        "model_record_id": "gpt-5.6-luna",
+        "rank": 37,
+        "score": 1519,
+        "uncertainty": 8,
+        "rank_range": [
+          34,
+          43
+        ],
+        "votes": 7828,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-code:minimax-m3",
+        "model_variant": "minimax-m3",
+        "source_id": "arena-code",
+        "source_url": "https://arena.ai/leaderboard/code",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-11",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "minimax-m3",
+        "rank": 48,
+        "score": 1487,
+        "uncertainty": 6,
+        "rank_range": [
+          44,
+          53
+        ],
+        "votes": 12686,
+        "metric": "arena_rating",
+        "preliminary": false
+      }
+    ],
+    "arena_vision": [
+      {
+        "id": "arena-vision:claude-fable-5-high",
+        "model_variant": "claude-fable-5-high",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5",
+        "rank": 1,
+        "score": 1310,
+        "uncertainty": 8,
+        "rank_range": [
+          1,
+          8
+        ],
+        "votes": 11304,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:qwen3.8-max",
+        "model_variant": "qwen3.8-max",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-max",
+        "rank": 2,
+        "score": 1302,
+        "uncertainty": 8,
+        "rank_range": [
+          1,
+          14
+        ],
+        "votes": 8665,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:claude-opus-5-high",
+        "model_variant": "claude-opus-5-high",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-opus-5",
+        "rank": 10,
+        "score": 1289,
+        "uncertainty": 8,
+        "rank_range": [
+          2,
+          30
+        ],
+        "votes": 11599,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:claude-fable-5.1-max",
+        "model_variant": "claude-fable-5.1-max",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5.1",
+        "rank": 11,
+        "score": 1289,
+        "uncertainty": 12,
+        "rank_range": [
+          2,
+          31
+        ],
+        "votes": 2701,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gpt-5.6-sol-xhigh",
+        "model_variant": "gpt-5.6-sol-xhigh",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-sol",
+        "rank": 14,
+        "score": 1286,
+        "uncertainty": 8,
+        "rank_range": [
+          2,
+          31
+        ],
+        "votes": 7729,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gpt-6-astra-max",
+        "model_variant": "gpt-6-astra-max",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-6-astra",
+        "rank": 16,
+        "score": 1284,
+        "uncertainty": 17,
+        "rank_range": [
+          2,
+          38
+        ],
+        "votes": 1367,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gemini-3.1-pro-preview",
+        "model_variant": "gemini-3.1-pro-preview",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.1-pro-preview",
+        "rank": 26,
+        "score": 1279,
+        "uncertainty": 5,
+        "rank_range": [
+          8,
+          35
+        ],
+        "votes": 40691,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:glm-5.3-flash",
+        "model_variant": "glm-5.3-flash",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3-flash",
+        "rank": 30,
+        "score": 1275,
+        "uncertainty": 12,
+        "rank_range": [
+          6,
+          41
+        ],
+        "votes": 3110,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gpt-5.6-terra-xhigh",
+        "model_variant": "gpt-5.6-terra-xhigh",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-terra",
+        "rank": 32,
+        "score": 1267,
+        "uncertainty": 8,
+        "rank_range": [
+          20,
+          42
+        ],
+        "votes": 7726,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:claude-sonnet-5-high",
+        "model_variant": "claude-sonnet-5-high",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-sonnet-5",
+        "rank": 33,
+        "score": 1266,
+        "uncertainty": 8,
+        "rank_range": [
+          20,
+          42
+        ],
+        "votes": 10289,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gemini-3.5-flash-lite",
+        "model_variant": "gemini-3.5-flash-lite",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.5-flash-lite",
+        "rank": 34,
+        "score": 1266,
+        "uncertainty": 10,
+        "rank_range": [
+          19,
+          45
+        ],
+        "votes": 5254,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:grok-4.6-high",
+        "model_variant": "grok-4.6-high",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "grok-4.6",
+        "rank": 35,
+        "score": 1265,
+        "uncertainty": 11,
+        "rank_range": [
+          20,
+          48
+        ],
+        "votes": 3632,
+        "metric": "arena_rating",
+        "preliminary": false
+      },
+      {
+        "id": "arena-vision:gpt-5.6-luna-xhigh",
+        "model_variant": "gpt-5.6-luna-xhigh",
+        "source_id": "arena-vision",
+        "source_url": "https://arena.ai/leaderboard/vision",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": "2026-09-13",
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-luna",
+        "rank": 40,
+        "score": 1258,
+        "uncertainty": 8,
+        "rank_range": [
+          31,
+          50
+        ],
+        "votes": 7793,
+        "metric": "arena_rating",
+        "preliminary": false
+      }
+    ],
+    "artificial_analysis": [
+      {
+        "id": "aa-v43:Claude Fable 5.1 (max with fallback)",
+        "model_variant": "Claude Fable 5.1 (max with fallback)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-fable-5.1",
+        "intelligence_index": 53,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-6 Astra (max)",
+        "model_variant": "GPT-6 Astra (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-6-astra",
+        "intelligence_index": 53,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-6 Astra (medium)",
+        "model_variant": "GPT-6 Astra (medium)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-6-astra",
+        "intelligence_index": 50,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Claude Opus 5 (max)",
+        "model_variant": "Claude Opus 5 (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-opus-5",
+        "intelligence_index": 51,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-5.6 Sol (max)",
+        "model_variant": "GPT-5.6 Sol (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-sol",
+        "intelligence_index": 47,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Qwen3.8 Max (0902)",
+        "model_variant": "Qwen3.8 Max (0902)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-max-0902",
+        "intelligence_index": 45,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GLM-5.3 (max)",
+        "model_variant": "GLM-5.3 (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3",
+        "intelligence_index": 45,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Grok 4.6 (high)",
+        "model_variant": "Grok 4.6 (high)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "grok-4.6",
+        "intelligence_index": 44,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Kimi K3 (max)",
+        "model_variant": "Kimi K3 (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "kimi-k3",
+        "intelligence_index": 44,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-5.6 Terra (max)",
+        "model_variant": "GPT-5.6 Terra (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-terra",
+        "intelligence_index": 42,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GLM-5.3-Flash",
+        "model_variant": "GLM-5.3-Flash",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "glm-5.3-flash",
+        "intelligence_index": 42,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Gemini 3.8 Flash (high)",
+        "model_variant": "Gemini 3.8 Flash (high)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.8-flash",
+        "intelligence_index": 41,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:DeepSeek V4.1 Flash (max)",
+        "model_variant": "DeepSeek V4.1 Flash (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "deepseek-v4.1-flash",
+        "intelligence_index": 40,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Qwen3.8-Flash-Next",
+        "model_variant": "Qwen3.8-Flash-Next",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "qwen3.8-flash-next",
+        "intelligence_index": 40,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Claude Sonnet 5 (max)",
+        "model_variant": "Claude Sonnet 5 (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "claude-sonnet-5",
+        "intelligence_index": 38,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-5.6 Luna (max)",
+        "model_variant": "GPT-5.6 Luna (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-luna",
+        "intelligence_index": 38,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:DeepSeek V4 Pro 0813 (max)",
+        "model_variant": "DeepSeek V4 Pro 0813 (max)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "deepseek-v4-pro",
+        "intelligence_index": 36,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-5.3 Codex (xhigh)",
+        "model_variant": "GPT-5.3 Codex (xhigh)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.3-codex",
+        "intelligence_index": 33,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": "*",
+        "marker_interpretation": "source marker retained; not interpreted as full coverage"
+      },
+      {
+        "id": "aa-v43:Gemini 3.1 Pro Preview",
+        "model_variant": "Gemini 3.1 Pro Preview",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.1-pro-preview",
+        "intelligence_index": 30,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:MiniMax-M3",
+        "model_variant": "MiniMax-M3",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "minimax-m3",
+        "intelligence_index": 30,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:Gemini 3.5 Flash-Lite",
+        "model_variant": "Gemini 3.5 Flash-Lite",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gemini-3.5-flash-lite",
+        "intelligence_index": 23,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      },
+      {
+        "id": "aa-v43:GPT-5.6 Luna (low)",
+        "model_variant": "GPT-5.6 Luna (low)",
+        "source_id": "aa-v43",
+        "source_url": "https://artificialanalysis.ai/leaderboards/models",
+        "retrieved_at": "2026-09-18",
+        "leaderboard_date": null,
+        "evidence_type": "independent",
+        "harness": null,
+        "model_record_id": "gpt-5.6-luna",
+        "intelligence_index": 22,
+        "index_version": "4.3",
+        "metric": "intelligence_index",
+        "score_marker": null,
+        "marker_interpretation": null
+      }
+    ],
+    "vendor_reported": [
+      {
+        "id": "deepseek-v41:GPQA Diamond",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "GPQA Diamond",
+        "metric": "pass@1_percent",
+        "score": 90.9,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": null,
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:HLE",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "HLE",
+        "metric": "pass@1_percent",
+        "score": 36.8,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": null,
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:Terminal-Bench 2.1",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "Terminal-Bench 2.1",
+        "metric": "pass@1_percent",
+        "score": 90.6,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "DeepSeek Harness Minimal",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:Terminal-Bench 4.0",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "Terminal-Bench 4.0",
+        "metric": "pass@1_percent",
+        "score": 31.2,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "DeepSeek Harness Minimal",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:DeepSWE v1.1",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "DeepSWE v1.1",
+        "metric": "resolved_percent",
+        "score": 74.2,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "mini-SWE",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:ProgramBench",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "ProgramBench",
+        "metric": "almost@1_percent",
+        "score": 20.3,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "DeepSeek Harness Minimal",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:AutomationBench",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "AutomationBench",
+        "metric": "pass@1_percent",
+        "score": 54.8,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "official scaffold",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      },
+      {
+        "id": "deepseek-v41:Chartography w/tools",
+        "model_variant": "DeepSeek-V4.1-Flash reasoning_effort=100",
+        "model_record_id": "deepseek-v4.1-flash",
+        "benchmark": "Chartography w/tools",
+        "metric": "pass@1_percent",
+        "score": 78.9,
+        "evidence_type": "vendor_reported",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "retrieved_at": "2026-09-18",
+        "harness": "Claude Code",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "independent": false
+      }
+    ]
+  },
+  "facts_snapshot_date": "2026-08-27",
+  "previous_snapshot": {
+    "path": "benchmarks/model_evidence_2026-08-27.json",
+    "sha256": "4f69c0adc26963f3b06734744adeb1faa4ccabf577c6b1db61c12147f9909305"
+  },
+  "routing_effect": "none: external evidence only; routing priors and outcome posteriors unchanged",
+  "methodology_sources": [
+    {
+      "source_url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+      "retrieved_at": "2026-09-18",
+      "index_version": "4.3",
+      "note": "不使用此英语文本指数推断中文或视觉能力。"
+    }
+  ],
+  "observed_models": {
+    "gpt-6-astra": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": "gpt-6-astra",
+      "benchmark_refs": [
+        "arena-text:gpt-6-astra-max",
+        "arena-code:gpt-6-astra-max",
+        "arena-vision:gpt-6-astra-max",
+        "aa-v43:GPT-6 Astra (max)",
+        "aa-v43:GPT-6 Astra (medium)"
+      ],
+      "identity_source": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "identity_verified_at": "2026-09-18",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ]
+    },
+    "claude-fable-5.1": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-text:claude-fable-5.1-max",
+        "arena-code:claude-fable-5.1-max",
+        "arena-vision:claude-fable-5.1-max",
+        "aa-v43:Claude Fable 5.1 (max with fallback)"
+      ]
+    },
+    "deepseek-v4.1-flash": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": "deepseek-flash",
+      "benchmark_refs": [
+        "arena-code:deepseek-v4.1-flash-max",
+        "aa-v43:DeepSeek V4.1 Flash (max)",
+        "deepseek-v41:GPQA Diamond",
+        "deepseek-v41:HLE",
+        "deepseek-v41:Terminal-Bench 2.1",
+        "deepseek-v41:Terminal-Bench 4.0",
+        "deepseek-v41:DeepSWE v1.1",
+        "deepseek-v41:ProgramBench",
+        "deepseek-v41:AutomationBench",
+        "deepseek-v41:Chartography w/tools"
+      ],
+      "identity_source": "https://api-docs.deepseek.com/updates/",
+      "identity_verified_at": "2026-09-18",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "availability": "official documentation; account and campus deployment not verified"
+    },
+    "qwen3.8-max-0902": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-code:qwen3.8-max-0902",
+        "aa-v43:Qwen3.8 Max (0902)"
+      ]
+    },
+    "glm-5.3": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-text:glm-5.3-max",
+        "arena-code:glm-5.3-max",
+        "aa-v43:GLM-5.3 (max)"
+      ]
+    },
+    "glm-5.3-flash": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-code:glm-5.3-flash",
+        "arena-vision:glm-5.3-flash",
+        "aa-v43:GLM-5.3-Flash"
+      ]
+    },
+    "gemini-3.8-flash": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-text:gemini-3.8-flash-high",
+        "arena-code:gemini-3.8-flash-high",
+        "aa-v43:Gemini 3.8 Flash (high)"
+      ]
+    },
+    "qwen3.8-flash-next": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "aa-v43:Qwen3.8-Flash-Next"
+      ]
+    },
+    "gpt-5.3-codex": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "aa-v43:GPT-5.3 Codex (xhigh)"
+      ]
+    },
+    "minimax-m3": {
+      "status": "evidence_only_not_added_to_routing",
+      "api_model_id": null,
+      "benchmark_refs": [
+        "arena-code:minimax-m3",
+        "aa-v43:MiniMax-M3"
+      ]
+    }
+  },
+  "identity_notices": [
+    {
+      "model_record_id": "deepseek-v4-flash",
+      "source_url": "https://api-docs.deepseek.com/updates/",
+      "retrieved_at": "2026-09-18",
+      "effective_date": "2026-09-10",
+      "official_alias_now_serves": "deepseek-v4.1-flash",
+      "warning": "历史 V4 分数不代表当前官方别名后端；校内和中转同名服务不能据此认定升级。"
+    }
+  ],
+  "source_conflicts": [
+    {
+      "model_record_id": "deepseek-v4.1-flash",
+      "benchmark": "NL2Repo-Bench",
+      "observations": [
+        {
+          "score": 65.4,
+          "source_url": "https://api-docs.deepseek.com/updates/"
+        },
+        {
+          "score": 64.0,
+          "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash"
+        }
+      ],
+      "retrieved_at": "2026-09-18",
+      "resolved": false,
+      "adopted_score": null,
+      "note": "两份厂商材料数字不一致；未选择、平均或用于路由。"
+    }
+  ],
+  "coverage_gaps": [
+    {
+      "source_url": "https://www.swebench.com/",
+      "retrieved_at": "2026-09-18",
+      "status": "no_score_rows_in_retrieved_page",
+      "note": "取得方法介绍，未取得可核对的当前排行数值；不从二手汇总填补。"
+    },
+    {
+      "source_url": "https://www.tbench.ai/?version=2.0",
+      "retrieved_at": "2026-09-18",
+      "status": "version_redirect_and_no_score_rows",
+      "note": "旧 2.0 链接显示 4.0 页面描述且无可核对行；独立成绩未录入，厂商自报单列。"
+    },
+    {
+      "source_url": "https://arena.ai/leaderboard/vision",
+      "retrieved_at": "2026-09-18",
+      "status": "no_deepseek_match_in_retrieved_page",
+      "note": "不能把官方原生视觉支持等同已取得独立视觉分数。"
+    },
+    {
+      "status": "not_covered",
+      "note": "中文专门评测、embedding 检索、图像/视频生成及本机半卡吞吐，本次未取得可比数据。"
+    }
+  ],
+  "official_sources_verified_this_refresh": [
+    {
+      "url": "https://api-docs.deepseek.com/updates/",
+      "retrieved_at": "2026-09-18"
+    },
+    {
+      "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+      "retrieved_at": "2026-09-18"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "retrieved_at": "2026-09-18"
+    }
+  ],
+  "historical_evidence_notice": "旧 official_sources 和模型硬参数保留原日期；旧榜单与旧厂商自报完整保存在 previous_snapshot，不冒充本次结果。"
+}

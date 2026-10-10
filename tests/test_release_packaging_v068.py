@@ -17,9 +17,9 @@ from costweave.version import ACTIVE_WORK_PACKAGE, VERSION_TAG, __version__
 
 class ReleasePackagingV068Tests(unittest.TestCase):
     def test_public_identity_has_one_canonical_value(self):
-        self.assertEqual("0.6.9", __version__)
-        self.assertEqual("v0.6.9", VERSION_TAG)
-        self.assertEqual("Authoritative Decision Bridge", ACTIVE_WORK_PACKAGE)
+        self.assertEqual("0.6.9.1", __version__)
+        self.assertEqual("v0.6.9.1", VERSION_TAG)
+        self.assertEqual("Real-Evaluation Stabilization Freeze", ACTIVE_WORK_PACKAGE)
 
     def test_generated_and_sensitive_paths_are_rejected(self):
         for path in (
@@ -43,14 +43,14 @@ class ReleasePackagingV068Tests(unittest.TestCase):
             self.assertGreater(result["files"], 100)
             self.assertTrue((staging / "costweave" / "version.py").is_file())
             self.assertFalse((staging / "full_v064_tests.log").exists())
-            output = root / "CostWeave-v0.6.9.zip"
+            output = root / "CostWeave-v0.6.9.1.zip"
             create_source_zip(staging, output)
             validation = validate_archive(output)
             self.assertEqual(0, validation["violations"])
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
             self.assertTrue(
-                all(name.startswith("CostWeave-v0.6.9/") for name in names)
+                all(name.startswith("CostWeave-v0.6.9.1/") for name in names)
             )
 
     def test_stage_refuses_unmarked_replacement(self):

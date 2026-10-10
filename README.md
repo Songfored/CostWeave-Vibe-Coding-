@@ -4,17 +4,17 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.9-blue.svg)](costweave/version.py)
-[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.9.md)
+[![Version](https://img.shields.io/badge/version-0.6.9.1-blue.svg)](costweave/version.py)
+[![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/FREEZE-v0.6.9.1.md)
 
 ## 项目状态
 
-CostWeave 当前处于 **v0.6.9 权威决策桥阶段**。
+CostWeave 当前处于 **v0.6.9.1 真实实验稳定化半成品冻结阶段**。
 
 | 项目 | 当前结论 |
 |---|---|
 | 稳定工程基线 | v0.5.8.4 |
-| 当前开发版本 | v0.6.9 Authoritative Decision Bridge（候选版） |
+| 当前开发版本 | v0.6.9.1 Real-Evaluation Stabilization Freeze（半成品冻结版） |
 | 工程就绪 | 仅在全部发布门禁通过时为 `true` |
 | 生产就绪 | `false` |
 | 证据等级 | E0：离线、模拟与确定性夹具证据 |
@@ -201,7 +201,7 @@ WP07 只允许影子指标进入证据链，不允许改变基线路由、晋升
 - `.gitignore` 排除本地工作区、输出、日志、运行数据库、缓存与代理元数据；
 - `costweave-package` 在 `work/` 的干净 staging 中构建，不读取根目录旧 `build/`；
 - wheel、sdist、源码 zip、发布清单与 SHA256 清单均经过归档内容检查；
-- 当前 `.git` 元数据不是有效仓库，未擅自覆盖，恢复步骤见[Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)。
+- Git 历史已按版本快照恢复，远端标签保留 v0.2 至 v0.6.9 的演进记录，原先的远端主分支另有安全备份。
 
 ## v0.6.9 权威决策桥
 
@@ -242,6 +242,26 @@ costweave
 ```bash
 costweave --port 8766
 ```
+
+Windows 用户可以使用仓库内的一键本地配置，不需要激活虚拟环境：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
+.\scripts\configure-models.ps1
+.\scripts\run-local.ps1
+```
+
+该方式会创建 `.venv`、生成 Git 忽略的 `.env.local`，并把目录与运行数据库放到 `work/local-data/`。模型配置脚本已经预置 DeepSeek 官方平台和 TravelToken 中转地址；它会复用已有密钥，只在缺少密钥时要求输入，并自动查询模型列表和选择匹配型号。查询模型列表不会发送推理请求。默认配置仍明确关闭外部适配器、付费调用和 Canary。详细说明见[本地环境与真实模型评测指南](docs/REAL_MODEL_EVALUATION.md)。
+
+经用户明确授权预算后，可运行一次受限的三渠道真实冒烟评测：
+
+```powershell
+.\scripts\run-real-smoke.ps1 -BudgetUsd 0.5 -AuthorizePaidCalls
+```
+
+该入口固定每个渠道一次请求、零自动重试和 512 输出 Token 上限，并在脚本结束时恢复关闭付费开关。它只能验证真实调用、Token/延迟归因和确定性输出，不构成模型能力排行或商业降本证据。
+
+真实计费采用双口径：`reference_list_cost_usd` 只用于保守预算预留，`estimated_billed_cost_cny` 才是按账号折扣、峰谷时段和缓存规则估算的人民币实扣。平台账单到达后始终覆盖本地估算，并保留估算残差用于继续校准。2026-09-02 首轮完整对账确认中转站虽然错误显示 `$`，实际仍以人民币结算；历史三渠道真实实验对账总额为 ¥1.6151。详见[真实实验计费对账](docs/PRE_V07_BILLING_RECONCILIATION_20260902.md)。
 
 ## 常用离线命令
 
@@ -302,12 +322,14 @@ Web 界面可编辑模型，也可导入 JSON 或 CSV。JSON 的最小示意如�
 | 环境变量 | 作用 | 默认值 |
 |---|---|---|
 | `COSTWEAVE_CATALOG_PATH` | 自定义模型目录路径 | 项目默认目录 |
-| `COSTWEAVE_RUNTIME_V4` | 启用持久化运行时 | 关闭 |
-| `COSTWEAVE_RUNTIME_DB` | 指定运行时 SQLite 文件 | 未指定 |
+| `COSTWEAVE_RUNTIME_V4` | 启用持久化运行时 | 开启 |
+| `COSTWEAVE_RUNTIME_DB` | 指定运行时 SQLite 文件 | `%USERPROFILE%/.costweave/runtime-v4.sqlite3` |
+| `COSTWEAVE_PROVIDER_REGISTRY` | 自动发现的非密钥 Provider 配置 | `work/local-data/providers.local.json` |
 | `COSTWEAVE_EXPERIMENTAL_ADAPTERS` | 允许实验性外部适配边界 | 关闭 |
 | `COSTWEAVE_PAID_CALLS` | 允许付费调用层级 | 关闭 |
-| `COSTWEAVE_MEDIA_WORKFLOW` | 启用媒体工作流边界 | 关闭 |
-| `COSTWEAVE_PARALLEL_RUNTIME` | 启用并行运行时能力 | 关闭 |
+| `COSTWEAVE_MEDIA_WORKFLOW` | 启用媒体工作流边界 | 开启 |
+| `COSTWEAVE_PARALLEL_RUNTIME` | 启用并行运行时能力 | 开启 |
+| `COSTWEAVE_CANARY_ENABLED` | 允许受限 Canary 晋级 | 关闭 |
 
 安全原则是**默认拒绝**。仅打开环境变量并不足以产生外部调用：执行仍需通过端点、密钥引用、项目范围、会话有效期、预算、调用次数、Token 上限和明确授权等检查；默认发行版没有内置真实 Shadow 执行器。
 
@@ -390,6 +412,7 @@ docs/                            # 架构、规格、迁移、数据卡和验收
 - [v0.6.9 策略卡](docs/POLICY_CARD-v0.6.9.md)
 - [v0.6.9 安全边界](docs/SECURITY_REPORT-v0.6.9.md)
 - [v0.6.9 安装与复现](docs/INSTALL_REPRODUCE-v0.6.9.md)
+- [本地环境与真实模型评测指南](docs/REAL_MODEL_EVALUATION.md)
 - [v0.6.9 迁移说明](docs/V0.6.9_MIGRATION.md)
 - [v0.6.8 Git 恢复说明](docs/GIT_RECOVERY-v0.6.8.md)
 - [总体架构](docs/ARCHITECTURE.md)

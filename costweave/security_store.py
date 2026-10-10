@@ -24,12 +24,92 @@ from .security_boundary import (
 
 _PROJECT_OPERATION_REGISTRY_LOCK = threading.Lock()
 _PROJECT_OPERATION_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_PROJECT_SESSION_GATES: dict[tuple[str, str], "_ProjectSessionGate"] = {}
+
+
+class _ProjectSessionGate:
+    """Writer-preferring project gate for long-lived authorized sessions.
+
+    Ordinary sessions share the read side, while logical revocation owns the
+    write side.  Short durable mutations retain their separate RLock below.
+    """
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.RLock())
+        self._readers = 0
+        self._reader_depth: dict[int, int] = {}
+        self._writer_thread: int | None = None
+        self._writer_depth = 0
+        self._waiting_writers = 0
+
+    @contextmanager
+    def shared(self):
+        thread_id = threading.get_ident()
+        with self._condition:
+            reentrant = self._reader_depth.get(thread_id, 0) > 0
+            owns_writer = self._writer_thread == thread_id
+            while (
+                not reentrant
+                and not owns_writer
+                and (self._writer_thread is not None or self._waiting_writers > 0)
+            ):
+                self._condition.wait()
+            self._readers += 1
+            self._reader_depth[thread_id] = self._reader_depth.get(thread_id, 0) + 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                depth = self._reader_depth.get(thread_id, 0)
+                if depth <= 1:
+                    self._reader_depth.pop(thread_id, None)
+                else:
+                    self._reader_depth[thread_id] = depth - 1
+                self._readers -= 1
+                if self._readers == 0:
+                    self._condition.notify_all()
+
+    @contextmanager
+    def exclusive(self):
+        thread_id = threading.get_ident()
+        with self._condition:
+            if self._writer_thread == thread_id:
+                self._writer_depth += 1
+            else:
+                if self._reader_depth.get(thread_id, 0):
+                    raise RuntimeError(
+                        "project session cannot be upgraded to revocation"
+                    )
+                self._waiting_writers += 1
+                try:
+                    while self._writer_thread is not None or self._readers:
+                        self._condition.wait()
+                    self._writer_thread = thread_id
+                    self._writer_depth = 1
+                finally:
+                    self._waiting_writers -= 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                if self._writer_thread != thread_id or self._writer_depth <= 0:
+                    raise RuntimeError("project session writer ownership was lost")
+                self._writer_depth -= 1
+                if self._writer_depth == 0:
+                    self._writer_thread = None
+                    self._condition.notify_all()
 
 
 def _project_operation_lock(path: Path, project_id: str) -> threading.RLock:
     key = (str(path.resolve(strict=False)).casefold(), project_id)
     with _PROJECT_OPERATION_REGISTRY_LOCK:
         return _PROJECT_OPERATION_LOCKS.setdefault(key, threading.RLock())
+
+
+def _project_session_gate(path: Path, project_id: str) -> _ProjectSessionGate:
+    key = (str(path.resolve(strict=False)).casefold(), project_id)
+    with _PROJECT_OPERATION_REGISTRY_LOCK:
+        return _PROJECT_SESSION_GATES.setdefault(key, _ProjectSessionGate())
 
 
 class SecurityStoreError(ValueError):
@@ -124,6 +204,20 @@ class SecurityStore:
         with _project_operation_lock(self.path, project):
             yield self.ensure_project_active(project)
 
+    @contextmanager
+    def active_project_session(self, project_id: str):
+        """Share a long operation while remaining atomic with revocation.
+
+        Multiple calls for one project may execute concurrently.  Once a
+        revocation writer is waiting, no new session may enter; after the
+        existing sessions drain, the tombstone is committed before readers
+        can continue and their active-project check then fails closed.
+        """
+
+        project = normalize_project_id(project_id)
+        with _project_session_gate(self.path, project).shared():
+            yield self.ensure_project_active(project)
+
     def revoke_project(
         self,
         project_id: str,
@@ -167,6 +261,7 @@ class SecurityStore:
         raw = _canonical_json(tombstone)
         digest = _digest(raw)
         with (
+            _project_session_gate(self.path, project).exclusive(),
             _project_operation_lock(self.path, project),
             self._lock,
             self._connection() as connection,

@@ -1,5 +1,9 @@
 # CostWeave v0.6.9 安装与复现
 
+本文用于发布工程和冻结产物复现。首次在 Windows 本机运行项目，请先阅读[本地环境与真实模型评测指南](REAL_MODEL_EVALUATION.md)。
+
+本机模型渠道使用 `.\scripts\configure-models.ps1` 自动配置。该脚本只进行模型发现，不属于发布复现，也不会启用付费推理。
+
 ## 从源码运行
 
 ```powershell

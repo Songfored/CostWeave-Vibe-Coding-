@@ -69,11 +69,11 @@ class ServerTests(unittest.TestCase):
         status, health = self.fetch_json("/api/health")
         self.assertEqual(200, status)
         self.assertEqual("offline-decision-simulation", health["runtime"])
-        self.assertEqual("0.6.9", health["version"])
+        self.assertEqual("0.6.9.1", health["version"])
         self.assertNotIn("development_version", health)
-        self.assertEqual("v0.6.9", health["version_line"]["active_development"])
+        self.assertEqual("v0.6.9.1", health["version_line"]["active_development"])
         self.assertEqual(
-            "Authoritative Decision Bridge",
+            "Real-Evaluation Stabilization Freeze",
             health["version_line"]["active_work_package"],
         )
         self.assertEqual("v0.6.9", health["decision_bridge"]["schema_version"])
@@ -206,9 +206,9 @@ class ServerTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             page = response.read().decode("utf-8")
-        self.assertIn("v0.6.9", page)
-        self.assertIn("Authoritative Decision Bridge", page)
-        self.assertIn("/styles.css?v=0.6.9", page)
+        self.assertIn("v0.6.9.1", page)
+        self.assertIn("Real-Evaluation Stabilization Freeze", page)
+        self.assertIn("/styles.css?v=0.6.9.1", page)
         self.assertNotIn("{{COSTWEAVE_", page)
 
     def test_unified_evidence_console_and_export_receipt(self):

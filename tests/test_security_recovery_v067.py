@@ -11,10 +11,11 @@ import time
 import unittest
 import urllib.error
 import urllib.request
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from costweave.adapters.http import (
@@ -26,6 +27,7 @@ from costweave.adapters.http import (
     OpenAICompatibleHTTPAdapter,
     UrllibHTTPTransport,
     _PinnedHTTPSConnection,
+    _safe_error_code,
 )
 from costweave.approvals import ApprovalStore
 from costweave.contracts_v4 import canonical_identifier, utc_now
@@ -51,6 +53,7 @@ from costweave.planning_contracts import WorkOrder
 from costweave.security_boundary import (
     PromptInjectionError,
     SecretBroker,
+    SecretLeaseError,
     SecretReference,
     assess_prompt_security,
     prompt_approval_binding,
@@ -212,6 +215,7 @@ class AdapterSecurityRecoveryTests(unittest.TestCase):
         *,
         secret_env: str | None = None,
         output_price: float = 0.0,
+        secret_broker: SecretBroker | None = None,
     ) -> OpenAICompatibleHTTPAdapter:
         return OpenAICompatibleHTTPAdapter(
             ExperimentalAdapterConfig(
@@ -226,6 +230,82 @@ class AdapterSecurityRecoveryTests(unittest.TestCase):
             store=store,
             policy=AdapterRuntimePolicy(True, True),
             transport=transport,
+            secret_broker=secret_broker,
+        )
+
+    def test_project_queue_wait_does_not_expire_secret_before_transport(self) -> None:
+        experiment_id = "experiment_v067_secret_queue"
+        store = self.register(experiment_id)
+        transport = SuccessTransport()
+        adapter = self.adapter(
+            store,
+            transport,
+            secret_env="COSTWEAVE_V067_QUEUE_SECRET",
+            secret_broker=SecretBroker(ttl_seconds=0.1),
+        )
+        request = request_for(
+            experiment_id,
+            idempotency_key="external-security-queue-001",
+        )
+        outcome: list[object] = []
+        started = threading.Event()
+
+        def execute_after_queue() -> None:
+            started.set()
+            try:
+                outcome.append(adapter.execute(request))
+            except Exception as error:  # pragma: no cover - asserted below
+                outcome.append(error)
+
+        blocker = SecurityStore(self.path)
+        clock = {"now": 100.0}
+        operation_attempted = threading.Event()
+        original_operation = adapter.security_store.active_project_operation
+
+        @contextmanager
+        def observed_operation(project_id):
+            operation_attempted.set()
+            with original_operation(project_id):
+                yield
+
+        with patch.dict(
+            os.environ,
+            {"COSTWEAVE_V067_QUEUE_SECRET": "queue-secret-value-123456"},
+        ), patch("costweave.security_boundary.time", SimpleNamespace(monotonic=lambda: clock["now"])), patch.object(
+            adapter.secret_broker, "lease", wraps=adapter.secret_broker.lease
+        ) as issue_lease, patch.object(adapter.security_store, "active_project_operation", observed_operation):
+            with blocker.active_project_operation(request.project_id):
+                worker = threading.Thread(target=execute_after_queue)
+                worker.start()
+                self.assertTrue(started.wait(1.0))
+                self.assertTrue(operation_attempted.wait(2.0))
+                # Advance only the lease clock, not scheduler/HTTP deadlines.
+                # Queue time must not consume a lease; storage speed after
+                # admission is a different invariant tested separately.
+                clock["now"] += 1.0
+                self.assertEqual(0, issue_lease.call_count)
+                self.assertTrue(worker.is_alive())
+            worker.join(5.0)
+            self.assertEqual(1, issue_lease.call_count)
+
+        self.assertEqual(1, len(outcome))
+        self.assertNotIsInstance(outcome[0], Exception)
+        self.assertEqual(1, len(transport.calls))
+
+    def test_secret_lease_expiry_is_not_mislabeled_as_inspection_failure(self) -> None:
+        self.assertEqual(
+            "secret_lease_expired",
+            _safe_error_code(
+                SecretLeaseError("secret lease is closed or expired")
+            ),
+        )
+        self.assertEqual(
+            "secret_inspection_failed",
+            _safe_error_code(
+                SecretLeaseError(
+                    "provider response exceeded the secret inspection limit"
+                )
+            ),
         )
 
     def seed_task(self, *, run_id: str, task_id: str) -> None:

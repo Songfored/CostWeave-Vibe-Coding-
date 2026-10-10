@@ -147,6 +147,7 @@ def stage_source(source_root: Path, staging_root: Path, *, clean: bool = False) 
             )
     _prepare_directory(staging_root, marker=STAGING_MARKER, clean=clean)
     copied: list[str] = []
+    content_manifest: list[str] = []
     for source, relative in _source_files(source_root):
         reason = forbidden_reason(relative)
         if reason is not None:
@@ -155,6 +156,9 @@ def stage_source(source_root: Path, staging_root: Path, *, clean: bool = False) 
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         copied.append(relative.as_posix())
+        content_manifest.append(
+            f"{sha256_file(source)}  {relative.as_posix()}"
+        )
     validate_tree(staging_root, ignored_names={STAGING_MARKER})
     return {
         "source_root": str(source_root),
@@ -163,6 +167,38 @@ def stage_source(source_root: Path, staging_root: Path, *, clean: bool = False) 
         "source_manifest_sha256": hashlib.sha256(
             "\n".join(copied).encode("utf-8")
         ).hexdigest(),
+        "source_content_sha256": hashlib.sha256(
+            "\n".join(content_manifest).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def git_freeze_identity(source_root: Path) -> dict:
+    """Record the Git baseline without pretending a dirty tree is a commit."""
+
+    def run(*arguments: str) -> str:
+        completed = subprocess.run(
+            ["git", *arguments],
+            cwd=source_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else ""
+
+    head = run("rev-parse", "HEAD")
+    branch = run("branch", "--show-current")
+    status = run("status", "--porcelain=v1", "--untracked-files=all")
+    return {
+        "git_head": head or None,
+        "git_branch": branch or None,
+        "working_tree_dirty": bool(status),
+        "working_tree_status_sha256": hashlib.sha256(
+            status.encode("utf-8")
+        ).hexdigest(),
+        "identity_rule": (
+            "source_content_sha256_and_artifact_sha256_are_authoritative_when_dirty"
+        ),
     }
 
 
@@ -327,6 +363,7 @@ def build_release(
         "evidence_level": "E0-local-verification",
         "real_provider_calls": 0,
         "paid_calls": 0,
+        "git_freeze": git_freeze_identity(source_root),
         "clean_staging": stage,
         "archive_validation": validations,
         "artifacts": artifact_rows,
@@ -407,6 +444,7 @@ __all__ = [
     "create_source_tar",
     "create_source_zip",
     "forbidden_reason",
+    "git_freeze_identity",
     "sha256_file",
     "stage_source",
     "validate_archive",

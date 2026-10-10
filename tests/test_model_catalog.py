@@ -5,7 +5,7 @@ from pathlib import Path
 
 from costweave.catalog_store import CatalogStore
 from costweave.domain import RunMode, TaskContract
-from costweave.model_catalog import EVIDENCE_REGISTRY, MODELS, SNAPSHOT_DATE
+from costweave.model_catalog import EVIDENCE_REGISTRY, EVIDENCE_SNAPSHOT_DATE, MODELS, SNAPSHOT_DATE
 from costweave.router import PredictiveRouter, RoutingError
 
 
@@ -41,7 +41,8 @@ class ModelCatalogTests(unittest.TestCase):
     def test_evidence_registry_covers_catalog_and_separates_source_types(self):
         path = Path(__file__).parents[1] / "costweave" / EVIDENCE_REGISTRY
         evidence = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(SNAPSHOT_DATE, evidence["snapshot_date"])
+        self.assertEqual(EVIDENCE_SNAPSHOT_DATE, evidence["snapshot_date"])
+        self.assertEqual(SNAPSHOT_DATE, evidence["facts_snapshot_date"])
         self.assertEqual({model.id for model in MODELS}, set(evidence["models"]))
         self.assertTrue(evidence["official_sources"])
         self.assertTrue(evidence["independent_sources"])

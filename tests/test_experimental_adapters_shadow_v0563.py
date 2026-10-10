@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from costweave.adapters import (
@@ -259,8 +260,40 @@ class ExperimentalAdapterTests(unittest.TestCase):
         self.assertEqual("task_v0563", receipt.telemetry["task_id"])
         self.assertEqual(120, receipt.telemetry["input_tokens"])
         self.assertEqual(30, receipt.telemetry["output_tokens"])
+        self.assertEqual(20, receipt.telemetry["cache_read_input_tokens"])
+        self.assertEqual(0, receipt.telemetry["cache_creation_input_tokens"])
+        self.assertIsNone(receipt.telemetry["estimated_cache_read_cost_cny"])
+        self.assertIsNone(
+            receipt.telemetry["provider_billed_cache_creation_cost_cny"]
+        )
+        self.assertIsNone(receipt.telemetry["provider_billed_cost_cny"])
+        self.assertFalse(receipt.telemetry["invoice_reconciled"])
         self.assertEqual(4, receipt.telemetry["queue_latency_ms"])
         self.assertFalse(receipt.telemetry["commercial_claims_allowed"])
+
+    def test_openai_parser_distinguishes_cache_read_and_creation_tokens(self):
+        self.budget()
+        adapter = self.adapter(ScriptedTransport([]))
+        parsed = adapter.parse_response(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "prompt_tokens_details": {
+                        "cache_read_tokens": 70,
+                        "cache_creation_tokens": 15,
+                    },
+                },
+            }
+        )
+        self.assertEqual(70, parsed.cache_read_input_tokens)
+        self.assertEqual(15, parsed.cache_creation_input_tokens)
 
     def test_idempotent_replay_does_not_call_transport_twice(self):
         self.budget()
@@ -355,6 +388,22 @@ class ExperimentalAdapterTests(unittest.TestCase):
     def test_batch_is_rejected_by_contract(self):
         with self.assertRaises(ExperimentalCallError):
             self.request(batch=True)
+
+    def test_openai_compatible_structured_output_is_explicit(self):
+        request = replace(self.request(), structured_output=True)
+        payload = self.adapter(ScriptedTransport([])).build_payload(request)
+        self.assertEqual(
+            {"type": "json_object"}, payload["response_format"]
+        )
+
+    def test_completed_experiment_has_terminal_ledger_status(self):
+        self.budget()
+        self.assertTrue(self.store.complete_experiment("experiment_v0563"))
+        self.assertEqual(
+            "completed",
+            self.store.experiment_summary("experiment_v0563")["status"],
+        )
+        self.assertFalse(self.store.complete_experiment("experiment_v0563"))
 
     def test_local_adapter_needs_only_experimental_switch(self):
         self.budget(provider_name="local-fixture")

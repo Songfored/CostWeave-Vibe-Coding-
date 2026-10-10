@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CostWeave · 自动实验</title><link rel="stylesheet" href="/auto.css"><script src="/auto.js" defer></script></head>
+<body><main><header><span class="eyebrow">COSTWEAVE / 实验自动化</span><h1>接入模型，自动完成一轮实验。</h1><p>你提供接口和真实账单。任务设计、运行、验收、用量记录和成本校准由实验台完成。</p></header>
+<div id="notice" role="status" aria-live="polite">正在连接本机服务…</div>
+<div class="flow"><span>01 填写接口</span><span>02 自动实验</span><span>03 反馈账单</span><span>04 校准下一轮成本</span></div>
+<section><h2>接入一个模型</h2><p>一个模型保存一个连接。API 地址、密钥与模型 ID 均使用服务商提供的信息；无需先填价格。</p>
+<form id="connect"><input type="hidden" id="connection-id"><div class="grid">
+<label>接口类型<select id="profile"><option value="compatible">通用 / 校内 Chat Completions</option><option value="deepseek">DeepSeek 官方</option><option value="openai">新版 GPT · Chat Completions</option><option value="responses">GPT / Codex · Responses</option></select></label>
+<label>来源名称<input id="label" maxlength="80" placeholder="可选，例如：校内、官方、某中转站"></label>
+<label>API 地址<input id="endpoint" type="url" required placeholder="https://服务商地址/v1"></label><label>模型 ID<input id="model" list="model-options" maxlength="180" placeholder="可手动填写调用别名，不要求读取成功"><datalist id="model-options"></datalist></label>
+<label class="wide">API Key<input id="api-key" type="password" autocomplete="new-password" placeholder="密钥仅加密保存在本机；修改已有连接时可留空"></label></div>
+<label class="check"><input id="provider-default" type="checkbox">型号未知：使用接口默认模型（不发送 model 字段）</label><p>型号读取是可选辅助，不影响手动填写别名或使用接口默认模型。默认模式是否可用由服务商决定；失败会停止，不自动重试。</p><p class="policy">点击后自动运行一轮：8 项任务，每项最多 1 次调用、1024 输出 Token、60 秒；失败停止该接口本轮，不自动重试或无限续跑。未知价格允许调用，金额待账单确认，当前不承诺金额封顶。</p>
+<p id="model-discovery" role="status">可先读取服务商型号列表；实验响应声明的型号也会自动记录。两者均不证明底层模型身份。</p><div class="actions"><button id="discover" type="button" class="secondary">自动读取型号</button><button id="save" type="submit">保存接口并自动评测</button><button id="new" type="button" class="secondary">填写另一个接口</button><button id="offline" type="button" class="secondary">先验证离线全流程</button></div></form>
+<div id="connections"></div></section>
+<section><h2>实验结果与真实成本</h2><p>8 项固定任务覆盖计算、数据清洗、约束选择、依据提取及边界情况。同一轮任务集用于所有模型。小样本结果只用于本项目实验，不代表通用能力排名。</p>
+<div class="table-wrap"><table><thead><tr><th>来源 / 模型</th><th>实验进度</th><th>验收通过</th><th>输入 / 输出 Token</th><th>中位耗时</th><th>本轮账单</th></tr></thead><tbody id="overview"></tbody></table></div>
+<div id="rounds"></div><p id="directory" class="muted"></p></section>
+<footer><p>账单按轮次和接口归属保存；人民币、美元和点数分开记录。总账单用于学习综合有效单价，不虚构输入、输出或逐调用账单。</p><p>目前支持文本 Chat Completions 与 Responses 实验，未将主引擎切换为真实多模型编排；不自动部署 GPU 或调用向量接口。</p><button id="stop" class="secondary">停止本机服务</button></footer>
+</main></body></html>

@@ -24,6 +24,9 @@ costweave-joint-search = "costweave.joint_search_cli:main"
 costweave-execution-recovery = "costweave.execution_recovery_cli:main"
 costweave-safe-learning = "costweave.safe_learning_cli:main"
 costweave-package = "costweave.release_packaging:main"
+costweave-configure-models = "costweave.provider_setup:main"
+costweave-real-smoke = "costweave.real_smoke_eval:main"
+costweave-real-workflow = "costweave.real_workflow_eval:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "costweave.version.__version__"}

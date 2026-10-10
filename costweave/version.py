@@ -1,9 +1,9 @@
 """Canonical public release identity for CostWeave."""
 
-__version__ = "0.6.9"
+__version__ = "0.6.9.1"
 VERSION_TAG = f"v{__version__}"
 STABLE_BASELINE = "v0.5.8.4"
-ACTIVE_WORK_PACKAGE = "Authoritative Decision Bridge"
+ACTIVE_WORK_PACKAGE = "Real-Evaluation Stabilization Freeze"
 
 __all__ = [
     "ACTIVE_WORK_PACKAGE",

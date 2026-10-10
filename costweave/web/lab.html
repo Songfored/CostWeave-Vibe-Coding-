@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CostWeave · 手动实验台</title><link rel="stylesheet" href="/lab.css"><script src="/lab.js" defer></script></head>
+<body><main>
+<header><span class="badge">本机实验环境</span><h1>CostWeave 手动实验台</h1><p>保存接口 → 选择任务 → 查看结果。每次真实实验只调用一次，失败不自动重试。</p></header>
+<div id="notice" role="status" aria-live="polite">正在连接本地服务…</div>
+<section><h2>1. 接口连接</h2><p>密钥使用当前 Windows 用户加密保存在本机；保存不会发送请求。多家接口可分别保存。</p>
+<form id="connection-form"><input id="connection-id" type="hidden">
+<div class="grid"><label>接口类型<select id="profile"><option value="compatible">通用 / 校内 Chat Completions</option><option value="deepseek">DeepSeek 官方</option><option value="openai">新版 GPT · Chat Completions</option></select></label><label>连接名称<input id="label" required maxlength="80" placeholder="例如：校内 DeepSeek"></label>
+<label>API 地址<input id="endpoint" required type="url" placeholder="https://服务商地址/v1"></label><label>模型 ID<input id="model" required maxlength="180" placeholder="填写服务商提供的准确名称"></label>
+<label class="wide">API Key<input id="api-key" type="password" autocomplete="new-password" placeholder="首次填写；修改已有配置时留空可保留密钥"></label></div>
+<details><summary>计费信息（真实调用需要；未知价格可先保存接口）</summary><p>仅填写美元 / 百万 Token 单价。校内点数不能当作美元；点数接口目前可用下方人工评测。按单价预留费用不能替代提供商账单，亦不保证供应商遵守输出限制。</p><div class="grid"><label>输入单价<input id="input-price" type="number" min="0" max="10000" step="any" placeholder="未核实"></label><label>输出单价<input id="output-price" type="number" min="0" max="10000" step="any" placeholder="未核实"></label></div></details>
+<div class="actions"><button type="submit">保存接口</button><button type="button" id="new-connection" class="secondary">新增连接</button></div></form>
+<div id="connections"></div></section>
+<section><h2>2. 运行实验</h2><div class="grid"><label>任务<select id="task"></select></label><label>已保存的连接<select id="selected-connection"><option value="">尚未配置</option></select></label></div>
+<p>固定任务用于验证接口、结构化输出和基础正确性，不作为通用模型能力排名。当前入口不执行完整多模型编排。</p>
+<div class="actions"><button id="offline" class="secondary">离线检查 · 不联网</button></div>
+<details><summary>真实接口试跑</summary><label>本次金额上限（美元，最多 0.50）<input id="budget" type="number" min="0.000001" max="0.5" step="any" value="0.05"></label><label class="check"><input id="authorize" type="checkbox">我授权本次调用产生费用；每次点击限 1 次请求、最多 512 输出 Token，45 秒超时。</label><p>上限只适用于本次试跑，重复运行会累计费用。发送后的超时也可能计费。</p><button id="real">执行一次真实试跑</button></details>
+<details><summary>复制任务进行人工评测（含校内点数平台）</summary><p>将任务复制到你选择的模型，粘贴原始答案即可在本地校验。结果标记为人工记录，不冒充 API 运行。</p><label>手动评测的模型 / 平台<input id="manual-model" maxlength="180" placeholder="例如：校内 DeepSeek V4 Flash"></label><label>任务文本<textarea id="manual-prompt" readonly rows="5"></textarea></label><button id="copy-prompt" class="secondary">复制任务</button><label>模型原始答案<textarea id="manual-output" rows="5" placeholder="粘贴模型答案"></textarea></label><button id="manual">校验并保存人工记录</button></details>
+</section>
+<section><h2>3. 结果与记录</h2><p id="report-directory"></p><div id="results"><p>还没有实验记录。</p></div></section>
+<footer>配置、运行记录与历史实验隔离。只在你点击真实试跑后，才向所填地址发送内置任务；不会执行模型返回的代码。<p><button id="stop" class="secondary">停止本机实验服务</button></p></footer>
+</main></body></html>

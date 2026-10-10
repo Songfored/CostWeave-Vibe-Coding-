@@ -1,0 +1,74 @@
+{
+  "schema_version": "costweave-billing-calibration-v1",
+  "revision": "2026-09-02-user-invoice-reconciliation-v1",
+  "account_currency": "CNY",
+  "observed_at": "2026-09-02T00:00:00+08:00",
+  "providers": {
+    "traveltoken-claude": {
+      "method": "reference_numeric_multiplier",
+      "reference_to_billed_cny_multiplier": 0.25,
+      "relative_error_fraction": 0.01,
+      "confidence": "high",
+      "cache_read_price_ratio_to_input": 0.1,
+      "cache_creation_price_ratio_to_input": 1.25,
+      "evidence": {
+        "source": "user_provided_relay_dashboard_and_request_pages",
+        "request_count": 214,
+        "token_count_rounded": 465300,
+        "reference_amount": 3.2266,
+        "billed_cny": 0.8067,
+        "currency_symbol_on_dashboard_is_known_incorrect": true
+      }
+    },
+    "traveltoken-gpt": {
+      "method": "reference_numeric_multiplier",
+      "reference_to_billed_cny_multiplier": 0.3,
+      "relative_error_fraction": 0.002,
+      "confidence": "high",
+      "evidence": {
+        "source": "user_provided_relay_dashboard_and_request_pages",
+        "request_count": 43,
+        "token_count_rounded": 86400,
+        "reference_amount": 1.328,
+        "billed_cny": 0.3984,
+        "currency_symbol_on_dashboard_is_known_incorrect": true
+      }
+    },
+    "deepseek-official": {
+      "method": "official_time_band_then_empirical_cny",
+      "effective_cny_per_usd": 6.759094,
+      "relative_error_fraction": 0.025,
+      "confidence": "medium",
+      "peak_utc_weekday_windows": [
+        [1, 4],
+        [6, 10]
+      ],
+      "rates_usd_per_mtok": {
+        "off_peak": {
+          "cache_hit_input": 0.022,
+          "cache_miss_input": 0.66,
+          "output": 1.98
+        },
+        "peak": {
+          "cache_hit_input": 0.044,
+          "cache_miss_input": 1.32,
+          "output": 3.96
+        }
+      },
+      "evidence": {
+        "source": "user_provided_deepseek_official_usage_dashboard",
+        "official_pricing_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "request_count": 38,
+        "token_count": 70950,
+        "time_and_cache_adjusted_reference_usd": 0.060659016,
+        "billed_cny_rounded": 0.41,
+        "dashboard_rounding_cny": 0.01
+      }
+    }
+  },
+  "notes": [
+    "Relay amounts are CNY even though the relay UI renders a dollar symbol.",
+    "Reference/list-price estimates remain separate from estimated billed CNY.",
+    "Provider invoice totals override local estimates after reconciliation."
+  ]
+}

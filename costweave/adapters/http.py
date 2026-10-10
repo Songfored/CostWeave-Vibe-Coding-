@@ -180,10 +180,19 @@ class ExperimentalAdapterConfig:
     max_retries: int = 0
     secret_env: str | None = None
     reasoning_effort: str = "medium"
+    input_reservation_multiplier: float = 1.0
     billing_header: str | None = None
     adapter_revision: str = OPENAI_COMPATIBLE_ADAPTER_REVISION
+    accounting_mode: str = "priced"
 
     def __post_init__(self) -> None:
+        if self.accounting_mode not in {"priced", "usage_only"}:
+            raise ExperimentalCallError("invalid accounting mode")
+        if self.accounting_mode == "usage_only" and (
+            self.input_price_per_mtok_usd != 0 or self.output_price_per_mtok_usd != 0
+            or self.billing_header is not None or self.max_retries != 0
+        ):
+            raise ExperimentalCallError("usage-only accounting requires unknown prices and zero retries")
         if not all(
             value.strip()
             for value in (
@@ -202,6 +211,7 @@ class ExperimentalAdapterConfig:
                 self.input_price_per_mtok_usd,
                 self.output_price_per_mtok_usd,
                 self.timeout_seconds,
+                self.input_reservation_multiplier,
             )
         ):
             raise ExperimentalCallError(
@@ -215,6 +225,10 @@ class ExperimentalAdapterConfig:
             raise ExperimentalCallError("adapter pricing or timeout is invalid")
         if self.timeout_seconds <= 0 or not 0 <= self.max_retries <= 3:
             raise ExperimentalCallError("bounded adapter retry policy is required")
+        if not 1.0 <= self.input_reservation_multiplier <= 16.0:
+            raise ExperimentalCallError(
+                "input reservation multiplier must be between 1 and 16"
+            )
         try:
             validate_endpoint(self.endpoint, deployment=self.deployment)
             if self.secret_env:
@@ -256,6 +270,7 @@ class ExperimentalAdapterConfig:
             "deployment_id": self.deployment_id,
             "adapter_revision": self.adapter_revision,
             "reasoning_effort": self.reasoning_effort,
+            "input_reservation_multiplier": self.input_reservation_multiplier,
             "paid": self.paid,
             "secret_required": bool(self.secret_env),
             "text_only": True,
@@ -275,6 +290,7 @@ class ExternalExecutionRequest:
     project_id: str = DEFAULT_PROJECT_ID
     data_residency: str = DEFAULT_DATA_RESIDENCY
     security_approval_id: str | None = None
+    structured_output: bool = False
 
     def __post_init__(self) -> None:
         if not self.experiment_id.startswith("experiment_"):
@@ -287,6 +303,8 @@ class ExternalExecutionRequest:
             raise ExperimentalCallError("bounded output token limit is required")
         if self.batch:
             raise ExperimentalCallError("batch execution is disabled in the current release")
+        if not isinstance(self.structured_output, bool):
+            raise ExperimentalCallError("structured_output must be a boolean")
         try:
             normalize_project_id(self.project_id)
             normalize_data_residency(self.data_residency)
@@ -468,14 +486,28 @@ class UrllibHTTPTransport:
                     release_slot = False
             raise AdapterTransportError("transport_error") from error
         finally:
-            if sender is not None:
-                sender.close()
-            if receiver is not None:
-                receiver.close()
-            if process is not None and process.pid is not None and not process.is_alive():
-                process.close()
-            if release_slot:
-                _DNS_RESOLVER_SLOTS.release()
+            try:
+                if process is not None and process.pid is not None:
+                    # Deadline expiry during process.start() can bypass poll
+                    # and its normal reap path. Never return that child's slot
+                    # until termination is confirmed, even on an early error.
+                    release_slot = False
+                    if process.is_alive():
+                        _stop_dns_process(process)
+                    if not process.is_alive():
+                        process.close()
+                        release_slot = True
+            finally:
+                try:
+                    if sender is not None:
+                        sender.close()
+                finally:
+                    try:
+                        if receiver is not None:
+                            receiver.close()
+                    finally:
+                        if release_slot:
+                            _DNS_RESOLVER_SLOTS.release()
 
     def _post_remote_pinned(
         self,
@@ -484,6 +516,7 @@ class UrllibHTTPTransport:
         headers: Mapping[str, str],
         body: bytes,
         timeout_seconds: float,
+        method: str = "POST",
     ) -> HTTPResponse:
         parsed = urlparse(url)
         deadline = time.monotonic() + timeout_seconds
@@ -506,7 +539,7 @@ class UrllibHTTPTransport:
         timer.start()
         try:
             connection.request(
-                "POST",
+                method,
                 parsed.path or "/",
                 body=body,
                 headers=dict(headers),
@@ -534,6 +567,12 @@ class UrllibHTTPTransport:
         finally:
             timer.cancel()
             connection.close()
+
+    def get_models(self, *, url: str, headers: Mapping[str, str]) -> HTTPResponse:
+        """Bounded metadata GET; shares pinned DNS, TLS and no-redirect transport."""
+        validate_endpoint(url, deployment="remote")
+        return self._post_remote_pinned(url=url, headers=headers, body=b"",
+                                        timeout_seconds=15, method="GET")
 
     def post(
         self,
@@ -606,14 +645,45 @@ class ParsedModelResponse:
     input_tokens: int
     output_tokens: int
     cached_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    reasoning_tokens: int = 0
+    reasoning_content_present: bool = False
+    finish_reason: str | None = None
+    provider_response_id: str | None = None
+    reported_model: str | None = None
 
     def __post_init__(self) -> None:
         if min(
             self.input_tokens,
             self.output_tokens,
             self.cached_input_tokens,
+            self.cache_read_input_tokens,
+            self.cache_creation_input_tokens,
+            self.reasoning_tokens,
         ) < 0:
             raise ExperimentalCallError("provider token usage is invalid")
+        if self.cache_read_input_tokens == 0 and self.cached_input_tokens:
+            object.__setattr__(
+                self, "cache_read_input_tokens", self.cached_input_tokens
+            )
+        elif self.cached_input_tokens == 0 and self.cache_read_input_tokens:
+            object.__setattr__(
+                self, "cached_input_tokens", self.cache_read_input_tokens
+            )
+        elif self.cached_input_tokens != self.cache_read_input_tokens:
+            raise ExperimentalCallError(
+                "cached input and cache-read token fields disagree"
+            )
+        for value, name in (
+            (self.finish_reason, "provider finish reason"),
+            (self.provider_response_id, "provider response id"),
+            (self.reported_model, "provider reported model"),
+        ):
+            if value is not None and (
+                not str(value).strip() or len(str(value)) > 512
+            ):
+                raise ExperimentalCallError(f"{name} is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -625,19 +695,24 @@ class ExternalCallReceipt:
     schema_version: str = HTTP_ADAPTER_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "external_call_id": self.external_call_id,
             "result": self.result.to_dict(),
             "telemetry": dict(self.telemetry),
             "replayed": self.replayed,
             "schema_version": self.schema_version,
         }
+        if self.telemetry.get("accounting_mode") == "usage_only":
+            value["result"]["actual_cost"] = None
+        return value
 
     @classmethod
     def from_dict(
         cls, value: Mapping[str, Any], *, replayed: bool
     ) -> "ExternalCallReceipt":
         result = dict(value["result"])
+        if result.get("actual_cost") is None and value["telemetry"].get("accounting_mode") == "usage_only":
+            result["actual_cost"] = 0.0  # Legacy in-memory envelope only; never serialize as a known cost.
         envelope = ResultEnvelope(
             work_order_id=str(result["work_order_id"]),
             status=str(result["status"]),
@@ -672,7 +747,23 @@ def _safe_error_code(error: BaseException) -> str:
     if isinstance(error, AdapterTransportError):
         return "transport_error"
     if isinstance(error, SecretLeaseError):
-        return "secret_exposure_detected"
+        message = str(error).lower()
+        if "contained current leased secret material" in message:
+            return "secret_exposure_detected"
+        if "closed or expired" in message:
+            return "secret_lease_expired"
+        if "unavailable" in message:
+            return "secret_unavailable"
+        if any(
+            marker in message
+            for marker in (
+                "inspection",
+                "normalization",
+                "could not be checked",
+            )
+        ):
+            return "secret_inspection_failed"
+        return "secret_lease_failed"
     if isinstance(error, json.JSONDecodeError):
         return "invalid_json"
     if isinstance(error, ExperimentalCallError):
@@ -773,6 +864,7 @@ class BaseExperimentalHTTPAdapter(ABC):
     ) -> float:
         return round(
             input_token_upper_bound
+            * self.config.input_reservation_multiplier
             / 1_000_000
             * self.config.input_price_per_mtok_usd
             + max_output_tokens
@@ -780,6 +872,34 @@ class BaseExperimentalHTTPAdapter(ABC):
             * self.config.output_price_per_mtok_usd,
             10,
         )
+
+    def estimate_reservation(
+        self, request: ExternalExecutionRequest
+    ) -> dict[str, int | float]:
+        """Return the exact local reservation inputs without admitting a call.
+
+        The estimator deliberately reuses ``build_payload`` and the same
+        UTF-8-byte upper bound as execution.  It performs no secret lookup,
+        DNS resolution, budget mutation or network access, so callers can
+        size a WorkOrder before deciding whether the call is affordable.
+        """
+
+        payload_raw = canonical_json(self.build_payload(request)).encode("utf-8")
+        input_upper = len(payload_raw)
+        per_attempt = self._worst_case_cost(
+            input_upper, request.max_output_tokens
+        )
+        attempts = self.config.max_retries + 1
+        return {
+            "input_token_upper_bound": input_upper,
+            "max_output_tokens": request.max_output_tokens,
+            "input_reservation_multiplier": self.config.input_reservation_multiplier,
+            "worst_case_cost_per_attempt_usd": per_attempt,
+            "max_attempts": attempts,
+            "required_work_order_cost_limit_usd": round(
+                per_attempt * attempts, 10
+            ),
+        }
 
     def _actual_cost(
         self,
@@ -820,11 +940,21 @@ class BaseExperimentalHTTPAdapter(ABC):
     def execute(
         self, request: ExternalExecutionRequest
     ) -> ExternalCallReceipt:
-        secret_lease, prompt_assessment, manifest = self._admit(request)
-        try:
-            with self.security_store.active_project_operation(
-                request.project_id
-            ):
+        # Long model calls share a project session.  Revocation owns the
+        # session's exclusive side and therefore still waits for transport,
+        # capability cleanup and secret-lease closure, while independent calls
+        # no longer serialize behind network latency.  Durable mutations keep
+        # using the separate short-lived active_project_operation boundary.
+        with self.security_store.active_project_session(request.project_id):
+            secret_lease: SecretLease | None = None
+            try:
+                # Wait for any authorized durable mutation before issuing the
+                # short-lived secret.  Only admission is serialized here;
+                # transport and response inspection remain concurrent.
+                with self.security_store.active_project_operation(
+                    request.project_id
+                ):
+                    secret_lease, prompt_assessment, manifest = self._admit(request)
                 try:
                     return self._execute_admitted(
                         request,
@@ -842,9 +972,9 @@ class BaseExperimentalHTTPAdapter(ABC):
                         run_id=request.run_id,
                         task_id=request.task_id,
                     )
-        finally:
-            if secret_lease is not None:
-                secret_lease.close()
+            finally:
+                if secret_lease is not None:
+                    secret_lease.close()
 
     def _replay_completed_side_effect(
         self,
@@ -939,6 +1069,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             "global_side_effect_replayed": True,
             "replay_source_external_call_id": source_call_id,
         }
+        if prior.telemetry.get("accounting_mode") == "usage_only":
+            telemetry["actual_cost_usd"] = None
         receipt = ExternalCallReceipt(
             external_call_id=reservation.external_call_id,
             result=replayed_result,
@@ -968,10 +1100,10 @@ class BaseExperimentalHTTPAdapter(ABC):
             request.idempotency_key
         )
         payload_raw = canonical_json(payload).encode("utf-8")
-        # A UTF-8 byte count is a conservative upper bound for BPE tokens.
-        input_upper = len(payload_raw)
-        worst_per_attempt = self._worst_case_cost(
-            input_upper, request.max_output_tokens
+        estimate = self.estimate_reservation(request)
+        input_upper = int(estimate["input_token_upper_bound"])
+        worst_per_attempt = float(
+            estimate["worst_case_cost_per_attempt_usd"]
         )
         if (
             worst_per_attempt * (self.config.max_retries + 1)
@@ -995,6 +1127,9 @@ class BaseExperimentalHTTPAdapter(ABC):
             "provider": self.config.provider,
             "model_id": self.config.model_id,
             "adapter_revision": self.config.adapter_revision,
+            "provider_profile_revision": getattr(
+                self, "PROFILE_REVISION", self.config.adapter_revision
+            ),
             "adapter_id": self.config.adapter_id,
             "operation": "model_inference",
             "endpoint": self.config.endpoint,
@@ -1005,6 +1140,8 @@ class BaseExperimentalHTTPAdapter(ABC):
             "max_output_tokens": request.max_output_tokens,
             "payload_hash": hashlib.sha256(payload_raw).hexdigest(),
         }
+        if self.config.accounting_mode == "usage_only":
+            fingerprint["accounting_mode"] = "usage_only"
         authority_reservation = self.authority.reserve(
             logical_values={
                 "experiment_id": request.experiment_id,
@@ -1019,6 +1156,7 @@ class BaseExperimentalHTTPAdapter(ABC):
                 "request_fingerprint": fingerprint,
                 "worst_case_cost_per_attempt_usd": worst_per_attempt,
                 "max_attempts": self.config.max_retries + 1,
+                "accounting_mode": self.config.accounting_mode,
             },
             project_id=request.project_id,
             data_residency=request.data_residency,
@@ -1082,6 +1220,13 @@ class BaseExperimentalHTTPAdapter(ABC):
 
         attempts: list[ExternalAttempt] = []
         billing_sources: list[str] = []
+        provider_response_ids: list[str] = []
+        reported_models: list[str] = []
+        finish_reasons: list[str] = []
+        reasoning_tokens = 0
+        reasoning_only_responses = 0
+        cache_read_input_tokens = 0
+        cache_creation_input_tokens = 0
         evidence_level = str(
             getattr(
                 self.transport,
@@ -1174,6 +1319,19 @@ class BaseExperimentalHTTPAdapter(ABC):
                 if secret_lease is not None:
                     secret_lease.reject_if_exposed(value)
                 parsed = self.parse_response(value)
+                if parsed.provider_response_id:
+                    provider_response_ids.append(parsed.provider_response_id)
+                if parsed.reported_model:
+                    reported_models.append(parsed.reported_model)
+                if parsed.finish_reason:
+                    finish_reasons.append(parsed.finish_reason)
+                reasoning_tokens += parsed.reasoning_tokens
+                cache_read_input_tokens += parsed.cache_read_input_tokens
+                cache_creation_input_tokens += (
+                    parsed.cache_creation_input_tokens
+                )
+                if parsed.reasoning_content_present and not parsed.content.strip():
+                    reasoning_only_responses += 1
                 if secret_lease is not None:
                     secret_lease.reject_if_exposed(parsed.content)
                 actual_cost, billing_source = self._actual_cost(
@@ -1271,6 +1429,9 @@ class BaseExperimentalHTTPAdapter(ABC):
             "provider": self.config.provider,
             "model_id": self.config.model_id,
             "adapter_revision": self.config.adapter_revision,
+            "provider_profile_revision": getattr(
+                self, "PROFILE_REVISION", self.config.adapter_revision
+            ),
             "adapter_id": self.config.adapter_id,
             "operation": "model_inference",
             "endpoint": self.config.endpoint,
@@ -1285,6 +1446,17 @@ class BaseExperimentalHTTPAdapter(ABC):
             "cached_input_tokens": sum(
                 item.cached_input_tokens for item in attempts
             ),
+            "cache_read_input_tokens": cache_read_input_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "estimated_cache_read_cost_cny": None,
+            "estimated_cache_creation_cost_cny": None,
+            "provider_billed_cache_read_cost_cny": None,
+            "provider_billed_cache_creation_cost_cny": None,
+            "estimated_billed_cost_cny": None,
+            "provider_billed_cost_cny": None,
+            "billing_residual_cny": None,
+            "billing_currency": "CNY",
+            "invoice_reconciled": False,
             "actual_cost_usd": round(
                 sum(item.actual_cost_usd for item in attempts), 10
             ),
@@ -1303,6 +1475,11 @@ class BaseExperimentalHTTPAdapter(ABC):
             ),
             "batch": False,
             "billing_sources": sorted(set(billing_sources)),
+            "provider_response_ids": list(dict.fromkeys(provider_response_ids)),
+            "reported_models": list(dict.fromkeys(reported_models)),
+            "finish_reasons": list(dict.fromkeys(finish_reasons)),
+            "reasoning_tokens": reasoning_tokens,
+            "reasoning_only_response_count": reasoning_only_responses,
             "commercial_claims_allowed": False,
             "adapter_plugin_id": manifest.plugin_id,
             "prompt_security": dict(prompt_assessment),
@@ -1315,6 +1492,10 @@ class BaseExperimentalHTTPAdapter(ABC):
             ),
             "secret_value_persisted": False,
         }
+        if self.config.accounting_mode == "usage_only":
+            telemetry.update(accounting_mode="usage_only", actual_cost_usd=None,
+                             billing_currency=None, billing_sources=["awaiting_provider_invoice"],
+                             monetary_budget_enforced=False)
         if result is None:
             current = self.security_store.side_effect(side_effect_id) or {}
             if not any(
@@ -1342,8 +1523,15 @@ class BaseExperimentalHTTPAdapter(ABC):
             result=result,
             telemetry=telemetry,
         )
-        if secret_lease is not None:
-            secret_lease.reject_if_exposed(receipt.to_dict())
+        # The provider-controlled response body and parsed content were already
+        # inspected before the completed attempt was recorded (lines 1146 and
+        # 1205-1218 above).  Re-normalizing the complete internal receipt here
+        # is both redundant and unsafe operationally: generated SHA-256 values,
+        # IDs and telemetry can look like nested base64/hex payloads and exhaust
+        # the bounded secret scanner after the provider has already charged us.
+        # That used to strand a successful call in `reserved`.  Only untrusted
+        # provider material is inspected; the system envelope adds no new
+        # provider-controlled bytes.
         self.store.finalize(
             reservation.external_call_id,
             status="completed",
@@ -1381,10 +1569,11 @@ def _prompt_contract(work_order: WorkOrder) -> dict[str, Any]:
 
 class OpenAICompatibleHTTPAdapter(BaseExperimentalHTTPAdapter):
     PLUGIN_ID = "openai-compatible-http"
+    PROFILE_REVISION = OPENAI_COMPATIBLE_ADAPTER_REVISION
     def build_payload(
         self, request: ExternalExecutionRequest
     ) -> Mapping[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "model": self.config.model_id,
             "messages": [
                 {
@@ -1405,6 +1594,9 @@ class OpenAICompatibleHTTPAdapter(BaseExperimentalHTTPAdapter):
             "max_tokens": request.max_output_tokens,
             "reasoning_effort": self.config.reasoning_effort,
         }
+        if request.structured_output:
+            payload["response_format"] = {"type": "json_object"}
+        return payload
 
     def parse_response(
         self, value: Mapping[str, Any]
@@ -1419,20 +1611,110 @@ class OpenAICompatibleHTTPAdapter(BaseExperimentalHTTPAdapter):
         if not isinstance(message, Mapping):
             raise ExperimentalCallError("provider message is missing")
         content = message.get("content")
+        reasoning_content = message.get("reasoning_content")
+        if content is None and isinstance(reasoning_content, str):
+            content = ""
         if not isinstance(content, str):
             raise ExperimentalCallError("provider text content is missing")
+        if reasoning_content is not None and not isinstance(reasoning_content, str):
+            raise ExperimentalCallError("provider reasoning content is invalid")
         usage = value.get("usage") or {}
         if not isinstance(usage, Mapping):
             raise ExperimentalCallError("provider usage is invalid")
         details = usage.get("prompt_tokens_details") or {}
         if not isinstance(details, Mapping):
             details = {}
+        completion_details = usage.get("completion_tokens_details") or {}
+        if not isinstance(completion_details, Mapping):
+            completion_details = {}
+        finish_reason = first.get("finish_reason")
+        if finish_reason is not None:
+            finish_reason = str(finish_reason)
+        cache_read_tokens = int(
+            details.get("cached_tokens")
+            or details.get("cache_read_tokens")
+            or usage.get("cache_read_input_tokens")
+            or usage.get("prompt_cache_hit_tokens")
+            or usage.get("input_cache_read_tokens")
+            or 0
+        )
+        cache_creation_tokens = int(
+            details.get("cache_creation_tokens")
+            or details.get("cache_write_tokens")
+            or usage.get("cache_creation_input_tokens")
+            or usage.get("cache_write_input_tokens")
+            or usage.get("prompt_cache_write_tokens")
+            or usage.get("input_cache_creation_tokens")
+            or 0
+        )
         return ParsedModelResponse(
             content=content,
             input_tokens=int(usage.get("prompt_tokens") or 0),
             output_tokens=int(usage.get("completion_tokens") or 0),
-            cached_input_tokens=int(details.get("cached_tokens") or 0),
+            cached_input_tokens=cache_read_tokens,
+            cache_read_input_tokens=cache_read_tokens,
+            cache_creation_input_tokens=cache_creation_tokens,
+            reasoning_tokens=int(completion_details.get("reasoning_tokens") or 0),
+            reasoning_content_present=bool(reasoning_content),
+            finish_reason=finish_reason,
+            provider_response_id=(
+                str(value.get("id")) if value.get("id") is not None else None
+            ),
+            reported_model=(
+                str(value.get("model"))
+                if value.get("model") is not None
+                else None
+            ),
         )
+
+
+class DeepSeekChatHTTPAdapter(OpenAICompatibleHTTPAdapter):
+    """DeepSeek Chat Completions profile for bounded structured work orders.
+
+    DeepSeek thinking mode returns chain-of-thought separately from final
+    ``content``.  Small structured nodes previously spent their entire output
+    allowance on reasoning and therefore produced an empty final artifact.
+    Low-effort work orders now use non-thinking JSON mode; higher efforts keep
+    thinking enabled and continue to account for reasoning tokens separately.
+    """
+
+    PROFILE_REVISION = "deepseek-chat-json-v1"
+
+    def build_payload(
+        self, request: ExternalExecutionRequest
+    ) -> Mapping[str, Any]:
+        payload = dict(super().build_payload(request))
+        messages = [dict(message) for message in payload["messages"]]
+        messages[0]["content"] = (
+            str(messages[0]["content"])
+            + " Return exactly one valid JSON object matching the supplied "
+            "output schema. Do not use Markdown fences or explanatory text."
+        )
+        required = request.work_order.output_schema.get("required", ())
+        example = {
+            str(key): None
+            for key in required
+            if isinstance(key, str) and key.strip()
+        }
+        contract = json.loads(str(messages[1]["content"]))
+        if example:
+            contract["json_output_example"] = example
+        messages[1]["content"] = canonical_json(contract)
+        payload["messages"] = messages
+        payload["response_format"] = {"type": "json_object"}
+
+        effort = self.config.reasoning_effort.strip().lower()
+        if effort in {"none", "minimal", "low"}:
+            payload["thinking"] = {"type": "disabled"}
+            payload.pop("reasoning_effort", None)
+        else:
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = {
+                "medium": "high",
+                "xhigh": "high",
+                "ultra": "max",
+            }.get(effort, effort if effort in {"high", "max"} else "high")
+        return payload
 
 
 class LocalHTTPAdapter(BaseExperimentalHTTPAdapter):
@@ -1461,11 +1743,28 @@ class LocalHTTPAdapter(BaseExperimentalHTTPAdapter):
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
             cached_input_tokens=int(usage.get("cached_input_tokens") or 0),
+            cache_read_input_tokens=int(
+                usage.get("cache_read_input_tokens")
+                or usage.get("cached_input_tokens")
+                or 0
+            ),
+            cache_creation_input_tokens=int(
+                usage.get("cache_creation_input_tokens") or 0
+            ),
+            provider_response_id=(
+                str(value.get("id")) if value.get("id") is not None else None
+            ),
+            reported_model=(
+                str(value.get("model"))
+                if value.get("model") is not None
+                else None
+            ),
         )
 
 
 __all__ = [
     "AdapterRuntimePolicy",
+    "DeepSeekChatHTTPAdapter",
     "AdapterTransportError",
     "ExperimentalAdapterConfig",
     "ExternalCallReceipt",
