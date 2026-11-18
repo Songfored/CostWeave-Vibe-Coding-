@@ -150,8 +150,54 @@ def paired_bootstrap_cost_reduction_pct(
     )
 
 
+def paired_bootstrap_p95_latency_regression_pct(
+    candidate_latencies: Sequence[float],
+    baseline_latencies: Sequence[float],
+    *,
+    samples: int,
+    seed: int,
+) -> BootstrapInterval | None:
+    """Estimate the percent change in nearest-rank P95 across paired cases.
+
+    Each draw uses the same case indices for both policies. A zero baseline
+    P95 makes the point estimate undefined; zero-denominator draws are omitted.
+    """
+    candidate = _values(candidate_latencies, "candidate_latencies")
+    baseline = _values(baseline_latencies, "baseline_latencies")
+    if len(candidate) != len(baseline):
+        raise ValueError("latency sequences must have equal length")
+    if min(candidate) < 0 or min(baseline) < 0:
+        raise ValueError("latencies must be non-negative")
+    sample_count = _samples(samples)
+    random_seed = _seed(seed)
+    baseline_p95 = _percentile(baseline, 0.95)
+    if baseline_p95 == 0:
+        return None
+    point = (_percentile(candidate, 0.95) - baseline_p95) / baseline_p95 * 100.0
+
+    rng = random.Random(random_seed)
+    draws: list[float] = []
+    case_count = len(baseline)
+    for _ in range(sample_count):
+        indices = [rng.randrange(case_count) for _ in range(case_count)]
+        baseline_draw_p95 = _percentile([baseline[i] for i in indices], 0.95)
+        if baseline_draw_p95 > 0:
+            candidate_draw_p95 = _percentile([candidate[i] for i in indices], 0.95)
+            draws.append((candidate_draw_p95 - baseline_draw_p95) / baseline_draw_p95 * 100.0)
+    if not draws:
+        return None
+    return BootstrapInterval(
+        mean_difference=point,
+        lower=_percentile(draws, 0.025),
+        upper=_percentile(draws, 0.975),
+        samples=len(draws),
+        seed=random_seed,
+    )
+
+
 __all__ = [
     "BootstrapInterval",
     "paired_bootstrap_cost_reduction_pct",
     "paired_bootstrap_difference",
+    "paired_bootstrap_p95_latency_regression_pct",
 ]

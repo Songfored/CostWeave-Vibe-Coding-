@@ -66,6 +66,16 @@ class TournamentV060Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._spec(minimum_claim_cases=29)
 
+    def test_old_spec_keeps_its_identity_but_new_runs_use_the_p95_revision(self):
+        current = self._spec()
+        historical = replace(current, policy_revision="decision-intelligence-tournament-v1")
+        self.assertEqual(historical, TournamentSpecV1.from_dict(historical.to_dict()))
+        self.assertNotEqual(historical.tournament_id, current.tournament_id)
+        with self.assertRaisesRegex(TournamentError, "policy revision"):
+            TournamentRunner().run(
+                spec=historical, manifest=self.manifest, records=self.records, policies=self._policies()
+            )
+
     def test_runner_is_offline_deterministic_and_report_hash_excludes_generated_at(self):
         runner = TournamentRunner()
         first = runner.run(spec=self._spec(), manifest=self.manifest, records=self.records, policies=self._policies(), generated_at="2026-08-09T01:00:00Z")
@@ -89,6 +99,72 @@ class TournamentV060Tests(unittest.TestCase):
         self.assertEqual(report.to_dict(), restored.to_dict())
         with self.assertRaises(ValueError):
             TournamentReportV1.from_dict({**report.to_dict(), "report_hash": "a" * 64})
+
+    def _run_latency_comparison(self, baseline_ms, candidate_ms, **spec_overrides):
+        records = []
+        for index, (baseline, candidate) in enumerate(zip(baseline_ms, candidate_ms, strict=True)):
+            case_id = f"latency-{index:03d}"
+            for model, latency_ms, cost in (("seed-strong", baseline, 0.02), ("seed-cheap", candidate, 0.01)):
+                records.append(replace(
+                    self.records[0],
+                    source_record_id=f"{case_id}-{model}",
+                    case_id=case_id,
+                    partition="test",
+                    prompt_hash=f"{index:064x}",
+                    model_id=model,
+                    quality_score=1.0,
+                    accepted=True,
+                    cost_usd=cost,
+                    latency_ms=latency_ms,
+                    evidence_level="E1-public-replay",
+                ))
+        manifest = build_dataset_manifest(
+            records,
+            source_uri="fixture://p95-latency",
+            license_id="MIT",
+            created_at=self.manifest.created_at,
+        )
+        return TournamentRunner().run(
+            spec=self._spec(dataset_id=manifest.dataset_id, **spec_overrides),
+            manifest=manifest,
+            records=records,
+            policies=(FixedModelPolicy("seed-strong", "strong-only"), FixedModelPolicy("seed-cheap", "cheap-only")),
+        )
+
+    def test_faster_average_does_not_hide_a_doubled_p95(self):
+        report = self._run_latency_comparison([100] * 100, [10] * 94 + [200] * 6)
+        self.assertEqual(100, report.policy_metrics["strong-only"]["p95_latency_ms"])
+        self.assertEqual(200, report.policy_metrics["cheap-only"]["p95_latency_ms"])
+        interval = report.candidate_vs_baseline["cheap-only"]["latency_regression_pct"]
+        self.assertEqual(100.0, interval["mean_difference"])
+        self.assertEqual(100.0, interval["upper"])
+        gate = report.claim_gates["cheap-only"]
+        self.assertFalse(gate["passed"])
+        self.assertIn("latency_regression_failed", gate["reason_codes"])
+
+    def test_proportional_case_latencies_keep_a_paired_p95_interval(self):
+        baseline = [10] * 94 + [200] * 6
+        report = self._run_latency_comparison(baseline, [ms // 2 for ms in baseline])
+        interval = report.bootstrap["cheap-only"]["latency_regression_pct"]
+        for key in ("mean_difference", "lower", "upper"):
+            self.assertEqual(-50.0, interval[key])
+        self.assertTrue(report.claim_gates["cheap-only"]["passed"])
+
+    def test_zero_baseline_p95_makes_relative_regression_undefined(self):
+        report = self._run_latency_comparison([0] * 99 + [100], [10] * 100)
+        self.assertEqual(0, report.policy_metrics["strong-only"]["p95_latency_ms"])
+        self.assertIsNone(report.candidate_vs_baseline["cheap-only"]["latency_regression_pct"])
+        gate = report.claim_gates["cheap-only"]
+        self.assertFalse(gate["passed"])
+        self.assertIn("latency_incomplete", gate["reason_codes"])
+
+    def test_missing_latency_suppresses_p95_comparison_even_with_zero_latency_weight(self):
+        report = self._run_latency_comparison([100] * 30, [50] * 29 + [None], latency_weight=0)
+        self.assertIsNone(report.candidate_vs_baseline["cheap-only"]["latency_regression_pct"])
+        self.assertIsNone(report.bootstrap["cheap-only"]["latency_regression_pct"])
+        gate = report.claim_gates["cheap-only"]
+        self.assertFalse(gate["passed"])
+        self.assertIn("latency_incomplete", gate["reason_codes"])
 
     def test_manifest_mismatch_partition_model_policy_and_baseline_fail_closed(self):
         with self.assertRaises(TournamentError):

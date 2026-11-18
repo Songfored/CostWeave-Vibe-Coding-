@@ -16,7 +16,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 DECISION_INTELLIGENCE_SCHEMA_VERSION = "v0.6.0"
 TOURNAMENT_SCHEMA_VERSION = "v0.6.0"
-TOURNAMENT_POLICY_REVISION = "decision-intelligence-tournament-v1"
+TOURNAMENT_POLICY_REVISION = "decision-intelligence-tournament-v2"
 CLAIM_POLICY_REVISION = "competitive-claim-gate-v1"
 META_CONTROLLER_SCHEMA_VERSION = "v0.6.1"
 META_CONTROLLER_POLICY_REVISION = "rational-meta-controller-v1"

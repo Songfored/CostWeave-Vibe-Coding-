@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -23,7 +22,12 @@ from .claims import ClaimGateResultV1, evaluate_claim_gate
 from .contracts import CaseViewV1, DatasetManifestV1, RoutingRecordV1, validate_routing_records
 from .metrics import PolicyMetricsV1, evaluate_policy_decisions, summarize_policy
 from .policies import PolicyDecisionV1, TournamentPolicy
-from .statistics import BootstrapInterval, paired_bootstrap_cost_reduction_pct, paired_bootstrap_difference
+from .statistics import (
+    BootstrapInterval,
+    paired_bootstrap_cost_reduction_pct,
+    paired_bootstrap_difference,
+    paired_bootstrap_p95_latency_regression_pct,
+)
 
 
 class TournamentError(ValueError):
@@ -89,8 +93,8 @@ class TournamentSpecV1:
         if isinstance(self.minimum_claim_cases, bool) or not isinstance(self.minimum_claim_cases, int) or self.minimum_claim_cases < 30:
             raise ValueError("minimum_claim_cases must be at least 30")
         object.__setattr__(self, "registered_at", validate_timestamp(self.registered_at, "registered_at"))
-        if self.policy_revision != TOURNAMENT_POLICY_REVISION:
-            raise ValueError(f"policy_revision must be {TOURNAMENT_POLICY_REVISION}")
+        if self.policy_revision not in ("decision-intelligence-tournament-v1", TOURNAMENT_POLICY_REVISION):
+            raise ValueError(f"unsupported tournament policy_revision: {self.policy_revision}")
 
     def _identity(self) -> dict[str, Any]:
         return {
@@ -226,32 +230,6 @@ def _interval_scale(interval: BootstrapInterval, factor: float) -> BootstrapInte
     )
 
 
-def _relative_regression_pct(candidate: Sequence[float], baseline: Sequence[float], *, samples: int, seed: int) -> BootstrapInterval | None:
-    if len(candidate) != len(baseline) or not candidate:
-        raise ValueError("latency sequences must be non-empty and paired")
-    baseline_total = sum(baseline)
-    if baseline_total <= 0:
-        return None
-    from random import Random
-
-    import math
-
-    point = (sum(candidate) - baseline_total) / baseline_total * 100.0
-    rng = Random(seed)
-    draws: list[float] = []
-    for _ in range(samples):
-        indexes = [rng.randrange(len(candidate)) for _ in range(len(candidate))]
-        base = sum(baseline[index] for index in indexes)
-        if base > 0:
-            draws.append((sum(candidate[index] for index in indexes) - base) / base * 100.0)
-    if not draws:
-        return None
-    draws.sort()
-    lower = draws[max(0, min(len(draws) - 1, math.ceil(0.025 * len(draws)) - 1))]
-    upper = draws[max(0, min(len(draws) - 1, math.ceil(0.975 * len(draws)) - 1))]
-    return BootstrapInterval(point, lower, upper, len(draws), seed)
-
-
 class TournamentRunner:
     """Run a tournament entirely in memory; no network or provider calls."""
 
@@ -266,6 +244,8 @@ class TournamentRunner:
     ) -> TournamentReportV1:
         if not isinstance(spec, TournamentSpecV1) or not isinstance(manifest, DatasetManifestV1):
             raise TypeError("spec and manifest must be v1 contracts")
+        if spec.policy_revision != TOURNAMENT_POLICY_REVISION:
+            raise TournamentError(f"new tournament runs require policy revision {TOURNAMENT_POLICY_REVISION}")
         try:
             ordered = validate_routing_records(records)
         except (TypeError, ValueError) as exc:
@@ -337,6 +317,7 @@ class TournamentRunner:
         baseline_metrics = metrics_by_policy[spec.baseline_policy_id]
         baseline_outcomes = outcomes_by_policy[spec.baseline_policy_id]
         baseline_by_case = {item.case_id: item for item in baseline_outcomes}
+        baseline_latency = [item.latency_ms for item in baseline_outcomes if item.latency_ms is not None]
         candidate_vs_baseline: dict[str, dict[str, Any]] = {}
         bootstrap_reports: dict[str, dict[str, Any]] = {}
         claim_reports: dict[str, dict[str, Any]] = {}
@@ -354,11 +335,14 @@ class TournamentRunner:
             candidate_cost = [candidate_by_case[case.case_id].cost_usd or 0.0 for case in cases]
             baseline_cost = [baseline_by_case[case.case_id].cost_usd or 0.0 for case in cases]
             cost_interval = paired_bootstrap_cost_reduction_pct(candidate_cost, baseline_cost, samples=spec.bootstrap_samples, seed=spec.random_seed)
-            candidate_latency = [float(candidate_by_case[case.case_id].latency_ms or 0) for case in cases]
-            baseline_latency = [float(baseline_by_case[case.case_id].latency_ms or 0) for case in cases]
-            latency_interval = _relative_regression_pct(candidate_latency, baseline_latency, samples=spec.bootstrap_samples, seed=spec.random_seed)
+            candidate_latency = [item.latency_ms for item in candidate_outcomes if item.latency_ms is not None]
+            latency_complete = len(candidate_latency) == len(baseline_latency) == len(cases)
+            latency_interval = None
+            if latency_complete:
+                latency_interval = paired_bootstrap_p95_latency_regression_pct(
+                    candidate_latency, baseline_latency, samples=spec.bootstrap_samples, seed=spec.random_seed
+                )
             cost_complete = candidate_metrics.decided_cases == candidate_metrics.total_cases and baseline_metrics.decided_cases == baseline_metrics.total_cases
-            latency_complete = all(item.latency_ms is not None for item in candidate_outcomes if not item.abstained) and all(item.latency_ms is not None for item in baseline_outcomes if not item.abstained)
             comparison = {
                 "candidate_policy_id": policy.policy_id,
                 "baseline_policy_id": spec.baseline_policy_id,
