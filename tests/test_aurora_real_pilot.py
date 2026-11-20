@@ -15,6 +15,7 @@ from costweave.aurora_real_pilot import (
     _deterministic_provider_selection,
     _extract_repaired_json_object,
     _failure_category,
+    _fallback_admission,
     _fallback_route,
     _ledger_policy_metrics,
     _normalize_model_value,
@@ -354,6 +355,22 @@ class AuroraRealPilotSchedulerTests(unittest.TestCase):
                 }
             ),
         )
+
+    def test_r3_local_approval_denial_and_provider_safety_stops_cannot_switch_models(self) -> None:
+        for primary in (
+            {"status": "failed", "error": "PromptInjectionError"},
+            {"status": "failed", "diagnostic": "request requires a separate security approval"},
+            {"status": "completed", "diagnostic": "invalid_json", "finish_reasons": ["content_filter"]},
+            {"status": "completed", "diagnostic": "invalid_json", "finish_reasons": ["refusal"]},
+        ):
+            with self.subTest(primary=primary), patch("costweave.aurora_real_pilot._planned_call") as plan:
+                decision = _fallback_admission(
+                    node_id="media_review", policy_id="costweave_dynamic", primary=primary,
+                    fallback_route={"slot": "gpt", "reasoning_effort": "low"},
+                    dependencies={}, providers={}, store=object(), reveal_incident=False,
+                )
+                self.assertEqual({"admitted": False, "reason": "non_retryable_hard_security"}, decision)
+                plan.assert_not_called()
 
     def test_worst_case_projection_is_soft_when_each_call_fits(self) -> None:
         rows = [

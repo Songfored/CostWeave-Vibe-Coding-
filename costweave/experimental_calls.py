@@ -747,13 +747,16 @@ class ExperimentalCallStore:
         return True
 
     def budget_headroom(
-        self, experiment_id: str, *, provider: str
+        self, experiment_id: str, *, provider: str,
+        pending_reservations: Mapping[str, tuple[str, float]] | None = None,
     ) -> dict[str, Any]:
         """Return a conservative read-only budget snapshot for route choice.
 
         This snapshot is advisory: ``reserve`` remains the atomic authority and
         repeats every check, so a concurrent call cannot overspend based on a
-        stale fallback decision.
+        stale fallback decision. A caller dispatching concurrent work may
+        include the primary tasks it already admitted locally. Count their
+        allowance only until the corresponding reservation appears in this read.
         """
 
         with self._connection() as connection:
@@ -769,7 +772,7 @@ class ExperimentalCallStore:
                     "provider has no explicit experiment budget"
                 )
             rows = connection.execute(
-                "SELECT provider,status,reserved_cost,actual_cost "
+                "SELECT task_id,provider,status,reserved_cost,actual_cost "
                 "FROM external_calls WHERE experiment_id=?",
                 (experiment_id,),
             ).fetchall()
@@ -782,14 +785,22 @@ class ExperimentalCallStore:
         provider_committed = sum(
             committed(row) for row in rows if row["provider"] == provider
         )
+        registered = {row["task_id"] for row in rows}
+        outstanding = [
+            (owner, max(0.0, allowance))
+            for task, (owner, allowance) in (pending_reservations or {}).items()
+            if task not in registered
+        ]
+        total_committed += sum(allowance for _, allowance in outstanding)
+        provider_committed += sum(allowance for owner, allowance in outstanding if owner == provider)
         total_limit = float(experiment["total_cost_limit"])
         provider_limit = float(provider_limits[provider])
-        logical_limit = int(experiment["max_logical_calls"])
+        remaining_calls = max(0, int(experiment["max_logical_calls"]) - len(rows) - len(outstanding))
         if experiment["revision"] == USAGE_ONLY_POLICY_REVISION:
             return {"experiment_id": experiment_id, "provider": provider,
                     "experiment_status": str(experiment["status"]), "accounting_mode": "usage_only",
                     "total_remaining_usd": None, "provider_remaining_usd": None,
-                    "logical_calls_remaining": max(0, logical_limit - len(rows)),
+                    "logical_calls_remaining": remaining_calls,
                     "authoritative_at_reserve": True}
         return {
             "experiment_id": experiment_id,
@@ -801,7 +812,7 @@ class ExperimentalCallStore:
             "provider_remaining_usd": round(
                 max(0.0, provider_limit - provider_committed), 10
             ),
-            "logical_calls_remaining": max(0, logical_limit - len(rows)),
+            "logical_calls_remaining": remaining_calls,
             "authoritative_at_reserve": True,
         }
 

@@ -16,7 +16,7 @@ import re
 import sqlite3
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
@@ -30,6 +30,7 @@ from .adapters import (
     ExternalExecutionRequest,
     OpenAICompatibleHTTPAdapter,
 )
+from .aurora_checkpoint import CHECKPOINT_VERSION, analyze_report, terminal_checkpoint
 from .aurora_rescue_eval import (
     ALLOCATOR_CASES,
     AURORA_TASK_VERSION,
@@ -63,12 +64,13 @@ from .event_store import EventStore
 from .experimental_calls import ExperimentBudget, ExperimentalCallStore
 from .planning_contracts import WorkOrder
 from .provider_setup import DEFAULT_REGISTRY_FILE, project_root, utc_now
-from .real_smoke_eval import PRICE_ASSUMPTIONS, _atomic_json, _extract_json_object, _load_registry
+from .real_smoke_eval import PRICE_ASSUMPTIONS, _extract_json_object, _load_registry
 
 
-SCHEMA_VERSION = "pre-v0.7-aurora-real-pilot-11-r3-planner-billing-1"
-EXPERIMENT_ID = "experiment_aurora_real_pilot_20260902_v11_r3_0691_frozen"
-RUN_ID = "run_aurora_real_pilot_20260902_v11_r3_0691_frozen"
+SCHEMA_VERSION = "pre-v0.7-aurora-real-pilot-12-adaptive-execution-1"
+EXPERIMENT_ID = "experiment_aurora_real_pilot_20261119_v12_adaptive_execution"
+RUN_ID = "run_aurora_real_pilot_20261119_v12_adaptive_execution"
+PILOT_SUFFIX = "v12-adaptive-execution-20261119"
 AUTHORIZED_BUDGET_CNY: float | None = None
 AGGREGATE_AUTHORIZED_BUDGET_USD = 4.90
 PRIOR_INTERNAL_COST_USD = 2.61085564
@@ -77,9 +79,7 @@ PRIOR_INTERNAL_COST_USD = 2.61085564
 # whereas PRIOR_INTERNAL_COST_USD is retained only as a legacy conservative
 # reference and must never again be presented as an invoice amount.
 PRIOR_RECONCILED_BILLED_COST_CNY = 1.640709
-# v11-r3 remains inside the original cumulative 4.90 USD / 35 CNY envelope.
-# The launcher must pass the remaining caps after v11-r2 rather than granting
-# a second independent envelope.
+# The launcher supplies the explicitly authorized remaining caps for a fresh run.
 MAX_BUDGET_USD = AGGREGATE_AUTHORIZED_BUDGET_USD
 DEEPSEEK_REPORTED_BALANCE_CNY = 18.18
 RELAY_REPORTED_BALANCE_CNY = 18.73
@@ -155,6 +155,30 @@ PROVIDER_BY_SLOT = {
 
 class AuroraRealPilotError(RuntimeError):
     """Fail-closed preflight or execution error."""
+
+
+def _publish_new_json(path: Path, value: Mapping[str, Any]) -> str:
+    """Publish complete bytes once. A second runner cannot replace the winner."""
+    data = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(dir=path.parent)
+    temporary_path = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            if os.name == "nt":
+                # Windows rename fails if the target exists. POSIX rename replaces it.
+                os.rename(temporary_path, path)
+            else:
+                os.link(temporary_path, path)
+        except FileExistsError as error:
+            raise AuroraRealPilotError("Aurora artifact already exists") from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return hashlib.sha256(data).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,6 +526,7 @@ def _planned_call(
     return adapter, request, {
         **estimate,
         "node_id": node_id,
+        "task_id": request.task_id,
         "policy_id": policy_id,
         "provider_id": provider_id,
         "requested_model": providers[provider_id]["selected_model"],
@@ -554,6 +579,8 @@ def _select_reservation_wave(
     *,
     total_remaining_usd: float,
     provider_remaining_usd: Mapping[str, float],
+    logical_calls_remaining: float = math.inf,
+    max_workers: int | None = None,
 ) -> tuple[list[str], list[str]]:
     """Admit a safe useful sub-wave instead of reserving the entire DAG."""
 
@@ -574,16 +601,21 @@ def _select_reservation_wave(
     admitted: list[str] = []
     deferred: list[str] = []
     for node_id in ordered:
+        if max_workers is not None and len(admitted) >= max_workers:
+            break
         plan = plans[node_id]
         provider = str(plan["provider_id"])
         required = float(plan["required_work_order_cost_limit_usd"])
         if (
             required <= total_left + 1e-12
             and required <= provider_left.get(provider, 0.0) + 1e-12
+            and (provider == "local-deterministic" or logical_calls_remaining > 0)
         ):
             admitted.append(node_id)
             total_left -= required
             provider_left[provider] = provider_left.get(provider, 0.0) - required
+            if provider != "local-deterministic":
+                logical_calls_remaining -= 1
         else:
             deferred.append(node_id)
     admitted.sort(key=original_index.__getitem__)
@@ -599,11 +631,13 @@ def _admit_runtime_wave(
     snapshot: Mapping[str, Mapping[str, Any]],
     providers: Mapping[str, Mapping[str, Any]],
     store: ExperimentalCallStore,
+    max_workers: int,
+    pending_reservations: Mapping[str, tuple[str, float]],
 ) -> tuple[list[str], list[str], dict[str, Mapping[str, Any]]]:
     """Plan a sub-wave; fail open while atomic reservations remain authoritative."""
 
     if not hasattr(store, "budget_headroom"):
-        return list(runnable), [], {}
+        return list(runnable[:max_workers]), [], {}
     try:
         plans: dict[str, Mapping[str, Any]] = {}
         for node_id in runnable:
@@ -620,13 +654,10 @@ def _admit_runtime_wave(
                 node_id=node_id,
                 policy_id=policy_id,
                 route=routes[node_id],
-                dependencies={
-                    dependency: snapshot[dependency]
-                    for dependency in REAL_NODES[node_id].dependencies
-                },
+                dependencies=_call_dependencies(node_id, snapshot),
                 providers=providers,
                 store=store,
-                reveal_incident=node_id == "incident_replan",
+                reveal_incident=node_id == "incident_replan" or node_id in VIRTUAL_SPECS,
             )
             plans[node_id] = plan
         paid_providers = {
@@ -635,7 +666,9 @@ def _admit_runtime_wave(
             if str(plan["provider_id"]) != "local-deterministic"
         }
         snapshots = {
-            provider: store.budget_headroom(EXPERIMENT_ID, provider=provider)
+            provider: store.budget_headroom(
+                EXPERIMENT_ID, provider=provider, pending_reservations=pending_reservations
+            )
             for provider in paid_providers
         }
         total_remaining = min(
@@ -652,12 +685,16 @@ def _admit_runtime_wave(
             plans,
             total_remaining_usd=total_remaining,
             provider_remaining_usd=provider_remaining,
+            logical_calls_remaining=min(
+                (item["logical_calls_remaining"] for item in snapshots.values()), default=math.inf
+            ),
+            max_workers=max_workers,
         )
         return admitted, deferred, plans
     except Exception:
         # Admission planning is advisory. The atomic store still blocks any
         # real overspend, so diagnostic failure must not stop a healthy run.
-        return list(runnable), [], {}
+        return list(runnable[:max_workers]), [], {}
 
 
 def _validate_virtual(
@@ -1032,22 +1069,23 @@ def _failure_category(row: Mapping[str, Any]) -> str:
     status = str(row.get("status") or "")
     diagnostic = str(row.get("diagnostic") or "").lower()
     error = str(row.get("error") or "").lower()
+    finish_reasons = {
+        str(reason).strip().lower() for reason in (row.get("finish_reasons") or ())
+    }
+    if error == "promptinjectionerror" or finish_reasons & {"content_filter", "refusal"}:
+        return "hard_security"
     if any(
         marker in diagnostic
         for marker in (
             "secret_exposure_detected",
             "credential_exposure",
             "prompt_injection_confirmed",
+            "requires a separate security approval",
         )
     ):
         return "hard_security"
     if status.startswith("blocked_budget") or "budget" in diagnostic:
         return "budget"
-    finish_reasons = {
-        str(reason).strip().lower()
-        for reason in row.get("finish_reasons", [])
-        if reason is not None
-    }
     if diagnostic == "truncated_output" or finish_reasons.intersection(
         {"length", "max_tokens", "max_output_tokens"}
     ):
@@ -1511,6 +1549,106 @@ def _virtual_dependencies(
     return base
 
 
+def _call_dependencies(
+    node_id: str, artifacts: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Mapping[str, Any]]:
+    if node_id in VIRTUAL_SPECS:
+        return _virtual_dependencies(node_id, artifacts)
+    return {dep: artifacts[dep] for dep in REAL_NODES[node_id].dependencies}
+
+
+def _run_ready_nodes(
+    dependencies: Mapping[str, Sequence[str]],
+    *,
+    policy_id: str,
+    routes: Mapping[str, Mapping[str, str]],
+    artifacts: dict[str, Mapping[str, Any]],
+    providers: Mapping[str, Mapping[str, Any]],
+    store: ExperimentalCallStore,
+    max_workers: int,
+    origin: float,
+    rows: dict[str, dict[str, Any]],
+    dispatches: list[list[str]],
+    deferrals: list[dict[str, Any]],
+) -> None:
+    """Only the coordinator publishes accepted artifacts and releases successors."""
+    pending = {node_id: deps for node_id, deps in dependencies.items()
+               if node_id not in artifacts and node_id not in rows}
+    running = {}
+    active_plans: dict[str, Mapping[str, Any]] = {}
+    ready_at: dict[str, float] = {}
+
+    def execute(node_id, snapshot):
+        started = time.perf_counter()
+        row, artifact = _execute_node(
+            node_id=node_id, policy_id=policy_id, route=routes[node_id],
+            dependencies=_call_dependencies(node_id, snapshot), all_artifacts=snapshot,
+            providers=providers, store=store,
+            reveal_incident=node_id == "incident_replan" or node_id in VIRTUAL_SPECS,
+        )
+        finished = time.perf_counter()
+        return {**row, "started_at_ms": (started - origin) * 1000,
+                "finished_at_ms": (finished - origin) * 1000}, artifact
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f"aurora-{policy_id}") as pool:
+        while pending or running:
+            ready = [node for node, deps in pending.items() if all(dep in artifacts for dep in deps)]
+            now = (time.perf_counter() - origin) * 1000
+            for node in ready:
+                ready_at.setdefault(node, now)
+            slots = max_workers - len(running)
+            if ready and slots:
+                snapshot = dict(artifacts)
+                admitted, deferred, plans = _admit_runtime_wave(
+                    runnable=ready, policy_id=policy_id, routes=routes, snapshot=snapshot,
+                    providers=providers, store=store, max_workers=slots,
+                    pending_reservations={
+                        plan["task_id"]: (plan["provider_id"], plan["required_work_order_cost_limit_usd"])
+                        for plan in active_plans.values()
+                    },
+                )
+                if deferred:
+                    deferrals.append({
+                        "deferred": deferred, "admitted": admitted,
+                        "required_reservations_usd": {
+                            node: plan["required_work_order_cost_limit_usd"] for node, plan in plans.items()
+                        },
+                    })
+                if admitted:
+                    dispatches.append(admitted)
+                    for node in admitted:
+                        plan = plans.get(node, {})
+                        if "task_id" in plan:
+                            active_plans[node] = plan
+                        running[pool.submit(execute, node, snapshot)] = node
+                        del pending[node]
+                elif not running:
+                    # No outstanding reservation can settle and restore headroom.
+                    for node in ready:
+                        rows[node] = {
+                            "node_id": node, "status": "blocked_budget_hard_cap", "accepted": False,
+                            "actual_cost_usd": 0.0, "diagnostic": "no_single_call_reservation_fits_remaining_budget",
+                            **routes[node],
+                        }
+                        del pending[node]
+            if not running:
+                break
+            finished, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in finished:
+                node = running.pop(future)
+                row, artifact = future.result()
+                active_plans.pop(node, None)
+                row["ready_at_ms"] = ready_at[node]
+                rows[node] = row
+                if artifact is not None:
+                    artifacts[node] = artifact
+    for node, deps in pending.items():
+        rows[node] = {
+            "node_id": node, "status": "skipped_missing_dependencies", "accepted": False,
+            "missing_dependencies": sorted(set(deps) - artifacts.keys()), **routes[node],
+        }
+
+
 def _run_virtual_revisions(
     *,
     policy_id: str,
@@ -1518,34 +1656,23 @@ def _run_virtual_revisions(
     artifacts: dict[str, Mapping[str, Any]],
     providers: Mapping[str, Mapping[str, Any]],
     store: ExperimentalCallStore,
+    origin: float | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
-    rows: list[dict[str, Any]] = []
-    for group in (("provider_selection_v2", "deployment_plan_v2"), ("security_review_v2", "financial_review_v2")):
-        outcomes: dict[str, tuple[dict[str, Any], Mapping[str, Any] | None]] = {}
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="aurora-v2") as executor:
-            futures = {
-                executor.submit(
-                    _execute_node,
-                    node_id=node_id,
-                    policy_id=policy_id,
-                    route=routes[node_id],
-                    dependencies=_virtual_dependencies(node_id, artifacts),
-                    all_artifacts=dict(artifacts),
-                    providers=providers,
-                    store=store,
-                    reveal_incident=True,
-                ): node_id
-                for node_id in group
-            }
-            for future in as_completed(futures):
-                outcomes[futures[future]] = future.result()
-        for node_id in group:
-            row, artifact = outcomes[node_id]
-            rows.append(row)
-            if artifact is not None:
-                artifacts[node_id] = artifact
-        if any(node_id not in artifacts for node_id in group):
-            return rows, False
+    dependencies = {
+        "provider_selection_v2": ("incident_replan", "provider_selection"),
+        "deployment_plan_v2": ("incident_replan", "deployment_plan"),
+        "security_review_v2": ("incident_replan", "deployment_plan_v2"),
+        "financial_review_v2": ("incident_replan", "provider_selection_v2"),
+    }
+    outcomes: dict[str, dict[str, Any]] = {}
+    _run_ready_nodes(
+        dependencies, policy_id=policy_id, routes=routes, artifacts=artifacts, providers=providers,
+        store=store, max_workers=2, origin=time.perf_counter() if origin is None else origin,
+        rows=outcomes, dispatches=[], deferrals=[],
+    )
+    rows = [outcomes[node] for node in dependencies if node in outcomes]
+    if not all(node in artifacts for node in dependencies):
+        return rows, False
     command = dict(artifacts["incident_replan"])
     command["provider_plan_v2"] = dict(artifacts["provider_selection_v2"])
     command["deployment_plan_v2"] = dict(artifacts["deployment_plan_v2"])
@@ -1673,6 +1800,18 @@ def _load_virtual_verification_checkpoints(root: Path) -> dict[str, bool]:
     }
 
 
+def _overlap_ms(rows: Sequence[Mapping[str, Any]]) -> float:
+    """Return concurrent worker time, excluding idle gaps between independent branches."""
+    intervals = sorted((row["started_at_ms"], row["finished_at_ms"])
+                       for row in rows if "started_at_ms" in row)
+    overlap = 0.0
+    busy_until = 0.0
+    for started, finished in intervals:
+        overlap += max(0.0, min(busy_until, finished) - started)
+        busy_until = max(busy_until, finished)
+    return overlap
+
+
 def _execute_policy(
     *,
     policy_id: str,
@@ -1683,184 +1822,93 @@ def _execute_policy(
     terminal_failures: Mapping[str, str] | None = None,
     virtual_revisions_verified: bool = False,
 ) -> dict[str, Any]:
-    artifacts: dict[str, Mapping[str, Any]] = dict(seed_artifacts or {})
+    artifacts: dict[str, Mapping[str, Any]] = {}
+    checkpoints = dict(seed_artifacts or {})
     learned_failures = dict(terminal_failures or {})
-    rows: list[dict[str, Any]] = []
-    stage_rows: list[dict[str, Any]] = []
+    outcomes: dict[str, dict[str, Any]] = {}
+    dispatches: list[list[str]] = []
+    deferrals: list[dict[str, Any]] = []
+    virtual_rows: list[dict[str, Any]] = []
+    verified_checkpoint = False
     started = time.perf_counter()
-    for stage in STAGES:
-        stage_started = time.perf_counter()
-        reused = [node_id for node_id in stage if node_id in artifacts]
-        outcomes: dict[str, tuple[dict[str, Any], Mapping[str, Any] | None]] = {}
-        attempted: set[str] = set()
-        runnable_all: list[str] = []
-        waves: list[list[str]] = []
-        budget_deferrals: list[dict[str, Any]] = []
-        while True:
-            snapshot = dict(artifacts)
-            runnable = [
-                node_id
-                for node_id in stage
-                if node_id not in artifacts
-                and node_id not in attempted
-                and node_id not in learned_failures
-                and all(
-                    dependency in snapshot
-                    for dependency in REAL_NODES[node_id].dependencies
+
+    # The frozen incident is disclosed only after all pre-incident work has
+    # settled. All other stage numbers describe the report, not scheduling.
+    release_stage = INCIDENT_PACKET["release_stage"]
+    before_reveal = [node.node_id for node in NODES if node.stage < release_stage]
+    after_reveal = [node.node_id for node in NODES if node.stage >= release_stage
+                    and node.node_id != "incident_replan"]
+    max_workers = max(len(stage) for stage in STAGES)
+    for phase in (before_reveal, ["incident_replan"], after_reveal):
+        for node in phase:
+            artifact = checkpoints.get(node)
+            deps = REAL_NODES[node].dependencies
+            if artifact is not None and all(dep in artifacts for dep in deps):
+                validation = validate_node(
+                    node, artifact, artifacts, incident_revealed=node in {"incident_replan", "final_assembly"}
                 )
-            ]
-            if not runnable:
-                break
-            admitted, deferred, admission_plans = _admit_runtime_wave(
-                runnable=runnable,
-                policy_id=policy_id,
-                routes=routes,
-                snapshot=snapshot,
-                providers=providers,
-                store=store,
-            )
-            if deferred:
-                budget_deferrals.append(
-                    {
-                        "deferred": list(deferred),
-                        "admitted": list(admitted),
-                        "required_reservations_usd": {
-                            node_id: admission_plans.get(node_id, {}).get(
-                                "required_work_order_cost_limit_usd"
-                            )
-                            for node_id in runnable
-                        },
+                if validation.accepted:
+                    artifacts[node] = artifact
+                    outcomes[node] = {
+                        "node_id": node, "status": "reused_prior_checkpoint", "accepted": True,
+                        "actual_cost_usd": 0.0, **routes[node],
+                        "checkpoint_sha256": hashlib.sha256(json.dumps(
+                            artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                        ).encode("utf-8")).hexdigest(),
                     }
-                )
-            if not admitted:
-                for node_id in runnable:
-                    outcomes[node_id] = (
-                        {
-                            "node_id": node_id,
-                            "status": "blocked_budget_hard_cap",
-                            "accepted": False,
-                            "actual_cost_usd": 0.0,
-                            "diagnostic": "no_single_call_reservation_fits_remaining_budget",
-                            **routes[node_id],
-                        },
-                        None,
-                    )
-                attempted.update(runnable)
-                break
-            waves.append(list(admitted))
-            runnable_all.extend(admitted)
-            attempted.update(admitted)
-            wave_outcomes: dict[
-                str, tuple[dict[str, Any], Mapping[str, Any] | None]
-            ] = {}
-            with ThreadPoolExecutor(
-                max_workers=max(1, len(admitted)),
-                thread_name_prefix=f"aurora-{policy_id}",
-            ) as executor:
-                futures = {
-                    executor.submit(
-                        _execute_node,
-                        node_id=node_id,
-                        policy_id=policy_id,
-                        route=routes[node_id],
-                        dependencies={
-                            dependency: snapshot[dependency]
-                            for dependency in REAL_NODES[node_id].dependencies
-                        },
-                        all_artifacts=snapshot,
-                        providers=providers,
-                        store=store,
-                        reveal_incident=node_id == "incident_replan",
-                    ): node_id
-                    for node_id in admitted
+            if node not in artifacts and node in learned_failures:
+                outcomes[node] = {
+                    "node_id": node, "status": "skipped_learned_terminal_failure", "accepted": False,
+                    "actual_cost_usd": 0.0, "reason": learned_failures[node], **routes[node],
                 }
-                for future in as_completed(futures):
-                    wave_outcomes[futures[future]] = future.result()
-            outcomes.update(wave_outcomes)
-            for node_id in admitted:
-                _, artifact = wave_outcomes[node_id]
-                if artifact is not None:
-                    artifacts[node_id] = artifact
-        skipped = [
-            node_id
-            for node_id in stage
-            if node_id not in artifacts and node_id not in attempted
-        ]
-        for node_id in stage:
-            if node_id in outcomes:
-                row, _ = outcomes[node_id]
-                rows.append(row)
-            elif node_id in reused:
-                rows.append(
-                    {
-                        "node_id": node_id,
-                        "status": "reused_prior_checkpoint",
-                        "accepted": True,
-                        "actual_cost_usd": 0.0,
-                        "checkpoint_sha256": hashlib.sha256(
-                            json.dumps(
-                                artifacts[node_id],
-                                ensure_ascii=False,
-                                sort_keys=True,
-                                separators=(",", ":"),
-                            ).encode("utf-8")
-                        ).hexdigest(),
-                        **routes[node_id],
-                    }
-                )
-            elif node_id in learned_failures:
-                rows.append(
-                    {
-                        "node_id": node_id,
-                        "status": "skipped_learned_terminal_failure",
-                        "accepted": False,
-                        "actual_cost_usd": 0.0,
-                        "reason": learned_failures[node_id],
-                        **routes[node_id],
-                    }
-                )
-            else:
-                rows.append({"node_id": node_id, "status": "skipped_missing_dependencies", "accepted": False, "missing_dependencies": sorted(set(REAL_NODES[node_id].dependencies) - set(artifacts)), **routes[node_id]})
-        wall_ms = round((time.perf_counter() - stage_started) * 1000, 3)
-        sum_ms = sum(
-            float(outcomes[node][0].get("elapsed_ms") or 0)
-            for node in runnable_all
+
+        _run_ready_nodes(
+            {node: REAL_NODES[node].dependencies for node in phase},
+            policy_id=policy_id, routes=routes, artifacts=artifacts, providers=providers,
+            store=store, max_workers=max_workers, origin=started, rows=outcomes,
+            dispatches=dispatches, deferrals=deferrals,
         )
-        stage_rows.append({
-            "stage": REAL_NODES[stage[0]].stage,
-            "nodes": list(stage),
-            "runnable": runnable_all,
-            "waves": waves,
-            "budget_deferrals": budget_deferrals,
-            "reused_checkpoints": reused,
-            "skipped": skipped,
-            "wall_ms": wall_ms,
-            "sum_node_elapsed_ms": round(sum_ms, 3),
-            "observed_parallel_overlap_ms": round(max(0, sum_ms - wall_ms), 3),
-        })
-        if (
-            "incident_replan" in stage
-            and "incident_replan" in artifacts
-            and not virtual_revisions_verified
-        ):
-            virtual_rows, accepted = _run_virtual_revisions(
-                policy_id=policy_id,
-                routes=routes,
-                artifacts=artifacts,
-                providers=providers,
-                store=store,
+        if phase == ["incident_replan"] and "incident_replan" in artifacts:
+            verified_checkpoint = virtual_revisions_verified and (
+                outcomes["incident_replan"]["status"] == "reused_prior_checkpoint"
             )
-            rows.extend(virtual_rows)
-            if not accepted:
-                artifacts.pop("incident_replan", None)
+            if not verified_checkpoint:
+                virtual_rows, accepted = _run_virtual_revisions(
+                    policy_id=policy_id, routes=routes, artifacts=artifacts,
+                    providers=providers, store=store, origin=started,
+                )
+                if not accepted:
+                    del artifacts["incident_replan"]
+
+    stage_rows = []
+    for stage in STAGES:
+        waves = [[node for node in batch if node in stage] for batch in dispatches]
+        runnable = [node for batch in waves for node in batch]
+        timings = [outcomes[node] for node in runnable]
+        wall_ms = (max(row["finished_at_ms"] for row in timings)
+                   - min(row["started_at_ms"] for row in timings)) if timings else 0.0
+        sum_ms = sum(row["finished_at_ms"] - row["started_at_ms"] for row in timings)
+        stage_rows.append({
+            "stage": REAL_NODES[stage[0]].stage, "nodes": list(stage),
+            "runnable": runnable, "waves": [batch for batch in waves if batch],
+            "budget_deferrals": [item for item in deferrals if any(n in stage for n in item["deferred"])],
+            "reused_checkpoints": [n for n in stage if outcomes[n]["status"] == "reused_prior_checkpoint"],
+            "skipped": [n for n in stage if outcomes[n]["status"].startswith("skipped")],
+            "wall_ms": round(wall_ms, 3), "sum_node_elapsed_ms": round(sum_ms, 3),
+            "observed_parallel_overlap_ms": round(_overlap_ms(timings), 3),
+        })
+    rows = [outcomes[node] for node in before_reveal] + [outcomes["incident_replan"], *virtual_rows]
+    rows.extend(outcomes[node] for node in after_reveal)
     final = artifacts.get("final_assembly")
     final_validation = validate_node("final_assembly", final, artifacts, incident_revealed=True) if final else None
+    final_accepted = bool(final_validation and final_validation.accepted)
     actual_cost = round(sum(float(row.get("actual_cost_usd") or 0) for row in rows), 10)
     return {
         "policy_id": policy_id,
-        "accepted": bool(final_validation and final_validation.accepted),
+        "accepted": final_accepted,
+        "final_repair_checkpoint": terminal_checkpoint(policy_id, rows, final_accepted=final_accepted),
         "oracle_score": round(100 * sum(1 for node in NODES if node.node_id in artifacts) / len(NODES), 3),
-        "hard_gates_passed": bool(final_validation and final_validation.accepted),
+        "hard_gates_passed": final_accepted,
         "actual_cost_usd": actual_cost,
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
         "accepted_primary_artifacts": sum(node.node_id in artifacts for node in NODES),
@@ -1870,8 +1918,9 @@ def _execute_policy(
         "completed_model_calls": sum(row.get("status") == "completed" for row in rows),
         "fallback_attempts": sum(bool(row.get("fallback_used")) for row in rows),
         "fallback_recoveries": sum(row.get("fallback_status") == "recovered" for row in rows),
-        "virtual_reverification_skipped": virtual_revisions_verified,
-        "parallel_execution_observed": any(stage["observed_parallel_overlap_ms"] > 0 and len(stage["runnable"]) > 1 for stage in stage_rows),
+        "virtual_reverification_skipped": verified_checkpoint,
+        "scheduling_policy": "dependency_ready",
+        "parallel_execution_observed": _overlap_ms(rows) > 0,
         "stages": stage_rows,
         "nodes": rows,
         "final_output": dict(final) if final else None,
@@ -2305,7 +2354,7 @@ def run_preflight(
         "budget_gate_policy": {
             "hard": "actual spend plus active atomic reservations must remain within aggregate and provider caps",
             "preflight": "every individual call must fit; the all-fallback projection is advisory",
-            "runtime": "admit safe sub-waves and defer peers until reservations settle to actual cost",
+            "runtime": "admit dependency-ready nodes as workers finish and retry budget deferrals after settlement",
         },
         "provider_worst_case_usd": provider_worst,
         "authorized_budget_usd": budget_usd,
@@ -2339,11 +2388,11 @@ def run_real(
 ) -> dict[str, Any]:
     if not fresh_replay:
         raise AuroraRealPilotError(
-            "v11 quality verification requires --fresh-replay; old answers and checkpoints are forbidden"
+            "Aurora quality verification requires --fresh-replay"
         )
     if not math.isfinite(budget_usd) or not 0 < budget_usd <= MAX_BUDGET_USD:
         raise AuroraRealPilotError(
-            "v11 budget exceeds the fresh 4.90 USD aggregate authorization"
+            "Aurora reference budget must be positive and within the 4.90 USD ceiling"
         )
     if (
         budget_cny is None
@@ -2381,11 +2430,11 @@ def run_real(
     providers = {str(item["provider_id"]): item for item in provider_list}
     routes = freeze_routes()
     output_dir = root / "work/local-data/real-eval"
-    suffix = "v11-r3-0691-frozen"
+    suffix = PILOT_SUFFIX
     frozen_path = output_dir / f"aurora-real-pilot-{suffix}-frozen.json"
     report_path = output_dir / f"aurora-real-pilot-{suffix}-result.json"
     runtime_path = root / f"work/local-data/aurora-real-pilot-{suffix}.sqlite3"
-    if runtime_path.exists() or report_path.exists():
+    if any(path.exists() for path in (runtime_path, report_path, frozen_path)):
         raise AuroraRealPilotError(
             f"Aurora {suffix} result already exists; refusing an accidental paid replay"
         )
@@ -2401,6 +2450,14 @@ def run_real(
     )
     frozen = {
         "schema_version": SCHEMA_VERSION,
+        "experiment_id": EXPERIMENT_ID,
+        "run_id": RUN_ID,
+        "checkpoint_schema_version": CHECKPOINT_VERSION,
+        "scheduling_policy": "dependency_ready",
+        "source_sha256": {
+            name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+            for name in ("aurora_real_pilot.py", "aurora_checkpoint.py", "aurora_rescue_eval.py", "experimental_calls.py")
+        },
         "created_at": utc_now(),
         "validator_version": VALIDATOR_VERSION,
         "task": frozen_task_record(),
@@ -2411,7 +2468,7 @@ def run_real(
         "preflight_without_secrets": {key: value for key, value in preflight.items() if key not in {"rows"}},
         "paid_calls_started": False,
     }
-    _atomic_json(frozen_path, frozen)
+    frozen_sha256 = _publish_new_json(frozen_path, frozen)
     EventStore(runtime_path)
     store = ExperimentalCallStore(runtime_path)
     # The aggregate ledger is the authoritative hard cap. Giving every provider
@@ -2472,6 +2529,7 @@ def run_real(
         row["latency_reduction_vs_all_premium"] = round((premium_elapsed - float(row["elapsed_ms"])) / premium_elapsed, 6) if premium_elapsed else None
     report = {
         "schema_version": SCHEMA_VERSION,
+        "frozen_sha256": frozen_sha256,
         "created_at": utc_now(),
         "experiment_id": EXPERIMENT_ID,
         "run_id": RUN_ID,
@@ -2530,18 +2588,30 @@ def run_real(
         "frozen_task_path": str(frozen_path.resolve()),
         "runtime_path": str(runtime_path.resolve()),
     }
-    _atomic_json(report_path, report)
+    _publish_new_json(report_path, report)
     return {**report, "report_path": str(report_path.resolve())}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the authorized Aurora real parallel pilot")
-    parser.add_argument("--preflight", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--preflight", action="store_true")
+    mode.add_argument("--analyze-report", type=Path, help="Read terminal blockers from a saved result file offline")
     parser.add_argument("--fresh-replay", action="store_true")
     parser.add_argument("--budget-usd", type=float)
     parser.add_argument("--budget-cny", type=float)
     parser.add_argument("--root", type=Path, default=project_root())
     args = parser.parse_args(argv)
+    if args.analyze_report is not None:
+        if args.fresh_replay or args.budget_usd is not None or args.budget_cny is not None:
+            parser.error("--analyze-report takes no replay or budget options")
+        try:
+            result = analyze_report(args.analyze_report)
+        except (ValueError, OSError, RecursionError) as error:
+            print(json.dumps({"status": "invalid_report", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     budget_usd = (
         args.budget_usd
         if args.budget_usd is not None
