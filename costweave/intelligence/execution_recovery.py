@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from ..contracts_v4 import utc_now
+from .final_repair import POLICY_REVISION as FINAL_REPAIR_REVISION, REPAIR_ACTIONS, parse_repair_request, select_final_repair
 from .common import (
     NonNegativeEstimate,
     ProbabilityInterval,
@@ -303,6 +304,7 @@ class ExecutionSnapshotV1:
     observed_at: str
     evidence_ids: tuple[str, ...]
     schema_version: str = EXECUTION_RECOVERY_SCHEMA_VERSION
+    repair_allocation: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_id", bounded_text(self.project_id, "project_id", maximum=200))
@@ -345,6 +347,8 @@ class ExecutionSnapshotV1:
         for field in ("max_retries", "max_switches", "max_subgraph_replans", "max_full_replans"):
             object.__setattr__(self, field, _non_negative_int(getattr(self, field), field, maximum=1000))
         object.__setattr__(self, "observed_at", validate_timestamp(self.observed_at, "observed_at"))
+        if self.repair_allocation is not None:
+            object.__setattr__(self, "repair_allocation", parse_repair_request(self.repair_allocation))
         if self.schema_version != EXECUTION_RECOVERY_SCHEMA_VERSION:
             raise ValueError(f"schema_version must be {EXECUTION_RECOVERY_SCHEMA_VERSION}")
 
@@ -367,6 +371,7 @@ class ExecutionSnapshotV1:
             "max_switches": self.max_switches, "max_subgraph_replans": self.max_subgraph_replans,
             "max_full_replans": self.max_full_replans, "observed_at": self.observed_at,
             "evidence_ids": list(self.evidence_ids), "schema_version": self.schema_version,
+            **({"repair_allocation": self.repair_allocation} if self.repair_allocation is not None else {}),
         }
 
     @classmethod
@@ -381,6 +386,7 @@ class ExecutionSnapshotV1:
                 "risk_loss_usd", "max_retries", "max_switches", "max_subgraph_replans", "max_full_replans",
                 "observed_at", "evidence_ids", "schema_version",
             }),
+            optional=frozenset({"repair_allocation"}),
         )
         return cls(
             project_id=value["project_id"], case_id=value["case_id"], objective_hash=value["objective_hash"],
@@ -397,6 +403,7 @@ class ExecutionSnapshotV1:
             max_retries=value["max_retries"], max_switches=value["max_switches"],
             max_subgraph_replans=value["max_subgraph_replans"], max_full_replans=value["max_full_replans"],
             observed_at=value["observed_at"], evidence_ids=tuple(value["evidence_ids"]), schema_version=value["schema_version"],
+            repair_allocation=value.get("repair_allocation"),
         )
 
 
@@ -599,8 +606,8 @@ class ExecutionRecoveryDecisionV1:
     belief: ProgressBeliefV1
     options: tuple[RecoveryOptionV1, ...]
     baseline_cps: Mapping[str, float]
-    recovery_advantage_usd: float
-    decision_confidence: float
+    recovery_advantage_usd: float | None
+    decision_confidence: float | None
     trigger_reasons: tuple[str, ...]
     reason_codes: tuple[str, ...]
     evidence_ids: tuple[str, ...]
@@ -612,22 +619,31 @@ class ExecutionRecoveryDecisionV1:
     trace_hash: str = ""
     policy_revision: str = EXECUTION_RECOVERY_POLICY_REVISION
     schema_version: str = EXECUTION_RECOVERY_SCHEMA_VERSION
+    final_repair: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_id", bounded_text(self.project_id, "project_id", maximum=200))
         object.__setattr__(self, "case_id", bounded_text(self.case_id, "case_id", maximum=200))
         if self.stage not in EXECUTION_STAGES:
             raise ValueError(f"unsupported stage: {self.stage!r}")
-        if self.action not in EXECUTION_ACTIONS:
+        if self.action not in EXECUTION_ACTIONS and not (self.final_repair is not None and self.action in REPAIR_ACTIONS):
             raise ValueError(f"unsupported recovery action: {self.action!r}")
         if not isinstance(self.belief, ProgressBeliefV1):
             raise TypeError("belief must be ProgressBeliefV1")
-        if not self.options or any(not isinstance(item, RecoveryOptionV1) for item in self.options):
+        paired = self.final_repair is not None
+        if paired:
+            report = _mapping(self.final_repair, "final_repair")
+            if report.get("policy_revision") != FINAL_REPAIR_REVISION or report.get("action") != self.action:
+                raise ValueError("final repair report must match its revision and decision action")
+            object.__setattr__(self, "final_repair", report)
+        if (not self.options and not paired) or any(not isinstance(item, RecoveryOptionV1) for item in self.options):
             raise ValueError("options must contain RecoveryOptionV1")
         object.__setattr__(self, "options", tuple(self.options))
         object.__setattr__(self, "baseline_cps", {bounded_text(key, "baseline_cps.key", maximum=64): _non_negative(value, "baseline_cps.value") for key, value in _mapping(self.baseline_cps, "baseline_cps").items()})
-        object.__setattr__(self, "recovery_advantage_usd", _non_negative(self.recovery_advantage_usd, "recovery_advantage_usd"))
-        object.__setattr__(self, "decision_confidence", probability(self.decision_confidence, "decision_confidence"))
+        if not paired or self.recovery_advantage_usd is not None:
+            object.__setattr__(self, "recovery_advantage_usd", _non_negative(self.recovery_advantage_usd, "recovery_advantage_usd"))
+        if not paired or self.decision_confidence is not None:
+            object.__setattr__(self, "decision_confidence", probability(self.decision_confidence, "decision_confidence"))
         object.__setattr__(self, "trigger_reasons", unique_texts(self.trigger_reasons, "trigger_reasons", maximum_items=128))
         object.__setattr__(self, "reason_codes", unique_texts(self.reason_codes, "reason_codes", maximum_items=128))
         object.__setattr__(self, "evidence_ids", unique_texts(self.evidence_ids, "evidence_ids", maximum_items=256))
@@ -637,8 +653,9 @@ class ExecutionRecoveryDecisionV1:
         object.__setattr__(self, "network_calls", _non_negative_int(self.network_calls, "network_calls"))
         if not self.advisory_only or self.production_route_intervention or self.provider_calls or self.network_calls:
             raise ValueError("v0.6.4 decisions must remain offline advisory-only")
-        if self.policy_revision != EXECUTION_RECOVERY_POLICY_REVISION:
-            raise ValueError(f"policy_revision must be {EXECUTION_RECOVERY_POLICY_REVISION}")
+        expected_revision = FINAL_REPAIR_REVISION if paired else EXECUTION_RECOVERY_POLICY_REVISION
+        if self.policy_revision != expected_revision:
+            raise ValueError(f"policy_revision must be {expected_revision}")
         if self.schema_version != EXECUTION_RECOVERY_SCHEMA_VERSION:
             raise ValueError(f"schema_version must be {EXECUTION_RECOVERY_SCHEMA_VERSION}")
         if self.decision_id:
@@ -659,6 +676,7 @@ class ExecutionRecoveryDecisionV1:
             "trigger_reasons": list(self.trigger_reasons), "reason_codes": list(self.reason_codes),
             "evidence_ids": list(self.evidence_ids), "policy_revision": self.policy_revision,
             "schema_version": self.schema_version,
+            **({"final_repair": self.final_repair} if self.final_repair is not None else {}),
         }
 
     @property
@@ -684,7 +702,7 @@ class ExecutionRecoveryDecisionV1:
                 "evidence_ids", "advisory_only", "production_route_intervention", "provider_calls",
                 "network_calls", "policy_revision", "schema_version",
             }),
-            optional=frozenset({"decision_id", "trace_hash", "belief_id"}),
+            optional=frozenset({"decision_id", "trace_hash", "belief_id", "final_repair"}),
         )
         item = cls(
             project_id=value["project_id"], case_id=value["case_id"], stage=value["stage"], action=value["action"],
@@ -697,6 +715,7 @@ class ExecutionRecoveryDecisionV1:
             provider_calls=value["provider_calls"], network_calls=value["network_calls"],
             decision_id=value.get("decision_id", ""), trace_hash=value.get("trace_hash", ""),
             policy_revision=value["policy_revision"], schema_version=value["schema_version"],
+            final_repair=value.get("final_repair"),
         )
         if "belief_id" in value and value["belief_id"] != item.belief.belief_id:
             raise ValueError("belief_id does not match content")
@@ -943,14 +962,26 @@ class EconomicRecoveryPlanner:
 
     def decide(self, snapshot: ExecutionSnapshotV1) -> tuple[ExecutionRecoveryDecisionV1, ProgressBeliefV1]:
         belief = self.updater.update(snapshot)
+        if snapshot.repair_allocation is not None:
+            report = select_final_repair(snapshot, snapshot.repair_allocation)
+            return ExecutionRecoveryDecisionV1(
+                project_id=snapshot.project_id, case_id=snapshot.case_id, stage=snapshot.stage,
+                action=report["action"], belief=belief, options=(), baseline_cps={},
+                recovery_advantage_usd=None, decision_confidence=None, trigger_reasons=belief.trigger_reasons,
+                reason_codes=tuple(report["reason_codes"]), evidence_ids=snapshot.evidence_ids,
+                policy_revision=FINAL_REPAIR_REVISION, final_repair=report,
+            ), belief
         options = self._options(snapshot, belief)
         feasible = [item for item in options if item.feasible]
         selected = min(feasible or [item for item in options if item.action == "STOP_AND_RETURN_PARTIAL"], key=lambda item: (item.expected_loss_usd, item.action))
         by_action = {item.action: item for item in options}
-        retry_cps = by_action["RETRY_NODE"].cps
         full_cps = by_action["FULL_REPLAN"].cps
-        baseline_cps = {"fixed_retry": retry_cps, "fixed_full_replan": full_cps, "dynamic_selected": selected.cps}
-        advantage = max(0.0, min(retry_cps, full_cps) - selected.cps)
+        baseline_cps = {"fixed_full_replan": full_cps, "dynamic_selected": selected.cps}
+        fixed_cps = full_cps
+        if "RETRY_NODE" in by_action:
+            baseline_cps["fixed_retry"] = by_action["RETRY_NODE"].cps
+            fixed_cps = min(fixed_cps, by_action["RETRY_NODE"].cps)
+        advantage = max(0.0, fixed_cps - selected.cps)
         feasible_losses = sorted(item.expected_loss_usd for item in feasible)
         margin = (feasible_losses[1] - feasible_losses[0]) if len(feasible_losses) > 1 else 0.0
         confidence = min(0.98, max(0.35, 0.55 + min(0.25, margin) + (0.08 if belief.validator_diversity >= 0.5 else 0.0) - (0.12 if belief.resource_pressure > 0.8 else 0.0)))

@@ -1,5 +1,7 @@
 # CostWeave
 
+整图 P95 回放与返修预算分配现已接入离线决策接口。[输入格式、运行示例与验证方法](docs/ADAPTIVE_EXECUTION.md)
+
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)

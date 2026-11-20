@@ -4,15 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
-from .intelligence.execution_recovery import run_demo
+from .intelligence.execution_recovery import EconomicRecoveryPlanner, ExecutionSnapshotV1, run_demo
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="CostWeave v0.6.4 offline execution recovery")
     parser.add_argument("--pretty", action="store_true", help="pretty-print JSON")
-    args = parser.parse_args()
-    decision = run_demo()
+    parser.add_argument("--input", type=Path, help="read an ExecutionSnapshotV1 JSON file in place of the demo")
+    args = parser.parse_args(argv)
+    try:
+        if args.input is None:
+            decision = run_demo()
+        else:
+            snapshot = ExecutionSnapshotV1.from_dict(json.loads(args.input.read_text(encoding="utf-8-sig")))
+            decision, _ = EconomicRecoveryPlanner().decide(snapshot)
+    except (OSError, TypeError, ValueError, KeyError) as error:
+        parser.error(str(error))
     payload = {
         "version": "0.6.4",
         "schema_version": "v0.6.4",
