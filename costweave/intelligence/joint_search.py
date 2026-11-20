@@ -29,6 +29,7 @@ from .common import (
     validate_exact_fields,
     validate_sha256,
 )
+from .dag_latency import DagLatencyReplay, DagLatencyReplayer, Scenarios, scenario_dict, validate_scenarios
 from .strategy import StrategyCandidateV1, StrategyNodeV1
 
 
@@ -297,6 +298,7 @@ class JointSearchProblemV1:
     historical_route_ids: Mapping[str, str] = field(default_factory=dict)
     planner_route_ids: Mapping[str, str] = field(default_factory=dict)
     reuse_count: int = 1
+    latency_scenarios: Scenarios = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_id", bounded_text(self.project_id, "project_id", maximum=200))
@@ -319,11 +321,13 @@ class JointSearchProblemV1:
                 raise ValueError(f"node dependencies do not exist: {sorted(missing)!r}")
         object.__setattr__(self, "nodes", nodes)
         route_sets = tuple(self.route_sets)
-        if {item.node_id for item in route_sets} != node_ids:
-            raise ValueError("route_sets must cover each task node exactly once")
         if any(not isinstance(item, JointRouteSetV1) for item in route_sets):
             raise TypeError("route_sets must contain JointRouteSetV1")
+        if len(route_sets) != len(node_ids) or {item.node_id for item in route_sets} != node_ids:
+            raise ValueError("route_sets must cover each task node exactly once")
         object.__setattr__(self, "route_sets", tuple(sorted(route_sets, key=lambda item: item.node_id)))
+        permitted_routes = {item.node_id: {route.route_id for route in item.options} for item in route_sets}
+        object.__setattr__(self, "latency_scenarios", validate_scenarios(self.latency_scenarios, permitted_routes))
         object.__setattr__(self, "deadline_ms", _positive_int(self.deadline_ms, "deadline_ms", maximum=86_400_000))
         object.__setattr__(self, "min_success_lower", probability(self.min_success_lower, "min_success_lower"))
         object.__setattr__(self, "max_parallelism", _positive_int(self.max_parallelism, "max_parallelism", maximum=1_000))
@@ -373,12 +377,13 @@ class JointSearchProblemV1:
             "management_modes": list(self.management_modes), "recovery_policies": list(self.recovery_policies),
             "historical_route_ids": dict(self.historical_route_ids), "planner_route_ids": dict(self.planner_route_ids),
             "reuse_count": self.reuse_count, "schema_version": JOINT_SEARCH_SCHEMA_VERSION,
+            **({"latency_scenarios": scenario_dict(self.latency_scenarios)} if self.latency_scenarios else {}),
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "JointSearchProblemV1":
         required = frozenset({"project_id", "case_id", "task_family", "nodes", "route_sets", "budget", "deadline_ms", "min_success_lower", "max_parallelism", "max_information_loss", "failure_loss_usd", "latency_weight_usd_per_second", "allowed_tools", "allowed_authority_scopes", "required_deliverables", "management_modes", "recovery_policies", "historical_route_ids", "planner_route_ids", "reuse_count", "schema_version"})
-        validate_exact_fields(value, required=required)
+        validate_exact_fields(value, required=required, optional=frozenset({"latency_scenarios"}))
         if value["schema_version"] != JOINT_SEARCH_SCHEMA_VERSION:
             raise ValueError("unsupported joint search problem schema_version")
         return cls(
@@ -389,6 +394,7 @@ class JointSearchProblemV1:
             max_information_loss=value["max_information_loss"], failure_loss_usd=value["failure_loss_usd"], latency_weight_usd_per_second=value["latency_weight_usd_per_second"],
             allowed_tools=tuple(value["allowed_tools"]), allowed_authority_scopes=tuple(value["allowed_authority_scopes"]), required_deliverables=tuple(value["required_deliverables"]),
             management_modes=tuple(value["management_modes"]), recovery_policies=tuple(value["recovery_policies"]), historical_route_ids=value["historical_route_ids"], planner_route_ids=value["planner_route_ids"], reuse_count=value["reuse_count"],
+            latency_scenarios=value.get("latency_scenarios", {}),
         )
 
 
@@ -433,11 +439,14 @@ class JointSearchCandidateV1:
     hard_constraint_checks: Mapping[str, bool]
     candidate_id: str | None = None
     schema_version: str = JOINT_SEARCH_SCHEMA_VERSION
+    latency_replay: DagLatencyReplay | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "case_id", bounded_text(self.case_id, "case_id", maximum=200))
         if self.source not in JOINT_CANDIDATE_SOURCES:
             raise ValueError(f"unsupported candidate source: {self.source!r}")
+        if self.latency_replay is not None and not isinstance(self.latency_replay, DagLatencyReplay):
+            raise TypeError("latency_replay must be a DagLatencyReplay")
         if not isinstance(self.strategy, StrategyCandidateV1):
             raise TypeError("strategy must be StrategyCandidateV1")
         pairs = _route_pairs(_pairs_to_map(self.node_routes))
@@ -464,7 +473,13 @@ class JointSearchCandidateV1:
 
     @property
     def feasible(self) -> bool:
-        return all(self.hard_constraint_checks.values()) and self.compiler_audit.passed
+        return (self.latency_replay is None or self.latency_replay.status == "complete") and all(self.hard_constraint_checks.values()) and self.compiler_audit.passed
+
+    @property
+    def effective_p95_ms(self) -> float | None:
+        if self.latency_replay is not None:
+            return self.latency_replay.p95_ms
+        return self.strategy.predicted_total_latency_ms.p95
 
     @property
     def computed_id(self) -> str:
@@ -476,6 +491,7 @@ class JointSearchCandidateV1:
             "node_routes": [list(item) for item in self.node_routes], "parallel_width": self.parallel_width,
             "expected_loss": self.expected_loss, "cvar_tail_loss": self.cvar_tail_loss,
             "compiler_audit": self.compiler_audit.to_dict(), "hard_constraint_checks": dict(self.hard_constraint_checks), "schema_version": self.schema_version,
+            **({"latency_replay": self.latency_replay.to_dict()} if self.latency_replay is not None else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -486,8 +502,9 @@ class JointSearchCandidateV1:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "JointSearchCandidateV1":
         required = frozenset({"case_id", "source", "strategy", "node_routes", "parallel_width", "expected_loss", "cvar_tail_loss", "compiler_audit", "hard_constraint_checks", "schema_version"})
-        validate_exact_fields(value, required=required, optional=frozenset({"candidate_id"}))
-        return cls(case_id=value["case_id"], source=value["source"], strategy=StrategyCandidateV1.from_dict(value["strategy"]), node_routes=tuple((item[0], item[1]) for item in value["node_routes"]), parallel_width=value["parallel_width"], expected_loss=value["expected_loss"], cvar_tail_loss=value["cvar_tail_loss"], compiler_audit=PromptHandoffAuditV1.from_dict(value["compiler_audit"]), hard_constraint_checks=value["hard_constraint_checks"], candidate_id=value.get("candidate_id"), schema_version=value["schema_version"])
+        validate_exact_fields(value, required=required, optional=frozenset({"candidate_id", "latency_replay"}))
+        return cls(case_id=value["case_id"], source=value["source"], strategy=StrategyCandidateV1.from_dict(value["strategy"]), node_routes=tuple((item[0], item[1]) for item in value["node_routes"]), parallel_width=value["parallel_width"], expected_loss=value["expected_loss"], cvar_tail_loss=value["cvar_tail_loss"], compiler_audit=PromptHandoffAuditV1.from_dict(value["compiler_audit"]), hard_constraint_checks=value["hard_constraint_checks"], candidate_id=value.get("candidate_id"), schema_version=value["schema_version"],
+                   latency_replay=DagLatencyReplay.from_dict(value["latency_replay"]) if "latency_replay" in value else None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,14 +662,28 @@ class JointCandidateFactory:
                     seeds.append(("local_transform", transformed))
         seen: set[str] = set()
         results: list[JointSearchCandidateV1] = []
+        replayer = None
+        if problem.latency_scenarios:
+            replayer = DagLatencyReplayer(
+                {node.node_id: node.dependencies for node in problem.nodes},
+                problem.max_parallelism, problem.latency_scenarios,
+            )
+        replayed_routes: set[tuple[tuple[str, str], ...]] = set()
         for source, choices in seeds:
+            if replayer is not None:
+                # Every seed expands into the same management and recovery variants.
+                # Keep the first provenance for this route assignment.
+                route_key = tuple(sorted(choices.items()))
+                if route_key in replayed_routes:
+                    continue
+                replayed_routes.add(route_key)
             for mode in problem.management_modes:
                 if mode == "no_delegation" and len(problem.nodes) != 1:
                     continue
                 # Each recovery policy is a real search dimension, but we keep
                 # the Cartesian product bounded by the problem budget.
                 for recovery_policy in problem.recovery_policies[:3]:
-                    candidate = self._build(problem, source, mode, recovery_policy, choices, node_by_id, routes_by_node)
+                    candidate = self._build(problem, source, mode, recovery_policy, choices, node_by_id, routes_by_node, replayer)
                     if candidate.computed_id in seen:
                         continue
                     seen.add(candidate.computed_id)
@@ -661,7 +692,7 @@ class JointCandidateFactory:
                         return tuple(results)
         return tuple(results)
 
-    def _build(self, problem: JointSearchProblemV1, source: str, mode: str, recovery_policy: str, choices: Mapping[str, str], node_by_id: Mapping[str, JointTaskNodeV1], routes_by_node: Mapping[str, Mapping[str, JointRouteOptionV1]]) -> JointSearchCandidateV1:
+    def _build(self, problem: JointSearchProblemV1, source: str, mode: str, recovery_policy: str, choices: Mapping[str, str], node_by_id: Mapping[str, JointTaskNodeV1], routes_by_node: Mapping[str, Mapping[str, JointRouteOptionV1]], replayer: DagLatencyReplayer | None = None) -> JointSearchCandidateV1:
         selected: dict[str, JointRouteOptionV1] = {}
         missing = False
         for node_id in node_by_id:
@@ -706,19 +737,32 @@ class JointCandidateFactory:
             node_latency = 0.0 if route is None else route.predicted_latency_ms.p95 + route.validation_latency_ms.p95
             finish[node_id] = (max((finish[dep] for dep in node_by_id[node_id].dependencies), default=0.0) + node_latency)
         total_latency = planning_latency + max(finish.values() or [0.0])
+        deadline = min(problem.deadline_ms, problem.budget.wall_clock_ms)
+        replay = None
+        objective_latency = deadline_latency = total_latency
+        if replayer is not None:
+            replay = replayer.predict(
+                {node: route.route_id for node, route in selected.items()},
+                {node: route.capacity_units for node, route in selected.items()},
+                planning_latency, deadline,
+            )
+            if replay.status == "complete":
+                objective_latency = replay.mean_ms
+                deadline_latency = replay.p95_ms
+                parallel_width = replay.peak_slots
         handoff_cost = total_tokens * 0.00000002
         exploration_cost = planning_cost / problem.reuse_count
-        expected_loss = total_cost + handoff_cost + exploration_cost + problem.latency_weight_usd_per_second * total_latency / 1000.0 + problem.failure_loss_usd * (1.0 - lower)
-        tail_loss = total_p95_cost + handoff_cost * 1.5 + problem.latency_weight_usd_per_second * total_latency / 1000.0 + problem.failure_loss_usd
+        expected_loss = total_cost + handoff_cost + exploration_cost + problem.latency_weight_usd_per_second * objective_latency / 1000.0 + problem.failure_loss_usd * (1.0 - lower)
+        tail_loss = total_p95_cost + handoff_cost * 1.5 + problem.latency_weight_usd_per_second * deadline_latency / 1000.0 + problem.failure_loss_usd
         cvar_tail_loss = expected_loss + max(0.0, tail_loss - expected_loss) * (1.0 - lower) / 0.1
         checks = {
             "route_complete": not missing and len(selected) == len(node_by_id),
             "cost_known": all(route.cost_known for route in selected.values()),
-            "latency_known": all(route.latency_known for route in selected.values()),
+            "latency_known": all(route.latency_known for route in selected.values()) if replay is None else replay.status == "complete",
             "budget_money": total_cost <= problem.budget.money_usd + 1e-12,
             "budget_tokens": total_tokens <= problem.budget.input_tokens,
-            "deadline": total_latency <= min(problem.deadline_ms, problem.budget.wall_clock_ms),
-            "parallelism": parallel_width <= problem.max_parallelism,
+            "deadline": (replay is None or replay.status == "complete") and deadline_latency <= deadline,
+            "parallelism": parallel_width <= problem.max_parallelism and (replay is None or replay.status != "insufficient_slots"),
             "chance_constraint": lower >= problem.min_success_lower,
             "management_depth": mode != "expert" or 2 <= 2,
             "compiler": compiler.passed,
@@ -735,7 +779,7 @@ class JointCandidateFactory:
                 route = JointRouteOptionV1(route_id="missing-route", executor_id="unavailable", reasoning_tier="unknown", validator_id="validator:none", predicted_success=ProbabilityInterval(0.0, 0.0, 0.0), predicted_cost_usd=NonNegativeEstimate(0.0, 0.0), predicted_latency_ms=NonNegativeEstimate(0.0, 0.0))
             strategy_nodes.append(StrategyNodeV1(node_id=node.node_id, objective_hash=node.objective_hash, dependencies=node.dependencies, executor_id=route.executor_id, reasoning_tier=route.reasoning_tier, tool_ids=route.tool_ids, parallel_group=f"level-{depths[node_id]}", validator_id=route.validator_id, predicted_success=route.predicted_success, predicted_cost_usd=NonNegativeEstimate(route.predicted_cost_usd.mean + route.validation_cost_usd.mean, route.predicted_cost_usd.p95 + route.validation_cost_usd.p95), predicted_latency_ms=NonNegativeEstimate(route.predicted_latency_ms.mean + route.validation_latency_ms.mean, route.predicted_latency_ms.p95 + route.validation_latency_ms.p95)))
         strategy = StrategyCandidateV1(case_id=problem.case_id, management_mode=mode, nodes=tuple(strategy_nodes), planning_cost_usd=NonNegativeEstimate(planning_cost, planning_cost), planning_latency_ms=NonNegativeEstimate(planning_latency, planning_latency), predicted_success=ProbabilityInterval(success, lower, min(1.0, success + 0.1)), predicted_total_cost_usd=NonNegativeEstimate(total_cost, max(total_cost, total_p95_cost)), predicted_total_latency_ms=NonNegativeEstimate(total_latency * 0.7, total_latency), hard_constraint_checks=checks, recovery_policy=recovery_policy, evidence_ids=("joint-search-offline-fixture",), policy_revision=JOINT_SEARCH_POLICY_REVISION)
-        return JointSearchCandidateV1(case_id=problem.case_id, source=source, strategy=strategy, node_routes=_route_pairs(choices), parallel_width=parallel_width, expected_loss=expected_loss, cvar_tail_loss=cvar_tail_loss, compiler_audit=compiler, hard_constraint_checks=checks)
+        return JointSearchCandidateV1(case_id=problem.case_id, source=source, strategy=strategy, node_routes=_route_pairs(choices), parallel_width=parallel_width, expected_loss=expected_loss, cvar_tail_loss=cvar_tail_loss, compiler_audit=compiler, hard_constraint_checks=checks, latency_replay=replay)
 
 
 class JointStrategySearcher:
@@ -757,8 +801,8 @@ class JointStrategySearcher:
             for other in feasible:
                 if other.computed_id == candidate.computed_id:
                     continue
-                no_worse = other.expected_loss <= candidate.expected_loss and other.strategy.predicted_total_latency_ms.p95 <= candidate.strategy.predicted_total_latency_ms.p95 and other.strategy.predicted_success.lower >= candidate.strategy.predicted_success.lower
-                strictly = other.expected_loss < candidate.expected_loss or other.strategy.predicted_total_latency_ms.p95 < candidate.strategy.predicted_total_latency_ms.p95 or other.strategy.predicted_success.lower > candidate.strategy.predicted_success.lower
+                no_worse = other.expected_loss <= candidate.expected_loss and other.effective_p95_ms <= candidate.effective_p95_ms and other.strategy.predicted_success.lower >= candidate.strategy.predicted_success.lower
+                strictly = other.expected_loss < candidate.expected_loss or other.effective_p95_ms < candidate.effective_p95_ms or other.strategy.predicted_success.lower > candidate.strategy.predicted_success.lower
                 if no_worse and strictly:
                     dominated = True
                     break
@@ -771,6 +815,8 @@ class JointStrategySearcher:
             raise ValueError(f"unsupported searcher: {searcher!r}")
         candidates = list(self.factory.generate(problem))
         ordered = sorted(candidates, key=self._key)
+        if problem.latency_scenarios:
+            ordered.sort(key=lambda item: not item.feasible)
         budget = problem.budget
         trace: list[str] = [f"generated:{len(candidates)}"]
         if searcher == "greedy":
