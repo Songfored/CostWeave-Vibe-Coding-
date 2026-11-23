@@ -9,6 +9,7 @@ from pathlib import Path
 from costweave.decision_bridge import (
     DECISION_BRIDGE_SCHEMA_VERSION,
     DecisionOrchestratorV1,
+    failure_closed_envelope,
     MODULE_ORDER,
 )
 from costweave.domain import RunRequest, RunStatus
@@ -64,7 +65,12 @@ class DecisionBridgeV069Tests(unittest.TestCase):
         self.assertEqual(record.trace_id, envelope["trace_id"])
         self.assertFalse(envelope["failure_closed"])
         self.assertEqual(list(MODULE_ORDER), [item["module"] for item in envelope["module_receipts"]])
-        self.assertTrue(all(item["status"] == "ok" for item in envelope["module_receipts"]))
+        for item in envelope["module_receipts"]:
+            if item["module"] == "safe_learning":
+                self.assertEqual("insufficient_evidence", item["status"])
+                self.assertEqual(0, item["decision"]["observation_count"])
+            else:
+                self.assertEqual("ok", item["status"])
         self.assertEqual(
             {"formal_route": 0, "budget": 0, "task_status": 0, "dag_mutations": 0,
              "provider_calls": 0, "network_calls": 0, "external_calls": 0},
@@ -97,14 +103,39 @@ class DecisionBridgeV069Tests(unittest.TestCase):
         self.assertEqual(RunStatus.COMPLETED, record.status)
         envelope = record.decision_envelope
         self.assertTrue(envelope["failure_closed"])
-        self.assertEqual(
-            envelope["baseline_route"]["tasks"],
-            envelope["shadow_route"]["tasks"],
-        )
+        for failed in (envelope, failure_closed_envelope(record, "setup failed").to_dict()):
+            self.assertTrue(failed["baseline_route"]["tasks"])
+            self.assertIsNone(failed["shadow_route"]["tasks"])
+            self.assertIsNone(failed["shadow_route"]["estimated_total_cost_usd"])
+            self.assertFalse(failed["structured_diff"]["cost_comparable"])
         receipt = next(item for item in envelope["module_receipts"] if item["module"] == "joint_search")
         self.assertEqual("failed_closed", receipt["status"])
         self.assertIn("injected advisory failure", receipt["error"])
         self.assertEqual(0, envelope["effects"]["formal_route"])
+
+    def test_shadow_uses_the_selected_workers_own_quote_and_preserves_unknown(self):
+        option = {"route_id": "t:second", "executor_id": "second", "cost_known": True,
+                  "predicted_cost_usd": {"mean": 0.25}}
+        routes = [{"node_id": "t", "options": [option]}]
+        candidate = {"candidate_id": "plan", "strategy": {"management_mode": "no_delegation"},
+                     "node_routes": [["t", "t:second"]]}
+        decisions = {"meta_controller": {"decision": {"decision": {"action": "fast"}}},
+                     "joint_search": {"decision": {"decision": {"action": "SELECT", "selected_candidate_id": "plan",
+                                                                 "selected_candidate": candidate}}},
+                     "capability_graph": {"decision": {}}}
+        baseline = {"management_mode": "planner", "estimated_total_cost_usd": 1.0,
+                    "tasks": [{"task_id": "t", "worker_id": "first"}]}
+        shadow = DecisionOrchestratorV1._shadow_route(decisions, routes, failure_closed=False)
+        self.assertEqual(0.25, shadow["estimated_total_cost_usd"])
+        self.assertEqual("no_delegation", shadow["management_mode"])
+        changes = DecisionOrchestratorV1._route_diff(baseline, shadow)
+        self.assertEqual({"worker_id", "management_mode", "estimated_total_cost_usd"}, {row["field"] for row in changes})
+        option["cost_known"] = False
+        shadow = DecisionOrchestratorV1._shadow_route(decisions, routes, failure_closed=False)
+        self.assertIsNone(shadow["estimated_total_cost_usd"])
+        self.assertNotIn("estimated_total_cost_usd", [row["field"] for row in DecisionOrchestratorV1._route_diff(baseline, shadow)])
+        candidate["node_routes"] = []
+        self.assertIsNone(DecisionOrchestratorV1._shadow_route(decisions, routes, failure_closed=False)["tasks"])
 
     def test_envelope_round_trips_through_persistent_projection(self):
         manager, record = self._run()

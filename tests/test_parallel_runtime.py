@@ -400,6 +400,23 @@ class PersistentRuntimeStoreTests(unittest.TestCase):
         with self.assertRaises(BudgetUnavailable):
             self.reserve(estimated_cost=0.6, budget=1.0, spent=0.5)
 
+    def test_settled_cost_is_counted_once_for_new_work_and_retries(self):
+        first = self.reserve("task-a", estimated_cost=0.4)
+        self.reservations.release(first.reservation_id, reason="completed", actual_cost=0.35)
+        # A new instance can receive an older spent snapshot from its caller.
+        self.reservations = ReservationManager(self.path)
+        with self.assertRaises(BudgetUnavailable):
+            self.reserve("task-b", estimated_cost=0.7, spent=0.0)
+        second = self.reserve("task-b", estimated_cost=0.2, spent=0.0)
+        with self.assertRaises(BudgetUnavailable):
+            self.reservations.extend_cost(
+                second.reservation_id, additional_cost=0.5, budget=1.0, spent=0.0
+            )
+        # Once the caller catches up, it includes the same settled amount.
+        self.assertAlmostEqual(0.65, self.reservations.extend_cost(
+            second.reservation_id, additional_cost=0.45, budget=1.0, spent=0.35
+        ))
+
     def test_retry_cost_extension_is_atomic_and_budget_bounded(self):
         reservation = self.reserve(
             estimated_cost=0.4,
@@ -436,13 +453,19 @@ class PersistentRuntimeStoreTests(unittest.TestCase):
             )
         )
 
-    def test_startup_recovers_orphan_lease(self):
-        self.reserve()
+    def test_second_service_start_keeps_first_services_active_work(self):
         from costweave.control_kernel import ControlKernel
 
-        kernel = ControlKernel(self.path)
-        self.assertEqual(1, kernel.recovered_orphan_leases)
-        self.assertEqual(0, self.reservations.summary(self.run_id)["active_leases"])
+        first = ControlKernel(self.path)
+        self.reservations = first.reservations
+        reservation = self.reserve(lease_seconds=None)
+        second = ControlKernel(self.path)
+        with patch("costweave.reservations.utc_now", return_value="2099-01-01T00:00:00Z"):
+            self.assertEqual(0, second.reservations.availability(self.pool.pool_id)["slots"])
+            self.assertEqual(1, second.reservations.summary(self.run_id)["active_leases"])
+            self.assertAlmostEqual(0.2, second.reservations.summary(self.run_id)["reserved_cost"])
+        self.assertTrue(first.reservations.release(reservation.reservation_id, reason="completed", actual_cost=0.15))
+        self.assertAlmostEqual(0.15, second.reservations.summary(self.run_id)["released_actual_cost"])
 
     def test_resources_include_live_availability(self):
         resources = self.reservations.resources()
@@ -605,6 +628,31 @@ class ParallelRuntimeIntegrationTests(unittest.TestCase):
             recover=False,
         )
         return temp, manager
+
+    def test_startup_recovers_only_runs_without_unsettled_work(self):
+        temp, first = self.manager()
+        self.addCleanup(temp.cleanup)
+        self.addCleanup(first.shutdown)
+        with patch.object(first, "_start"):
+            active = first.create(RunRequest("分析产品需求", budget=2))
+        active.plan = first.engine.planner.plan(active.request)
+        first.control_kernel.checkpoint(active, source="test-before-dispatch")
+        pool = make_pool(slots=1, cpu=2)
+        leases = first.control_kernel.reservations
+        leases.register_pool(pool)
+        hold = leases.reserve(run_id=active.id, task_id=active.plan.tasks[0].id, attempt=1, pool=pool,
+                              request=ResourceRequest(slots=1), estimated_cost=0.2, budget=2.0, spent=0.0,
+                              lease_seconds=None)
+        db_path = str(first.control_kernel.store.path)
+        with patch.object(RunManager, "_start", autospec=True) as start:
+            second = RunManager(runtime_db_path=db_path)
+            self.addCleanup(second.shutdown)
+            start.assert_not_called()
+            self.assertEqual(active.runtime_revision, second.records[active.id].runtime_revision)
+            self.assertTrue(leases.release(hold.reservation_id, reason="completed", actual_cost=0.15))
+            third = RunManager(runtime_db_path=db_path)
+            self.addCleanup(third.shutdown)
+            start.assert_called_once_with(third, third.records[active.id], resume=True)
 
     def test_impossible_capacity_fails_before_first_attempt(self):
         temp, manager = self.manager()

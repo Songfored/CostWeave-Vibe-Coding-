@@ -912,7 +912,7 @@ MessageEnvelope：目标 / 范围 / 输入引用 / 输出规格 / 验收标准
 - 永久容量或期限不可能满足时直接拒绝，任务 `attempt` 仍为 0。
 - 临时容量不足、背压或熔断时节点留在 `pending`，无关分支继续运行。
 - 资源与预计成本在同一 SQLite 写事务内预留；`run + task + attempt` 是唯一键。
-- 执行成功、失败、取消或启动异常都会释放租约；重启会回收单实例遗留租约。
+- 调度器持有执行槽和预算，直到该次尝试结算。第二个服务启动时会跳过仍有待结算尝试的运行。显式限时的资源租约到期可释放执行槽，费用继续预留到确认实际金额。
 - Provider 暂时性异常最多重试两次，并驱动 closed → open → half-open 熔断状态。
 - 审批单拥有独立 revision 和 Idempotency-Key；审批只阻塞对应节点。
 - 默认使用关键路径策略，`COSTWEAVE_SCHEDULER_POLICY=fifo` 可切换兼容排序。
@@ -1070,6 +1070,6 @@ v0.3 仍限制最多一次全局重规划，防止模拟器无限循环。真正
 - 执行结果仍为离线模拟。
 - EventStore 当前为单进程、单机 SQLite，不是多进程或分布式调度器。
 - 资源容量来自模型目录派生的仿真资源池，不是操作系统或 GPU 实时遥测。
-- 启动回收假设单实例拥有数据库；多实例需要租约所有者、心跳和 fencing token。
+- 进程意外退出后，可用 `ReservationManager(db_path).pending_settlements(run_id)` 查看待核对的尝试。确认原执行者已停止并核实费用后，使用同一账本的 `release(reservation_id, reason="reconciled", actual_cost=amount)` 结算，确认为零费用时传入 `0`。服务下次启动会重新检查该运行的恢复条件。
 - Event payload 暂以完整运行投影换取简单确定的重放；后续版本可引入更细粒度 reducer 和周期快照。
 - Artifact 与运行事件目前分别使用短事务；外部 Provider 接入前仍需设计跨系统 outbox 和 Provider 幂等协议。

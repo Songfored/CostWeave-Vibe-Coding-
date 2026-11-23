@@ -225,11 +225,14 @@ class ParallelScheduler:
                 estimated_cost=task.estimated_cost,
                 budget=record.request.budget,
                 spent=record.spent,
+                lease_seconds=None,
             )
         except CapacityUnavailable:
             return StartDecision(
                 "queued", "capacity changed during reservation", None, 25
             )
+        if reservation.replayed:
+            return StartDecision("queued", "attempt already reserved", None, 25)
         return StartDecision("admitted", "resources reserved", reservation)
 
     async def execute_with_retry(

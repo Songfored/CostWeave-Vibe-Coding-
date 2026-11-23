@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import socket
 import sqlite3
+import ssl
 import tempfile
 import threading
 import time
@@ -834,6 +835,10 @@ class EndpointBindingTests(unittest.TestCase):
         wrapped = WrappedSocket()
 
         class Context:
+            # HTTPSConnection inspects both settings on Python 3.11.
+            verify_mode = ssl.CERT_REQUIRED
+            check_hostname = True
+
             @staticmethod
             def wrap_socket(_raw, *, server_hostname):
                 if server_hostname != "provider.example":

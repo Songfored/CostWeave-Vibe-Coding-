@@ -137,7 +137,11 @@ def _read_with_deadline(
         if size <= 0:
             raise AdapterTransportError("response_too_large")
         reader = getattr(stream, "read1", None)
-        chunk = reader(size) if callable(reader) else stream.read(size)
+        try:
+            chunk = reader(size) if callable(reader) else stream.read(size)
+        except TimeoutError as error:
+            # The socket's read timeout was set to the remaining wall-clock budget.
+            raise AdapterTransportError("absolute_timeout") from error
         if not chunk:
             return b"".join(chunks)
         chunks.append(bytes(chunk))

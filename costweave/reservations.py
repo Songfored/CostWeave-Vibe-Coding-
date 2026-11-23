@@ -155,7 +155,7 @@ class ReservationManager:
         estimated_cost: float,
         budget: float,
         spent: float,
-        lease_seconds: float = 30.0,
+        lease_seconds: float | None = 30.0,
     ) -> Reservation:
         canonical_task = canonical_identifier(
             "task", f"{run_id}:{task_id}"
@@ -166,10 +166,12 @@ class ReservationManager:
         cost_id = "costres_" + hashlib.sha256(
             reservation_id.encode("utf-8")
         ).hexdigest()[:32]
-        expires = (
-            datetime.now(timezone.utc)
-            + timedelta(seconds=max(1.0, float(lease_seconds)))
-        ).isoformat().replace("+00:00", "Z")
+        # The existing NOT NULL timestamp also supports reservations held
+        # until settlement. The scheduler uses these for work it dispatches.
+        expires = datetime.max.replace(tzinfo=timezone.utc)
+        if lease_seconds is not None:
+            expires = datetime.now(timezone.utc) + timedelta(seconds=max(1.0, float(lease_seconds)))
+        expires = expires.isoformat().replace("+00:00", "Z")
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
@@ -225,18 +227,7 @@ class ReservationManager:
                     > pool.vram_mb_total
                 ):
                     raise CapacityUnavailable("resource capacity changed")
-                active_cost = connection.execute(
-                    "SELECT COALESCE(SUM(amount),0) FROM cost_reservations "
-                    "WHERE run_id=? AND status='active'",
-                    (run_id,),
-                ).fetchone()[0]
-                if (
-                    float(spent)
-                    + float(active_cost)
-                    + float(estimated_cost)
-                    > float(budget) + 1e-9
-                ):
-                    raise BudgetUnavailable("budget cannot cover reservation")
+                self._check_budget(connection, run_id, budget, spent, estimated_cost)
                 now = utc_now()
                 connection.execute(
                     "INSERT INTO resource_reservations(reservation_id,run_id,"
@@ -292,19 +283,25 @@ class ReservationManager:
         reason: str,
         actual_cost: float | None = None,
     ) -> bool:
+        if actual_cost is not None and (not math.isfinite(actual_cost) or actual_cost < 0):
+            raise ReservationError("actual cost must be finite and non-negative")
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                self._expire_leases(connection)
                 row = connection.execute(
-                    "SELECT status FROM resource_reservations "
+                    "SELECT rr.status AS resource_status, cr.status AS cost_status "
+                    "FROM resource_reservations rr JOIN cost_reservations cr USING(reservation_id) "
                     "WHERE reservation_id=?",
                     (reservation_id,),
                 ).fetchone()
                 if row is None:
                     raise KeyError(reservation_id)
-                if row["status"] != "active":
+                if row["cost_status"] != "active":
                     connection.rollback()
                     return False
+                if row["resource_status"] == "expired" and actual_cost is None:
+                    raise ReservationError("settling an expired lease requires its confirmed actual cost")
                 now = utc_now()
                 connection.execute(
                     "UPDATE resource_reservations SET status='released',"
@@ -340,6 +337,7 @@ class ReservationManager:
         with self._lock, self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                self._expire_leases(connection)
                 row = connection.execute(
                     "SELECT rr.status,rr.run_id,cr.status cost_status,"
                     "cr.amount FROM resource_reservations rr "
@@ -353,20 +351,7 @@ class ReservationManager:
                     raise ReservationError(
                         "only an active reservation can fund a retry"
                     )
-                active_cost = float(
-                    connection.execute(
-                        "SELECT COALESCE(SUM(amount),0) FROM cost_reservations "
-                        "WHERE run_id=? AND status='active'",
-                        (row["run_id"],),
-                    ).fetchone()[0]
-                )
-                if (
-                    float(spent) + active_cost + additional
-                    > float(budget) + 1e-9
-                ):
-                    raise BudgetUnavailable(
-                        "budget cannot cover another execution attempt"
-                    )
+                self._check_budget(connection, row["run_id"], budget, spent, additional)
                 updated = float(row["amount"]) + additional
                 connection.execute(
                     "UPDATE cost_reservations SET amount=? "
@@ -379,18 +364,35 @@ class ReservationManager:
                 connection.rollback()
                 raise
 
+    @staticmethod
+    def _check_budget(connection, run_id, budget, spent, additional):
+        if not all(math.isfinite(value) and value >= 0 for value in (budget, spent, additional)):
+            raise ReservationError("budget, spend and reservation amounts must be finite and non-negative")
+        held, settled = connection.execute(
+            "SELECT COALESCE(SUM(CASE WHEN status='active' THEN amount ELSE 0 END),0), "
+            "COALESCE(SUM(actual_cost),0) FROM cost_reservations WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        # A caller's projection may lag another writer, or include older
+        # charges outside this ledger. Do not count overlapping charges twice.
+        if max(spent, settled) + held + additional > budget + 1e-9:
+            raise BudgetUnavailable("budget cannot cover reservation")
+
     def release_orphans(self) -> int:
+        """Recover elapsed capacity leases. A restart alone proves no outcome."""
         with self._lock, self._connection() as connection:
+            return self._expire_leases(connection)
+
+    def pending_settlements(self, run_id: str) -> list[dict[str, Any]]:
+        """List attempts which may still execute or owe a settlement, including zero-cost work."""
+        with self._connection() as connection:
             rows = connection.execute(
-                "SELECT reservation_id FROM resource_reservations "
-                "WHERE status='active'"
-            ).fetchall()
-        for row in rows:
-            self.release(
-                row["reservation_id"],
-                reason="startup-orphan-recovery",
+                "SELECT rr.reservation_id,rr.task_id,rr.attempt,cr.amount AS held_cost "
+                "FROM cost_reservations cr JOIN resource_reservations rr USING(reservation_id) "
+                "WHERE cr.run_id=? AND cr.status='active' ORDER BY rr.reservation_id",
+                (run_id,),
             )
-        return len(rows)
+            return [dict(row) for row in rows]
 
     def resources(self) -> list[dict[str, Any]]:
         with self._connection() as connection:
@@ -430,28 +432,13 @@ class ReservationManager:
 
     @staticmethod
     def _expire_leases(connection: sqlite3.Connection) -> int:
+        # Expiry proves when compute capacity is available again, not what
+        # the provider charged. Only settlement releases the financial hold.
         now = utc_now()
-        rows = connection.execute(
-            "SELECT reservation_id FROM resource_reservations "
-            "WHERE status='active' AND lease_expires_at<=?",
-            (now,),
-        ).fetchall()
-        if not rows:
-            return 0
-        ids = [str(row["reservation_id"]) for row in rows]
-        placeholders = ",".join("?" for _ in ids)
-        connection.execute(
-            f"UPDATE resource_reservations SET status='expired',"
-            f"released_at=?,release_reason='lease-expired' "
-            f"WHERE reservation_id IN ({placeholders})",
-            (now, *ids),
-        )
-        connection.execute(
-            f"UPDATE cost_reservations SET status='released',released_at=? "
-            f"WHERE reservation_id IN ({placeholders})",
-            (now, *ids),
-        )
-        return len(ids)
+        return connection.execute(
+            "UPDATE resource_reservations SET status='expired',released_at=?,release_reason='lease-expired' "
+            "WHERE status='active' AND lease_expires_at<=?", (now, now)
+        ).rowcount
 
     def save_circuit(self, provider: str, snapshot: dict[str, Any]) -> None:
         with self._lock, self._connection() as connection:

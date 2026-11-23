@@ -219,7 +219,8 @@ WP07 只允许影子指标进入证据链，不允许改变基线路由、晋升
 
 - 每个新 Run 在原路由冻结后生成 `AuthoritativeDecisionEnvelopeV1`；
 - 统一保存任务/目录/价格/容量快照、候选管理拓扑、候选模型组合、分布、预算和 baseline/shadow 差异；
-- 五个现有智能服务通过 Adapter 接入，同用 Run ID、Trace ID 与输入指纹；
+- 五个建议模块共用运行编号、追踪编号和输入指纹。执行前没有观测结果时，安全学习模块记录 `insufficient_evidence`。
+- 影子路线的费用按所选操作和各自的报价汇总。`structured_diff.cost_comparable` 为 `true` 时可以比较两条路线的预计费用。字段为 `false` 或历史记录缺少该字段时，费用差额未知。
 - 影子链不写任务状态、不改 DAG、不占正式预算、不调用 Provider、不晋级策略；
 - 任一模块异常都生成完整失败关闭信封，原 baseline 继续执行；
 - `GET /api/v1/runs/{run_id}/decision-bridge` 与运行页面提供只读追踪入口；

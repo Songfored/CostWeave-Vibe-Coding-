@@ -3,15 +3,15 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import time
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from costweave.catalog_store import CatalogStore
 from costweave.contracts_v4 import canonical_identifier
 from costweave.event_store import EventStore, RUNTIME_SCHEMA_VERSION
-from costweave.reservations import ReservationError, ReservationManager
+from costweave.reservations import BudgetUnavailable, ReservationError, ReservationManager
 from costweave.resource_inventory import ResourcePool
 from costweave.admission import ResourceRequest
 from costweave.runtime_maintenance import RuntimeMaintenance
@@ -214,10 +214,21 @@ class ReservationHardeningTests(unittest.TestCase):
         with self.assertRaises(ReservationError):
             self.reserve()
 
-    def test_expired_lease_frees_capacity(self):
-        self.reserve(lease_seconds=1)
-        time.sleep(1.05)
-        self.assertEqual(1, self.manager.availability("pool_test")["slots"])
+    def test_timed_lease_frees_capacity_but_holds_cost_until_known_settlement(self):
+        hold = self.reserve(lease_seconds=1, estimated_cost=0.65)
+        with patch("costweave.reservations.utc_now", return_value="2099-01-01T00:00:00Z"):
+            with self.assertRaises(ReservationError):
+                self.manager.release(hold.reservation_id, reason="outcome unavailable")
+            self.assertEqual(1, self.manager.availability("pool_test")["slots"])
+        self.assertAlmostEqual(0.65, self.manager.summary("run_test")["reserved_cost"])
+        with self.assertRaises(BudgetUnavailable):
+            self.reserve(attempt=2, estimated_cost=0.5)
+        self.assertTrue(self.manager.release(hold.reservation_id, reason="completed", actual_cost=0.4))
+        self.assertFalse(self.manager.release(hold.reservation_id, reason="completed", actual_cost=0.4))
+        settled = self.manager.summary("run_test")
+        self.assertEqual(0, settled["reserved_cost"])
+        self.assertAlmostEqual(0.4, settled["released_actual_cost"])
+        self.reserve(attempt=2, estimated_cost=0.6)
 
     def test_same_identity_with_different_cost_is_rejected(self):
         self.reserve()
