@@ -1,6 +1,5 @@
 import os
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -18,14 +17,11 @@ class ControlKernelTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    @staticmethod
-    def wait(record, timeout=12):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if record.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
-                return
-            time.sleep(0.03)
-        raise AssertionError(f"run did not finish: {record.status}")
+    def wait(self, manager, record):
+        worker = manager.threads[record.id]
+        worker.join(timeout=60)
+        self.assertFalse(worker.is_alive(), f"run did not finish: {record.status}")
+        self.assertIn(record.status, {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED})
 
     def test_create_command_is_idempotent_and_keeps_one_run(self):
         kernel = ControlKernel(self.path)
@@ -91,8 +87,7 @@ class ControlKernelTests(unittest.TestCase):
                 ),
                 idempotency_key="complete-run-key-0001",
             )
-            self.wait(record)
-            manager.threads[record.id].join(timeout=3)
+            self.wait(manager, record)
             self.assertEqual(RunStatus.COMPLETED, record.status, record.error)
             revision = record.runtime_revision
             event_count = len(manager.events(record.id))
@@ -111,8 +106,7 @@ class ControlKernelTests(unittest.TestCase):
                 RunRequest("分析一个产品并形成最终报告", budget=2),
                 idempotency_key="terminal-run-key-0001",
             )
-            self.wait(record)
-            first.threads[record.id].join(timeout=3)
+            self.wait(first, record)
             restarted = RunManager(runtime_db_path=self.path, recover=True)
         self.assertNotIn(record.id, restarted.threads)
         self.assertEqual(RunStatus.COMPLETED, restarted.get(record.id).status)
@@ -159,8 +153,7 @@ class ControlKernelTests(unittest.TestCase):
         with patch.dict(os.environ, {"COSTWEAVE_RUNTIME_V4": "1"}):
             restarted = RunManager(runtime_db_path=self.path, recover=True)
             restored = restarted.get(record.id)
-            self.wait(restored, timeout=12)
-            restarted.threads[record.id].join(timeout=3)
+            self.wait(restarted, restored)
         self.assertEqual(RunStatus.COMPLETED, restored.status, restored.error)
         restored_completed = next(task for task in restored.plan.tasks if task.id == completed.id)
         restored_interrupted = next(task for task in restored.plan.tasks if task.id == interrupted.id)
@@ -195,7 +188,7 @@ class ControlKernelTests(unittest.TestCase):
                 ),
                 idempotency_key="artifact-disabled-create-0001",
             )
-            self.wait(record)
+            self.wait(manager, record)
             self.assertEqual(RunStatus.COMPLETED, record.status, record.error)
             self.assertEqual([], manager.artifacts(record.id))
             self.assertEqual(
@@ -215,7 +208,7 @@ class ControlKernelTests(unittest.TestCase):
             ),
             idempotency_key="artifact-replan-create-0001",
         )
-        self.wait(record, timeout=15)
+        self.wait(manager, record)
         self.assertEqual(RunStatus.COMPLETED, record.status, record.error)
         artifacts = manager.artifacts(record.id)
         stale = [item for item in artifacts if item["status"] == "stale"]

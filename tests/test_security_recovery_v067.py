@@ -806,7 +806,9 @@ class EndpointBindingTests(unittest.TestCase):
                 url="https://provider.example/v1/chat/completions",
                 headers={"Content-Type": "application/json"},
                 body=b"{}",
-                timeout_seconds=1.0,
+                # This success-path fixture starts a resolver process. Deadline
+                # enforcement is exercised separately with deliberately slow I/O.
+                timeout_seconds=10.0,
             )
             self.assertEqual(
                 1, len(list(Path(marker_directory).glob("resolver-*.txt")))

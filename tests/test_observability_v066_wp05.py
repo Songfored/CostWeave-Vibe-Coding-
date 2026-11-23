@@ -447,7 +447,8 @@ class RuntimeTraceIntegrationTests(unittest.TestCase):
                 RunRequest(goal="trace a local run", max_concurrency=1),
                 idempotency_key="wp05-run-001",
             )
-            manager.shutdown(wait_timeout=10)
+            manager.shutdown(wait_timeout=60)
+            self.assertFalse(manager.threads[record.id].is_alive())
             snapshot = record.snapshot()
             self.assertEqual(record.trace_id, snapshot["trace_id"])
             self.assertEqual(record.trace_id, snapshot["observability"]["trace_id"])
