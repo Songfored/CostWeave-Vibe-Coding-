@@ -28,7 +28,17 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
-        cls.server.server_close()
+        try:
+            # Some requests deliberately return while their simulated runs still execute.
+            # This fixture owns the database and must drain those writes before removing it.
+            manager = cls.server.manager
+            manager.shutdown(wait_timeout=60)
+            with manager.lock:
+                active = [worker.name for worker in manager.threads.values() if worker.is_alive()]
+            if active:
+                raise AssertionError(f"server test workers still running after 60s: {active}")
+        finally:
+            cls.server.server_close()
         cls.temp.cleanup()
 
     def fetch_json(self, path, payload=None):
