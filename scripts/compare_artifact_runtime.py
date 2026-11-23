@@ -10,7 +10,7 @@ from costweave.intelligence.joint_search import (
     JointRouteOptionV1, JointRouteSetV1, JointSearchBudgetV1, JointSearchProblemV1,
     JointStrategySearcher, JointTaskNodeV1,
 )
-from costweave.kernel.contracts import Job, Operation, canonical_json
+from costweave.kernel.contracts import Job, Operation
 from costweave.kernel.ports import default_registry
 from costweave.kernel.runtime import Runtime
 from costweave.kernel.store import KernelStore
@@ -18,7 +18,7 @@ from costweave.kernel.store import KernelStore
 
 TOPOLOGIES = {"direct": ("read-summary", "calculate-inline"),
               "decomposed": ("normalize", "count", "sum", "assemble")}
-SCENARIOS = (
+ORIGINAL_SCENARIOS = (
     # name, summary total, budget, prevalidated artifacts
     ("valid_summary", 22, 6, {}),
     ("stale_summary", 21, 6, {}),
@@ -27,6 +27,10 @@ SCENARIOS = (
     ("inline_fallback_fits", 21, 7, {}),
     ("accepted_goal", 21, 0, {"receipt": {"count": 2, "total": 22}}),
 )
+SCENARIOS = ORIGINAL_SCENARIOS + (
+    ("valid_summary_budget_5", 22, 5, {}),
+    ("stale_summary_budget_5", 21, 5, {}),
+)
 
 
 def make_job(summary_total, budget, prevalidated):
@@ -34,12 +38,12 @@ def make_job(summary_total, budget, prevalidated):
               "summary": {"count": 2, "total": summary_total}}
     ops = [
         Operation("read-summary", ["source"], "receipt", "pick", "json_object", 1,
-                  {"source": "source", "path": ["summary"]}),
+                  {"source": "source", "path": ["summary"]}, route_role="speculative"),
         Operation("calculate-inline", ["source"], "receipt", "inline", "json_object", 6),
-        Operation("normalize", ["source"], "amounts", "line_amounts", "present", 2),
-        Operation("count", ["amounts"], "count", "line_count", "present", 1),
-        Operation("sum", ["amounts"], "total", "line_sum", "present", 1),
-        Operation("assemble", ["count", "total"], "receipt", "collect", "json_object", 1),
+        Operation("normalize", ["source"], "amounts", "line_amounts", "present", 2, route_role="fallback"),
+        Operation("count", ["amounts"], "count", "line_count", "present", 1, route_role="fallback"),
+        Operation("sum", ["amounts"], "total", "line_sum", "present", 1, route_role="fallback"),
+        Operation("assemble", ["count", "total"], "receipt", "collect", "json_object", 1, route_role="fallback"),
     ]
     # The terminal oracle belongs to the fixture. No executor reads it.
     return Job(["receipt"], {"source": source, **prevalidated}, budget, ops, acceptance={
@@ -153,6 +157,23 @@ def fixed_run(job, registry, topology):
             "attempts": attempts, "search_decisions": decisions}
 
 
+def kernel_run(runtime, run_id, job):
+    state = runtime.submit(run_id, job)
+    claims = [event for event in runtime.store.events(run_id) if event["type"] == "attempt_claimed"]
+    return {"final_passed": final_passed(runtime.registry, job, state["artifacts"]),
+            "spent_units": state["spent_units"], "attempts": [event["op_id"] for event in claims],
+            "reason": state["reason"], "first_fallback_assessment": claims[0]["plan"].get("fallback") if claims else None,
+            "job_sha256": state["job_sha256"]}
+
+
+def summarize(rows):
+    return {
+        arm: {"final_passes": sum(row[arm]["final_passed"] for row in rows),
+              "spent_units": sum(row[arm]["spent_units"] for row in rows)}
+        for arm in (*TOPOLOGIES, "kernel", "preserve_fallback")
+    }
+
+
 def compare():
     registry = make_registry()
     rows = []
@@ -161,23 +182,21 @@ def compare():
         runtime = Runtime(store, registry)
         for name, summary_total, budget, prevalidated in SCENARIOS:
             job = make_job(summary_total, budget, prevalidated)
-            state = runtime.submit(name, job)
-            attempts = [event["op_id"] for event in store.events(name) if event["type"] == "attempt_claimed"]
+            guarded_job = Job.from_dict({**job.to_dict(), "planning_policy": "preserve_fallback"})
+            baseline = kernel_run(runtime, f"{name}-lowest-cost", job)
             rows.append({
-                "case": name, "job_sha256": hashlib.sha256(canonical_json(job.to_dict()).encode()).hexdigest(),
+                # Keep the existing job hash associated with the default-policy arm.
+                "case": name, "job_sha256": baseline["job_sha256"],
                 "budget_units": budget, **{key: fixed_run(job, registry, key) for key in TOPOLOGIES},
-                "kernel": {"final_passed": final_passed(registry, job, state["artifacts"]),
-                           "spent_units": state["spent_units"], "attempts": attempts, "reason": state["reason"]},
+                "kernel": baseline,
+                "preserve_fallback": kernel_run(runtime, f"{name}-preserve-fallback", guarded_job),
             })
     return {
         "evidence": "Deterministic local invoice fixtures with integer operation quotes.",
         "provider_calls": 0,
-        "comparison": "Two fixed v1 topologies, each reconsidering its routes after rejection, versus the artifact runtime.",
-        "summary": {
-            arm: {"final_passes": sum(row[arm]["final_passed"] for row in rows),
-                  "spent_units": sum(row[arm]["spent_units"] for row in rows)}
-            for arm in (*TOPOLOGIES, "kernel")
-        },
+        "comparison": "Two fixed v1 topologies and two runtime policies share the same fixtures, quotes and final checks.",
+        "summary": summarize(rows),
+        "original_six_summary": summarize(rows[:len(ORIGINAL_SCENARIOS)]),
         "cases": rows,
     }
 

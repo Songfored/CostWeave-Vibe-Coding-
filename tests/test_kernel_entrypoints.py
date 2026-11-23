@@ -9,7 +9,7 @@ from costweave.kernel.catalog import compile_request
 from costweave.kernel.contracts import Job
 from costweave.kernel.ports import default_registry
 from costweave.kernel.runtime import Runtime, public_state
-from costweave.kernel.store import KernelStore
+from costweave.kernel.store import KernelStore, RunConflictError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +21,46 @@ def read(name):
 
 
 class KernelEntrypointTests(unittest.TestCase):
+    def test_legacy_jobs_keep_identity_when_default_policy_and_roles_are_explicit(self):
+        legacy = {
+            "goals": ["receipt"], "inputs": {}, "budget_units": 2, "search_limit": 10000,
+            "operations": [{"id": "read", "requires": [], "produces": "receipt", "executor": "emit",
+                            "validator": "present", "cost_units": 2, "config": {}}],
+            "acceptance": {"receipt": {"validator": "present", "config": {}}},
+        }
+        explicit = {**legacy, "planning_policy": "lowest_cost",
+                    "operations": [{**legacy["operations"][0], "route_role": "standard"}]}
+        self.assertEqual(legacy, Job.from_dict(explicit).to_dict())
+        store = KernelStore(":memory:")
+        self.addCleanup(store.close)
+        store.create("old-run", legacy)
+        original = store.snapshot("old-run")
+        store.create("old-run", explicit)
+        self.assertEqual(original, store.snapshot("old-run"))
+        for change in ({"planning_policy": "preserve_fallback"},
+                       {"operations": [{**legacy["operations"][0], "route_role": "speculative"}]}):
+            with self.subTest(change=change), self.assertRaises(RunConflictError):
+                store.create("old-run", {**legacy, **change})
+
+    def test_catalog_freezes_policy_and_route_roles_and_rejects_unknown_values(self):
+        request = {**read("handoff.json"), "planning_policy": "preserve_fallback"}
+        catalog = read("catalog.json")
+        for op in catalog["operations"]:
+            op["route_role"] = "speculative" if op["id"] == "read-preview" else "fallback"
+        job = compile_request(request, catalog)
+        restored = Job.from_dict(job.to_dict())
+        self.assertEqual(job, restored)
+        self.assertEqual("preserve_fallback", restored.planning_policy)
+        self.assertEqual({op["id"]: op["route_role"] for op in catalog["operations"]},
+                         {op.id: op.route_role for op in restored.operations})
+        for invalid in (None, [], "unknown"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "planning_policy"):
+                    Job.from_dict({**job.to_dict(), "planning_policy": invalid})
+                catalog["operations"][0]["route_role"] = invalid
+                with self.assertRaisesRegex(ValueError, "route_role"):
+                    compile_request(request, catalog)
+
     def test_catalog_selects_applicable_recipes_and_freezes_the_selected_contract(self):
         catalog = read("catalog.json")
         unused = {**catalog["operations"][0], "id": "unused", "requires": ["other-input"]}

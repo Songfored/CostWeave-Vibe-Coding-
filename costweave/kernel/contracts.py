@@ -82,12 +82,16 @@ class Operation:
     executor: str
     validator: str
     cost_units: int
+    route_role: str
     _config_json: str
 
     def __init__(self, id: str, requires: list[str] | tuple[str, ...], produces: str, executor: str,
-                 validator: str, cost_units: int, config: dict | None = None):
+                 validator: str, cost_units: int, config: dict | None = None, *, route_role: str = "standard"):
         for field, value in (("id", id), ("produces", produces), ("executor", executor), ("validator", validator)):
             object.__setattr__(self, field, _name(value, field))
+        if route_role not in ("standard", "speculative", "fallback"):
+            raise ValueError("route_role must be standard, speculative, or fallback")
+        object.__setattr__(self, "route_role", route_role)
         object.__setattr__(self, "requires", _names(requires, "requires"))
         object.__setattr__(self, "cost_units", _integer(cost_units, "cost_units", 0, MAX_UNITS))
         object.__setattr__(self, "_config_json", _json_object({} if config is None else config, "config"))
@@ -98,15 +102,19 @@ class Operation:
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> Operation:
-        _fields(raw, {"id", "requires", "produces", "executor", "validator", "cost_units"}, {"config"}, "operation")
+        _fields(raw, {"id", "requires", "produces", "executor", "validator", "cost_units"},
+                {"config", "route_role"}, "operation")
         if "config" in raw and raw["config"] is None:
             raise ValueError("config must be a JSON object")
         return cls(**raw)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "requires": list(self.requires), "produces": self.produces,
-                "executor": self.executor, "validator": self.validator, "cost_units": self.cost_units,
-                "config": self.config}
+        result = {"id": self.id, "requires": list(self.requires), "produces": self.produces,
+                  "executor": self.executor, "validator": self.validator, "cost_units": self.cost_units,
+                  "config": self.config}
+        if self.route_role != "standard":
+            result["route_role"] = self.route_role
+        return result
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -115,12 +123,16 @@ class Job:
     operations: tuple[Operation, ...]
     budget_units: int
     search_limit: int
+    planning_policy: str
     _inputs_json: str
     _acceptance_json: str
 
     def __init__(self, goals: list[str] | tuple[str, ...], inputs: dict, budget_units: int,
                  operations: list[Operation] | tuple[Operation, ...], search_limit: int = DEFAULT_SEARCH_LIMIT,
-                 acceptance: dict | None = None):
+                 acceptance: dict | None = None, *, planning_policy: str = "lowest_cost"):
+        if planning_policy not in ("lowest_cost", "preserve_fallback"):
+            raise ValueError("planning_policy must be lowest_cost or preserve_fallback")
+        object.__setattr__(self, "planning_policy", planning_policy)
         goals = _names(goals, "goals")
         if not goals:
             raise ValueError("at least one goal is required")
@@ -171,16 +183,22 @@ class Job:
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> Job:
-        _fields(raw, {"goals", "inputs", "operations", "budget_units"}, {"search_limit", "acceptance"}, "job")
+        _fields(raw, {"goals", "inputs", "operations", "budget_units"},
+                {"search_limit", "acceptance", "planning_policy"}, "job")
         rows = raw["operations"]
         if not isinstance(rows, (list, tuple)) or len(rows) > MAX_OPERATIONS:
             raise ValueError(f"operations must be an array of at most {MAX_OPERATIONS} items")
         if "acceptance" in raw and raw["acceptance"] is None:
             raise ValueError("acceptance must be an object")
         return cls(raw["goals"], raw["inputs"], raw["budget_units"], tuple(Operation.from_dict(row) for row in rows),
-                   raw.get("search_limit", DEFAULT_SEARCH_LIMIT), raw.get("acceptance"))
+                   raw.get("search_limit", DEFAULT_SEARCH_LIMIT), raw.get("acceptance"),
+                   planning_policy=raw.get("planning_policy", "lowest_cost"))
 
     def to_dict(self) -> dict:
-        return {"goals": list(self.goals), "inputs": self.inputs, "budget_units": self.budget_units,
-                "operations": [op.to_dict() for op in self.operations], "acceptance": self.acceptance,
-                "search_limit": self.search_limit}
+        result = {"goals": list(self.goals), "inputs": self.inputs, "budget_units": self.budget_units,
+                  "operations": [op.to_dict() for op in self.operations], "acceptance": self.acceptance,
+                  "search_limit": self.search_limit}
+        # Omitting defaults preserves the canonical hashes of previously stored jobs.
+        if self.planning_policy != "lowest_cost":
+            result["planning_policy"] = self.planning_policy
+        return result

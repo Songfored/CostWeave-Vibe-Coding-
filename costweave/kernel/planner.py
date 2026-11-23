@@ -5,9 +5,17 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 
 from .contracts import Job, Operation
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackAssessment:
+    speculative_operation: str
+    remaining_if_rejected: int
+    fallback_cost_units: int | None
+    decision: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,10 +25,14 @@ class Plan:
     cost_units: int | None = None
     optimal: bool = False
     states_examined: int = 0
+    fallback: FallbackAssessment | None = None
 
     def to_dict(self) -> dict:
-        return {"status": self.status, "operations": list(self.operations), "cost_units": self.cost_units,
-                "optimal": self.optimal, "states_examined": self.states_examined}
+        result = {"status": self.status, "operations": list(self.operations), "cost_units": self.cost_units,
+                  "optimal": self.optimal, "states_examined": self.states_examined}
+        if self.fallback is not None:
+            result["fallback"] = asdict(self.fallback)
+        return result
 
 
 def _relevant(job: Job, available: set[str], excluded: set[str]) -> list[Operation]:
@@ -88,13 +100,7 @@ def _witness(operations: list[Operation], available: set[str], goals: set[str]) 
 
 
 def plan(job: Job, available: Collection[str], excluded: Collection[str], remaining_units: int) -> Plan:
-    """Choose producers assuming successful execution at their declared costs.
-
-    Each action creates one reusable artifact. A state contains only accepted
-    artifacts. Failed operations are excluded by the caller on the next search.
-    The queue admits at most search_limit entries, including its initial state.
-    A capped search may return an executable incumbent without claiming optimality.
-    """
+    """Select the next step from accepted artifacts, settled attempts and the remaining budget."""
     if type(remaining_units) is not int or not 0 <= remaining_units <= job.budget_units:
         raise ValueError("remaining_units must be an integer within the job budget")
     if isinstance(available, (str, bytes)) or isinstance(excluded, (str, bytes)):
@@ -108,6 +114,38 @@ def plan(job: Job, available: Collection[str], excluded: Collection[str], remain
     if goals <= available:
         return Plan("complete", (), 0, True)
     operations = _relevant(job, available, excluded)
+    cheapest = _cheapest_plan(operations, available, goals, remaining_units, job.search_limit)
+    if job.planning_policy != "preserve_fallback" or cheapest.status != "ready":
+        return cheapest
+    first = next(op for op in operations if op.id == cheapest.operations[0])
+    if first.route_role != "speculative" or first.cost_units == 0:
+        return cheapest
+
+    # A rejection yields no artifact. Charging the full quote models the largest
+    # permitted loss; a real receipt can leave more budget on the next decision.
+    remaining_if_rejected = remaining_units - first.cost_units
+    fallback_ops = [op for op in operations if op.route_role == "fallback"]
+    fallback = _cheapest_plan(fallback_ops, available, goals, remaining_units, job.search_limit)
+    selected = cheapest
+    if fallback.status != "ready":
+        decision = fallback.status
+    elif fallback.cost_units <= remaining_if_rejected:
+        decision = "fallback_still_fits"
+    elif fallback.optimal:
+        # Only a proven minimum establishes that every declared fallback would
+        # become unaffordable. This choice optimizes a different objective.
+        selected = replace(fallback, optimal=False)
+        decision = "take_fallback"
+    else:
+        decision = "search_limit"
+    assessment = FallbackAssessment(first.id, remaining_if_rejected, fallback.cost_units, decision)
+    return replace(selected, states_examined=cheapest.states_examined + fallback.states_examined,
+                   fallback=assessment)
+
+
+def _cheapest_plan(operations: list[Operation], available: set[str], goals: set[str],
+                   remaining_units: int, search_limit: int) -> Plan:
+    """Find a least-cost successful derivation, admitting at most search_limit states."""
     witness = _witness(operations, available, goals)
     if witness is None:
         return Plan("unreachable")
@@ -163,7 +201,7 @@ def plan(job: Job, available: Collection[str], excluded: Collection[str], remain
                     path.append(predecessor)
                 incumbent = Plan("ready", tuple(reversed(path)), quote)
                 continue
-            if admitted >= job.search_limit:
+            if admitted >= search_limit:
                 if incumbent is None:
                     return Plan("search_limit", states_examined=examined)
                 return Plan("ready", incumbent.operations, incumbent.cost_units, False, examined)

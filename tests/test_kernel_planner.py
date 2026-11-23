@@ -7,9 +7,12 @@ from costweave.kernel.contracts import Job, MAX_UNITS, canonical_json
 from costweave.kernel.planner import plan
 
 
-def operation(id, requires, produces, cost):
-    return {"id": id, "requires": requires, "produces": produces,
-            "executor": "fixture", "validator": "type", "cost_units": cost}
+def operation(id, requires, produces, cost, role=None):
+    row = {"id": id, "requires": requires, "produces": produces,
+           "executor": "fixture", "validator": "type", "cost_units": cost}
+    if role is not None:
+        row["route_role"] = role
+    return row
 
 
 def job_dict(goals, operations, inputs=None, budget=50, limit=10_000):
@@ -139,6 +142,67 @@ class KernelPlannerTests(unittest.TestCase):
         for remaining in (-1, True, job.budget_units + 1):
             with self.assertRaises(ValueError):
                 plan(job, [], [], remaining)
+
+    def test_protects_a_complete_fallback_only_when_a_failed_probe_would_exhaust_its_budget(self):
+        raw = job_dict(["receipt"], [
+            operation("summary", [], "receipt", 1, "speculative"),
+            operation("parse", [], "items", 3, "fallback"),
+            operation("assemble", ["items"], "receipt", 2, "fallback"),
+        ])
+        legacy = Job.from_dict(raw)
+        guarded = Job.from_dict({**raw, "planning_policy": "preserve_fallback"})
+        self.assertEqual(("summary",), plan(legacy, [], [], 5).operations)
+        result = plan(guarded, [], [], 5)
+        self.assertEqual(("parse", "assemble"), result.operations)
+        self.assertFalse(result.optimal)
+        self.assert_executable(guarded, result)
+        for remaining in (1, 4, 6):
+            with self.subTest(remaining=remaining):
+                self.assertEqual(("summary",), plan(guarded, [], [], remaining).operations)
+
+        # An accepted intermediate reduces the remaining fallback quote to two.
+        self.assertEqual(("assemble",), plan(guarded, ["items"], [], 2).operations)
+        self.assertEqual(("summary",), plan(guarded, ["items"], [], 3).operations)
+        self.assertEqual(("summary",), plan(guarded, [], ["parse"], 5).operations)
+        self.assertEqual(("parse", "assemble"), plan(guarded, [], ["summary"], 5).operations)
+
+    def test_guard_needs_declared_roles_and_a_fallback_for_every_unfinished_goal(self):
+        for shortcut_role, rebuild_role in (("standard", "fallback"), ("speculative", "standard")):
+            with self.subTest(shortcut=shortcut_role, rebuild=rebuild_role):
+                raw = job_dict(["receipt"], [
+                    operation("summary", [], "receipt", 1, shortcut_role),
+                    operation("rebuild", [], "receipt", 5, rebuild_role),
+                ])
+                job = Job.from_dict({**raw, "planning_policy": "preserve_fallback"})
+                self.assertEqual(("summary",), plan(job, [], [], 5).operations)
+
+        raw = job_dict(["receipt", "audit"], [
+            operation("summary", [], "receipt", 1, "speculative"),
+            operation("rebuild", [], "receipt", 4, "fallback"),
+            operation("log", ["receipt"], "audit", 1),
+        ])
+        job = Job.from_dict({**raw, "planning_policy": "preserve_fallback"})
+        self.assertEqual(("summary", "log"), plan(job, [], [], 5).operations)
+        self.assertEqual(("rebuild",), plan(job, ["audit"], [], 4).operations)
+
+    def test_free_probe_can_spend_the_entire_budget_on_fallback_after_rejection(self):
+        raw = job_dict(["receipt"], [
+            operation("summary", [], "receipt", 0, "speculative"),
+            operation("rebuild", [], "receipt", 5, "fallback"),
+        ])
+        job = Job.from_dict({**raw, "planning_policy": "preserve_fallback"})
+        self.assertEqual(("summary",), plan(job, [], [], 5).operations)
+        self.assertEqual(("rebuild",), plan(job, [], ["summary"], 5).operations)
+
+    def test_a_capped_fallback_search_must_not_treat_its_witness_as_a_minimum(self):
+        # The fallback witness uses independent producers for 8. Reusing the
+        # survey actually costs 7 and still fits after the 1-unit probe fails.
+        raw = shared_job(limit=1).to_dict()
+        for op in raw["operations"]:
+            op["route_role"] = "fallback"
+        raw["operations"].append(operation("probe", [], "shared", 1, "speculative"))
+        job = Job.from_dict({**raw, "planning_policy": "preserve_fallback"})
+        self.assertEqual("probe", plan(job, [], [], 8).operations[0])
 
     def test_unreachable_cyclic_inputs_and_zero_cost_seeded_cycles(self):
         raw = job_dict(["report"], [
