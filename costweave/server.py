@@ -520,6 +520,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _local_only_lab_path(path: str) -> bool:
         prefixes = (
+            "/api/v2/runs",
             "/api/v1/tournaments",
             "/api/v1/meta-controller",
             "/api/v1/capability-router",
@@ -625,6 +626,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                 {"error": "invalid_project_scope", "message": str(exc)},
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+        if path == "/api/v2/runs" or path.startswith("/api/v2/runs/"):
+            self._artifact_request(path)
             return
         if path == "/api/health":
             runtime_health = self.manager.health()
@@ -1971,6 +1975,9 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
             )
 
     def _dispatch_authorized_post(self, path: str) -> None:
+        if path == "/api/v2/runs" or path.startswith("/api/v2/runs/"):
+            self._artifact_request(path)
+            return
         if path.startswith("/api/v1/projects/") and path.endswith("/revoke"):
             self._revoke_project(
                 unquote(
@@ -3139,6 +3146,21 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
                     "session_auth_required",
                 )
 
+    def _artifact_request(self, path: str) -> None:
+        from .kernel.http import dispatch
+        try:
+            body = None
+            if self.command == "POST":
+                self._validate_request_headers(require_json=True)
+                body = self._read_json(max_bytes=256_000)
+            status, result = dispatch(self.command, path, body, self.headers.get("Idempotency-Key"),
+                                      self.manager.control_kernel, self._project_id())
+            self._json(result, status)
+        except RequestError as exc:
+            self._json({"error": exc.code, "message": str(exc)}, exc.status)
+        except (ValueError, RecursionError) as exc:
+            self._json({"error": "invalid_artifact_request", "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+
     def _read_json(self, *, max_bytes: int = 64_000) -> object:
         if self.headers.get("Transfer-Encoding"):
             raise ValueError("不支持分块请求体")
@@ -3194,7 +3216,7 @@ class CostWeaveHandler(BaseHTTPRequestHandler):
     def _normalise_api_path(self, path: str) -> str:
         self._legacy_api = (
             path.startswith("/api/")
-            and not path.startswith("/api/v1/")
+            and not path.startswith(("/api/v1/", "/api/v2/"))
             and path != "/api/health"
         )
         if path == "/api/v1/catalog":
@@ -3556,7 +3578,7 @@ def build_server(
     return server
 
 
-def main() -> None:
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             f"Run the CostWeave {VERSION_TAG} local control plane "
@@ -3565,7 +3587,7 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     server = build_server(args.host, args.port)
     display_host = "[::1]" if args.host == "::1" else args.host
     print(

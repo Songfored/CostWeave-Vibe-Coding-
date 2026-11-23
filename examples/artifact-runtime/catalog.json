@@ -1,0 +1,26 @@
+{
+  "acceptance": {
+    "handoff": {"validator": "json_object", "config": {"required_keys": ["owner", "hours"]}}
+  },
+  "operations": [
+    {
+      "id": "read-preview", "requires": ["ticket"], "produces": "handoff",
+      "executor": "pick", "validator": "present", "cost_units": 1,
+      "config": {"source": "ticket", "path": ["preview"]}
+    },
+    {
+      "id": "read-owner", "requires": ["ticket"], "produces": "owner",
+      "executor": "pick", "validator": "present", "cost_units": 1,
+      "config": {"source": "ticket", "path": ["assignment", "owner"]}
+    },
+    {
+      "id": "read-hours", "requires": ["ticket"], "produces": "hours",
+      "executor": "pick", "validator": "present", "cost_units": 1,
+      "config": {"source": "ticket", "path": ["estimate", "hours"]}
+    },
+    {
+      "id": "assemble", "requires": ["owner", "hours"], "produces": "handoff",
+      "executor": "collect", "validator": "present", "cost_units": 1
+    }
+  ]
+}

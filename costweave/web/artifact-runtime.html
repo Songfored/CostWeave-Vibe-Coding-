@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08110f">
+  <title>产物运行台 · CostWeave</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/artifact-runtime.css">
+  <script src="/artifact-runtime.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到运行台</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="CostWeave 首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>CostWeave</span>
+    </a>
+    <a class="back-link" href="/">返回调度台</a>
+  </header>
+  <main id="workspace" class="artifact-workspace">
+    <h1>产物运行台</h1>
+    <p class="intro">设置目标产物、可用操作和预算，查看验收结果与每次尝试的记录。</p>
+    <div class="artifact-grid">
+      <section class="panel" aria-labelledby="job-title">
+        <div class="panel-heading"><h2 id="job-title">运行任务</h2></div>
+        <form id="job-form">
+          <div class="identity-fields">
+            <label>项目<input id="project" type="text" required maxlength="64" autocomplete="off"></label>
+            <label>运行编号<input id="run-id" type="text" required maxlength="96" autocomplete="off"></label>
+          </div>
+          <div class="editor-heading">
+            <label for="job">任务 JSON</label>
+            <button id="example" type="button" class="text-button">载入交接单示例</button>
+          </div>
+          <textarea id="job" rows="16" required spellcheck="false" autocapitalize="off"></textarea>
+          <div class="buttons">
+            <button type="submit" class="primary-button compact">提交运行</button>
+            <button id="inspect" type="button" class="secondary-button">查询记录</button>
+            <button id="resume" type="button" class="secondary-button">继续运行</button>
+          </div>
+          <p id="message" class="form-error" role="alert"></p>
+        </form>
+      </section>
+      <section class="panel" aria-labelledby="result-title" aria-busy="false" id="result-panel">
+        <div class="panel-heading"><h2 id="result-title">运行结果</h2><span id="status" class="status-pill" role="status">待提交</span></div>
+        <p id="scope"></p>
+        <p id="budget"></p>
+        <p id="reason"></p>
+        <h3>已验收的目标产物</h3>
+        <pre id="outputs">暂无产物</pre>
+        <h3>执行记录</h3>
+        <p id="events-note">查询或提交任务后显示。</p>
+        <ol id="events"></ol>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

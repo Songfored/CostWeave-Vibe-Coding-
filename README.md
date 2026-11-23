@@ -1,6 +1,16 @@
 # CostWeave
 
-整图 P95 回放与返修预算分配现已接入离线决策接口。[输入格式、运行示例与验证方法](docs/ADAPTIVE_EXECUTION.md)
+这个分支提供新的**产物执行内核**。任务声明要交付的产物、独立验收条件和预算。CostWeave 从可用操作中选择一条生产路径，实际执行并结算；如果结果未通过验收，已通过的产物可以供下一条路径复用。
+
+在仓库根目录用 Python 3.11 或更新版本运行：
+
+```sh
+python -m costweave plan examples/artifact-runtime/handoff.json --catalog examples/artifact-runtime/catalog.json
+python -m costweave run examples/artifact-runtime/handoff.json --catalog examples/artifact-runtime/catalog.json --id first-handoff
+python -m costweave events first-handoff
+```
+
+示例先读工单摘要。摘要缺少工时，系统随后从工单中分别读取负责人和工时，合并为通过验收的交接单。重复提交同一编号可以查看同一次运行。该示例在本地执行，计费单位是测试报价。[新架构、接口和基线对照](docs/ARTIFACT_RUNTIME.md)
 
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
@@ -9,9 +19,9 @@
 [![Version](https://img.shields.io/badge/version-0.6.9-blue.svg)](costweave/version.py)
 [![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.9.md)
 
-## 项目状态
+## v1 工程基线
 
-CostWeave 当前处于 **v0.6.9 权威决策桥阶段**。
+原有自由文本工作流与 `/api/v1` 服务沿用 **v0.6.9 决策桥**，整图 P95 回放和返修预算分配可通过离线决策接口使用。[v1 输入格式和验证方法](docs/ADAPTIVE_EXECUTION.md)
 
 | 项目 | 当前结论 |
 |---|---|
