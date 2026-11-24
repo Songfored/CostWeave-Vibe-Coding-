@@ -1,0 +1,52 @@
+{
+  "task": {
+    "goal_name": "audit_report",
+    "prompt": "Extract grounded clause totals from each policy section and produce the summary totals.",
+    "inputs": {
+      "sections": [
+        "Clause 101 cap: 1200 USD for storage.",
+        "Clause 202 cap: 800 USD for egress.",
+        "Clause 303 cap: 500 USD for audit."
+      ]
+    },
+    "chunks_input_key": "sections",
+    "budget_units": 30000,
+    "acceptance_validator": "invariants",
+    "acceptance_config": {
+      "non_empty_fields": ["clauses", "total"],
+      "sum_equals": {
+        "items_field": "clauses",
+        "item_key": "cap_usd",
+        "total_field": "total"
+      }
+    },
+    "max_parallel": 4,
+    "latency_weight_units_per_sec": 300.0
+  },
+  "models": [
+    {
+      "id": "small-extractor",
+      "executor": "map_exec",
+      "provider_family": "deepseek",
+      "input_price_per_mtok_usd": 0.20,
+      "output_price_per_mtok_usd": 0.60,
+      "context_window_tokens": 32000,
+      "quote_output_tokens": 1024,
+      "latency_p50_ms": 350,
+      "latency_p95_ms": 700,
+      "base_pass_prob": 0.92
+    },
+    {
+      "id": "frontier-synth",
+      "executor": "reduce_exec",
+      "provider_family": "anthropic",
+      "input_price_per_mtok_usd": 3.00,
+      "output_price_per_mtok_usd": 15.00,
+      "context_window_tokens": 200000,
+      "quote_output_tokens": 1024,
+      "latency_p50_ms": 1500,
+      "latency_p95_ms": 3000,
+      "base_pass_prob": 0.97
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .contracts import Job
 from .catalog import compile_request
+from .compiler import ModelSpec, TaskSpec, compile_task_hypergraph
 from .ports import Registry, default_registry
 from .runtime import Runtime, public_state
 from .store import KernelStore
@@ -50,6 +51,7 @@ def main(argv=None):
     for command in (preview, run):
         command.add_argument("job")
         command.add_argument("--catalog", help="compile this goal request against a JSON recipe catalog")
+        command.add_argument("--compile-models", help="compile a TaskSpec JSON against a ModelSpec list JSON")
     run.add_argument("--id", help="stable ID for idempotent submission")
     for name in ("resume", "show", "events"):
         commands.add_parser(name).add_argument("run_id")
@@ -72,7 +74,17 @@ def main(argv=None):
             runtime = Runtime(store, _registry(args.registry))
             if args.command in {"plan", "run"}:
                 data = _read(args.job)
-                job = compile_request(data, _read(args.catalog)) if args.catalog else Job.from_dict(data)
+                if args.compile_models:
+                    models_raw = _read(args.compile_models)
+                    if isinstance(models_raw, dict) and "models" in models_raw:
+                        models_raw = models_raw["models"]
+                    task_raw = data["task"] if isinstance(data, dict) and "task" in data else data
+                    models_seq = [ModelSpec.from_dict(m) for m in models_raw]
+                    job = compile_task_hypergraph(TaskSpec.from_dict(task_raw), models_seq)
+                elif args.catalog:
+                    job = compile_request(data, _read(args.catalog))
+                else:
+                    job = Job.from_dict(data)
                 if args.command == "plan":
                     output = runtime.preview(job).to_dict()
                 else:

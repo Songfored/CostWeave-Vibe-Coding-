@@ -1,0 +1,70 @@
+{
+  "task": {
+    "goal_name": "patch_bundle",
+    "prompt": "Generate verified schema and invariant helpers for the billing ledger module.",
+    "inputs": {
+      "spec": "Expose calculate_micro_usd(tokens, rate_mtok) and format_receipt(units)."
+    },
+    "budget_units": 50000,
+    "acceptance_validator": "json_object",
+    "acceptance_config": {
+      "required_keys": ["module_a", "module_b", "summary"]
+    },
+    "max_parallel": 4,
+    "latency_weight_units_per_sec": 200.0,
+    "subtasks": [
+      {
+        "name": "calc_helper",
+        "prompt": "Write calculate_micro_usd module descriptor.",
+        "validator": "json_schema_strict",
+        "validator_config": {
+          "type": "object",
+          "required": ["fn_name", "code"],
+          "properties": {
+            "fn_name": {"type": "string"},
+            "code": {"type": "string"}
+          }
+        }
+      },
+      {
+        "name": "receipt_helper",
+        "prompt": "Write format_receipt module descriptor.",
+        "validator": "json_schema_strict",
+        "validator_config": {
+          "type": "object",
+          "required": ["fn_name", "code"],
+          "properties": {
+            "fn_name": {"type": "string"},
+            "code": {"type": "string"}
+          }
+        }
+      }
+    ]
+  },
+  "models": [
+    {
+      "id": "flash-mini",
+      "executor": "fanout_exec",
+      "provider_family": "google",
+      "input_price_per_mtok_usd": 0.15,
+      "output_price_per_mtok_usd": 0.60,
+      "context_window_tokens": 128000,
+      "quote_output_tokens": 1024,
+      "latency_p50_ms": 400,
+      "latency_p95_ms": 800,
+      "base_pass_prob": 0.88
+    },
+    {
+      "id": "frontier-pro",
+      "executor": "fanout_exec",
+      "provider_family": "openai",
+      "input_price_per_mtok_usd": 2.50,
+      "output_price_per_mtok_usd": 10.00,
+      "context_window_tokens": 200000,
+      "quote_output_tokens": 1024,
+      "latency_p50_ms": 1400,
+      "latency_p95_ms": 2800,
+      "base_pass_prob": 0.96
+    }
+  ]
+}

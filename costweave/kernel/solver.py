@@ -114,6 +114,7 @@ def select_parallel_wave(
     ready_siblings = [
         op for op in rel_ops
         if op.id != primary.id
+        and op.id in seq_rank
         and op.id not in exh
         and op.produces not in avail
         and op.produces not in produced

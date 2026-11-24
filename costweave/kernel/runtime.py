@@ -184,80 +184,115 @@ class Runtime:
                 risk_rem = max(0.0, job.max_risk_alpha - snapshot["risk_spent"])
                 elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-                if len(futures) < job.max_parallel:
-                    # Plan excluding already-in-flight ops so wave selection finds remaining siblings.
-                    virtual_excluded = set(snapshot["excluded"]) | in_flight_ops
-                    choice = plan(
-                        job,
-                        snapshot["artifacts"].keys(),
-                        virtual_excluded,
-                        remaining,
-                        risk_remaining=risk_rem,
-                        elapsed_ms=elapsed_ms,
+                def _launch_op(op_id: str, claim_plan: Any) -> bool:
+                    nonlocal remaining
+                    op = by_id[op_id]
+                    if op.cost_units > remaining:
+                        return False
+                    attempt_id = self._write(
+                        self.store.claim,
+                        run_id,
+                        op.id,
+                        expected_excluded=snapshot["excluded"],
+                        plan=claim_plan,
                     )
-                    if choice.status != "ready":
-                        if not futures and not snapshot["active_attempts"]:
-                            status = "complete" if choice.status == "complete" else "blocked"
-                            self._write(self.store.finish, run_id, status, choice.status,
-                                        expected_excluded=snapshot["excluded"])
-                            snapshot = self.store.snapshot(run_id)
-                            break
-                        elif choice.status in {"unreachable", "over_budget", "risk_exceeded", "abstain"}:
-                            # If goals already satisfied or blocked, or even with in-flight outputs unreachable:
-                            # Only cancel siblings if even assuming all in-flight outputs succeed, goals cannot be reached!
-                            optimistic_avail = set(snapshot["artifacts"].keys()) | in_flight_outputs
-                            if set(job.goals) <= optimistic_avail:
-                                pass  # Let in-flight attempts finish to satisfy goals
-                            else:
-                                opt_check = plan(
-                                    job,
-                                    optimistic_avail,
-                                    virtual_excluded,
-                                    remaining,
-                                    risk_remaining=risk_rem,
-                                    elapsed_ms=elapsed_ms,
-                                )
-                                if opt_check.status in {"unreachable", "risk_exceeded"}:
-                                    for tok in tokens.values():
-                                        tok.cancel(f"goal_{opt_check.status}")
-                    else:
-                        wave = select_parallel_wave(
+                    if attempt_id is None:
+                        return False
+                    tok = CancellationToken()
+                    tokens[attempt_id] = tok
+                    attempt_meta[attempt_id] = op
+                    inputs = {key: snapshot["artifacts"][key] for key in op.requires}
+                    fut = pool.submit(self._dispatch, run_id, op, inputs, attempt_id, tok)
+                    futures[fut] = attempt_id
+                    remaining -= op.cost_units
+                    return True
+
+                if len(futures) < job.max_parallel:
+                    if not in_flight_ops:
+                        choice = plan(
                             job,
-                            choice.operations[0],
-                            choice.operations,
                             snapshot["artifacts"].keys(),
                             snapshot["excluded"],
-                            in_flight_ops,
-                            in_flight_outputs,
                             remaining,
-                            risk_rem,
+                            risk_remaining=risk_rem,
                             elapsed_ms=elapsed_ms,
                         )
-                        for idx, op_id in enumerate(wave.operations):
-                            if len(futures) >= job.max_parallel:
+                        if choice.status != "ready":
+                            if not futures and not snapshot["active_attempts"]:
+                                status = "complete" if choice.status == "complete" else "blocked"
+                                self._write(self.store.finish, run_id, status, choice.status,
+                                            expected_excluded=snapshot["excluded"])
+                                snapshot = self.store.snapshot(run_id)
                                 break
-                            op = by_id[op_id]
-                            claim_plan = (
-                                choice
-                                if idx == 0 and choice.cost_units is not None and choice.cost_units <= remaining
-                                else replace(choice, operations=(op.id,), cost_units=op.cost_units)
+                        else:
+                            wave = select_parallel_wave(
+                                job,
+                                choice.operations[0],
+                                choice.operations,
+                                snapshot["artifacts"].keys(),
+                                snapshot["excluded"],
+                                in_flight_ops,
+                                in_flight_outputs,
+                                remaining,
+                                risk_rem,
+                                elapsed_ms=elapsed_ms,
                             )
-                            attempt_id = self._write(
-                                self.store.claim,
-                                run_id,
-                                op.id,
-                                expected_excluded=snapshot["excluded"],
-                                plan=claim_plan,
+                            for idx, op_id in enumerate(wave.operations):
+                                if len(futures) >= job.max_parallel:
+                                    break
+                                op = by_id[op_id]
+                                claim_plan = (
+                                    choice
+                                    if idx == 0 and choice.cost_units is not None and choice.cost_units <= remaining
+                                    else replace(choice, operations=(op.id,), cost_units=op.cost_units)
+                                )
+                                _launch_op(op_id, claim_plan)
+                    else:
+                        avail = set(snapshot["artifacts"].keys())
+                        virtual_excluded = set(snapshot["excluded"]) | in_flight_ops
+                        optimistic_avail = avail | in_flight_outputs
+                        if not (set(job.goals) <= optimistic_avail):
+                            opt_check = plan(
+                                job,
+                                optimistic_avail,
+                                virtual_excluded,
+                                remaining,
+                                risk_remaining=risk_rem,
+                                elapsed_ms=elapsed_ms,
                             )
-                            if attempt_id is None:
-                                continue
-                            tok = CancellationToken()
-                            tokens[attempt_id] = tok
-                            attempt_meta[attempt_id] = op
-                            inputs = {key: snapshot["artifacts"][key] for key in op.requires}
-                            fut = pool.submit(self._dispatch, run_id, op, inputs, attempt_id, tok)
-                            futures[fut] = attempt_id
-                            remaining -= op.cost_units
+                            if opt_check.status in {"unreachable", "risk_exceeded"}:
+                                for tok in tokens.values():
+                                    tok.cancel(f"goal_{opt_check.status}")
+                            elif opt_check.status == "ready":
+                                min_prob = min(o.pass_prob for o in attempt_meta.values())
+                                min_lat = min(o.latency_p50_ms for o in attempt_meta.values())
+                                for op_id in opt_check.operations:
+                                    if len(futures) >= job.max_parallel:
+                                        break
+                                    if op_id in virtual_excluded:
+                                        continue
+                                    op = by_id[op_id]
+                                    if (
+                                        op.produces in optimistic_avail
+                                        or not avail.issuperset(op.requires)
+                                        or op.cost_units > remaining
+                                        or op.false_pass_risk > risk_rem + 1e-12
+                                        or (job.deadline_ms is not None and elapsed_ms + op.latency_p50_ms > job.deadline_ms)
+                                    ):
+                                        continue
+                                    latency_gain = job.latency_weight_units_per_sec * (min(min_lat, op.latency_p50_ms) / 1000.0)
+                                    option_loss = (1.0 - min_prob) * op.effective_expected_units
+                                    deadline_pressure = (
+                                        job.deadline_ms is not None
+                                        and elapsed_ms + min_lat + op.latency_p50_ms > job.deadline_ms
+                                    )
+                                    if min_prob >= 1.0 - 1e-9 or latency_gain > option_loss + 1e-9 or deadline_pressure:
+                                        claim_plan = replace(opt_check, operations=(op.id,), cost_units=op.cost_units)
+                                        if _launch_op(op_id, claim_plan):
+                                            in_flight_ops.add(op_id)
+                                            virtual_excluded.add(op_id)
+                                            in_flight_outputs.add(op.produces)
+                                            optimistic_avail.add(op.produces)
 
                 if not futures:
                     snapshot = self.store.snapshot(run_id)

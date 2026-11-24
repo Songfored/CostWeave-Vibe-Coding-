@@ -46,8 +46,8 @@ class KernelParallelRuntimeTests(unittest.TestCase):
     def test_option_value_parallel_wave_vs_serialization(self) -> None:
         def make_job(*, latency_weight: float) -> Job:
             ops = [
-                Operation("modA", ["spec"], "a", "slow", "present", 4, {}, pass_prob=0.55, latency_p50_ms=140),
-                Operation("modB", ["spec"], "b", "slow", "present", 4, {}, pass_prob=0.95, latency_p50_ms=140),
+                Operation("modA", ["spec"], "a", "slow", "present", 4, {}, pass_prob=0.55, latency_p50_ms=200),
+                Operation("modB", ["spec"], "b", "slow", "present", 4, {}, pass_prob=0.95, latency_p50_ms=200),
                 Operation("join", ["a", "b"], "app", "collect", "present", 1, {}, pass_prob=1.0),
             ]
             acc = {
@@ -71,7 +71,7 @@ class KernelParallelRuntimeTests(unittest.TestCase):
                     concurrency["cur"] += 1
                     concurrency["peak"] = max(concurrency["peak"], concurrency["cur"])
                 try:
-                    time.sleep(0.14)
+                    time.sleep(0.20)
                     return {"ok": op.id}
                 finally:
                     with lock:
@@ -88,13 +88,15 @@ class KernelParallelRuntimeTests(unittest.TestCase):
             dur_par = time.perf_counter() - t0
             self.assertEqual("complete", s_par["status"])
             self.assertEqual(2, concurrency["peak"])
-            self.assertLess(dur_par, 0.25)
 
             # Zero latency weight + risky modA: serializes to preserve stopping option.
             concurrency.update(cur=0, peak=0)
+            t1 = time.perf_counter()
             s_ser = rt.submit("run-ser", make_job(latency_weight=0.0))
+            dur_ser = time.perf_counter() - t1
             self.assertEqual("complete", s_ser["status"])
             self.assertEqual(1, concurrency["peak"])
+            self.assertLess(dur_par, dur_ser * 0.85)
 
     def test_sibling_failure_fires_cancellation_token_within_50ms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,6 +162,49 @@ class KernelParallelRuntimeTests(unittest.TestCase):
             restored = KernelStore(backup_path)
             self.assertEqual(store.snapshot("bkp-run"), restored.snapshot("bkp-run"))
             self.assertEqual(store.events("bkp-run"), restored.events("bkp-run"))
+
+    def test_inflight_parallel_siblings_do_not_trigger_premature_expensive_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = default_registry()
+            called: list[str] = []
+
+            def fast_exec(op, inp, *, attempt_id):
+                called.append("fast")
+                time.sleep(0.01)
+                return {"left": 1}
+
+            def slow_exec(op, inp, *, attempt_id):
+                called.append("slow")
+                time.sleep(0.08)
+                return {"right": 2}
+
+            def expensive_exec(op, inp, *, attempt_id):
+                called.append("expensive")
+                return {"direct": True}
+
+            reg.register_executor("fast_op", fast_exec)
+            reg.register_executor("slow_op", slow_exec)
+            reg.register_executor("exp_op", expensive_exec)
+
+            ops = [
+                Operation("branch_a", ["spec"], "a", "fast_op", "present", 2, {}, pass_prob=0.95, latency_p50_ms=300),
+                Operation("branch_b", ["spec"], "b", "slow_op", "present", 2, {}, pass_prob=0.95, latency_p50_ms=300),
+                Operation("join", ["a", "b"], "goal", "collect", "present", 0, {}, pass_prob=1.0),
+                Operation("direct_fallback", ["spec"], "goal", "exp_op", "present", 100, {}, pass_prob=0.99, latency_p50_ms=1000, route_role="fallback"),
+            ]
+            job = Job(
+                ["goal"], {"spec": 1}, 200, ops,
+                acceptance={"goal": {"validator": "present", "config": {}}},
+                planning_policy="bsao",
+                latency_weight_units_per_sec=500.0,
+                max_parallel=4,
+            )
+            store = KernelStore(Path(tmp) / "no-premature.sqlite3")
+            self.addCleanup(store.close)
+            state = Runtime(store, reg).submit("no-premature", job)
+            self.assertEqual("complete", state["status"])
+            self.assertEqual(["fast", "slow"], sorted(called))
+            self.assertEqual(4, state["spent_units"])
 
 
 if __name__ == "__main__":
