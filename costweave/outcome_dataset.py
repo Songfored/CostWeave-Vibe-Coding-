@@ -51,10 +51,10 @@ SAMPLE_TIER_INTERNAL = "internal_validation"
 SAMPLE_TIER_FORMAL = "formal_benchmark"
 
 SENSITIVE_PATTERNS = (
-    re.compile(r"(?i)\\b(?:api[_-]?key|secret|password|private[_-]?key)\\b"),
-    re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~-]{12,}\\b"),
-    re.compile(r"\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b", re.I),
-    re.compile(r"\\b1[3-9]\\d{9}\\b"),
+    re.compile(r"(?i)\b(?:api[_-]?key|secret|password|private[_-]?key)\b"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~-]{12,}\b"),
+    re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
+    re.compile(r"\b1[3-9]\d{9}\b"),
 )
 
 

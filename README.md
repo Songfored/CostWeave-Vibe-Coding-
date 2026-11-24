@@ -314,13 +314,14 @@ Web 界面可编辑模型，也可导入 JSON 或 CSV。JSON 的最小示意如�
 
 | 环境变量 | 作用 | 默认值 |
 |---|---|---|
+| `COSTWEAVE_ARTIFACT_DB` | 指定产物执行内核 SQLite 账本路径 | `~/.costweave/artifact-runtime.sqlite3` |
 | `COSTWEAVE_CATALOG_PATH` | 自定义模型目录路径 | 项目默认目录 |
-| `COSTWEAVE_RUNTIME_V4` | 启用持久化运行时 | 关闭 |
-| `COSTWEAVE_RUNTIME_DB` | 指定运行时 SQLite 文件 | 未指定 |
-| `COSTWEAVE_EXPERIMENTAL_ADAPTERS` | 允许实验性外部适配边界 | 关闭 |
-| `COSTWEAVE_PAID_CALLS` | 允许付费调用层级 | 关闭 |
-| `COSTWEAVE_MEDIA_WORKFLOW` | 启用媒体工作流边界 | 关闭 |
-| `COSTWEAVE_PARALLEL_RUNTIME` | 启用并行运行时能力 | 关闭 |
+| `COSTWEAVE_RUNTIME_V4` | 启用 v1 兼容层持久化运行时（维护冻结态） | 开启（`1`） |
+| `COSTWEAVE_RUNTIME_DB` | 指定 v1 运行时 SQLite 文件 | 未指定 |
+| `COSTWEAVE_EXPERIMENTAL_ADAPTERS` | 允许实验性外部适配边界 | 关闭（`0`） |
+| `COSTWEAVE_PAID_CALLS` | 允许付费调用层级 | 关闭（`0`） |
+| `COSTWEAVE_MEDIA_WORKFLOW` | 启用 v1 模拟媒体工作流边界（维护冻结态） | 开启（`1`） |
+| `COSTWEAVE_PARALLEL_RUNTIME` | 启用 v1 并行运行时能力（维护冻结态） | 开启（`1`） |
 
 安全原则是**默认拒绝**。仅打开环境变量并不足以产生外部调用：执行仍需通过端点、密钥引用、项目范围、会话有效期、预算、调用次数、Token 上限和明确授权等检查；默认发行版没有内置真实 Shadow 执行器。
 

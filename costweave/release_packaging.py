@@ -19,7 +19,7 @@ from .version import ACTIVE_WORK_PACKAGE, VERSION_TAG, __version__
 
 
 ROOT_FILES = ("README.md", "LICENSE", "pyproject.toml", ".gitignore")
-SOURCE_DIRECTORIES = ("costweave", "docs", "tests")
+SOURCE_DIRECTORIES = ("costweave", "docs", "examples", "scripts", "tests")
 BLOCKED_PARTS = {
     ".agents",
     ".codex",

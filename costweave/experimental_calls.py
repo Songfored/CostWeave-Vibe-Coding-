@@ -752,5 +752,6 @@ __all__ = [
     "ExternalBudgetExceededError",
     "ExternalCallInProgressError",
     "ExternalCallsDisabledError",
+    "ExternalCostOverrunError",
     "ExternalIdempotencyError",
 ]

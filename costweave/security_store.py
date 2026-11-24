@@ -22,14 +22,74 @@ from .security_boundary import (
 )
 
 
+class _ProjectOperationGate:
+    """Reentrant shared-active / exclusive-revocation barrier per project."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition(threading.Lock())
+        self._readers: dict[int, int] = {}
+        self._writers_waiting = 0
+        self._writer_thread: int | None = None
+        self._writer_depth = 0
+
+    @contextmanager
+    def shared(self):
+        ident = threading.get_ident()
+        with self._cond:
+            if self._writer_thread == ident:
+                self._readers[ident] = self._readers.get(ident, 0) + 1
+            elif ident in self._readers:
+                self._readers[ident] += 1
+            else:
+                while self._writer_thread is not None or self._writers_waiting > 0:
+                    self._cond.wait()
+                self._readers[ident] = 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                remaining = self._readers[ident] - 1
+                if remaining <= 0:
+                    del self._readers[ident]
+                    if not self._readers:
+                        self._cond.notify_all()
+                else:
+                    self._readers[ident] = remaining
+
+    @contextmanager
+    def exclusive(self):
+        ident = threading.get_ident()
+        with self._cond:
+            if self._writer_thread == ident:
+                self._writer_depth += 1
+            else:
+                self._writers_waiting += 1
+                try:
+                    while self._writer_thread is not None or any(t != ident for t in self._readers):
+                        self._cond.wait()
+                    self._writer_thread = ident
+                    self._writer_depth = 1
+                finally:
+                    self._writers_waiting -= 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._writer_depth -= 1
+                if self._writer_depth <= 0:
+                    self._writer_thread = None
+                    self._writer_depth = 0
+                    self._cond.notify_all()
+
+
 _PROJECT_OPERATION_REGISTRY_LOCK = threading.Lock()
-_PROJECT_OPERATION_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_PROJECT_OPERATION_GATES: dict[tuple[str, str], _ProjectOperationGate] = {}
 
 
-def _project_operation_lock(path: Path, project_id: str) -> threading.RLock:
+def _project_operation_gate(path: Path, project_id: str) -> _ProjectOperationGate:
     key = (str(path.resolve(strict=False)).casefold(), project_id)
     with _PROJECT_OPERATION_REGISTRY_LOCK:
-        return _PROJECT_OPERATION_LOCKS.setdefault(key, threading.RLock())
+        return _PROJECT_OPERATION_GATES.setdefault(key, _ProjectOperationGate())
 
 
 class SecurityStoreError(ValueError):
@@ -121,7 +181,7 @@ class SecurityStore:
         """
 
         project = normalize_project_id(project_id)
-        with _project_operation_lock(self.path, project):
+        with _project_operation_gate(self.path, project).shared():
             yield self.ensure_project_active(project)
 
     def revoke_project(
@@ -167,7 +227,7 @@ class SecurityStore:
         raw = _canonical_json(tombstone)
         digest = _digest(raw)
         with (
-            _project_operation_lock(self.path, project),
+            _project_operation_gate(self.path, project).exclusive(),
             self._lock,
             self._connection() as connection,
         ):
@@ -355,7 +415,7 @@ class SecurityStore:
         raw = _canonical_json(contract)
         contract_hash = _digest(raw)
         with (
-            _project_operation_lock(self.path, project),
+            _project_operation_gate(self.path, project).exclusive(),
             self._lock,
             self._connection() as connection,
         ):
