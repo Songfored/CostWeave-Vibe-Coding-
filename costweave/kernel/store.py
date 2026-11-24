@@ -1,4 +1,4 @@
-"""Durable attempts, immutable validated artifacts and a bounded execution ledger."""
+"""Durable attempts, immutable validated artifacts and a bounded multi-slot execution ledger."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -36,9 +37,12 @@ CREATE TABLE IF NOT EXISTS kernel_attempts (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES kernel_runs,
     op_id TEXT NOT NULL,
+    attempt_no INTEGER NOT NULL DEFAULT 1,
     cost_units INTEGER NOT NULL CHECK(cost_units >= 0),
     actual_units INTEGER CHECK(actual_units BETWEEN 0 AND cost_units),
     accepted INTEGER CHECK(accepted IN (0,1)),
+    superseded INTEGER NOT NULL DEFAULT 0 CHECK(superseded IN (0,1)),
+    risk_used REAL NOT NULL DEFAULT 0.0,
     result_sha256 TEXT,
     returned_json TEXT,
     returned_units INTEGER CHECK(returned_units BETWEEN 0 AND cost_units),
@@ -46,11 +50,11 @@ CREATE TABLE IF NOT EXISTS kernel_attempts (
     stop_reason TEXT,
     reason TEXT NOT NULL DEFAULT '',
     uncertain_reason TEXT,
-    UNIQUE(run_id, op_id),
+    UNIQUE(run_id, op_id, attempt_no),
     CHECK ((actual_units IS NULL) = (accepted IS NULL)),
     CHECK ((returned_json IS NULL) = (returned_units IS NULL))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS kernel_one_active_attempt
+CREATE INDEX IF NOT EXISTS kernel_active_attempts
     ON kernel_attempts(run_id) WHERE accepted IS NULL;
 CREATE TABLE IF NOT EXISTS kernel_events (
     seq INTEGER PRIMARY KEY,
@@ -109,9 +113,12 @@ def _attempt(db, run_id, attempt_id):
     return row
 
 
-def _amount(db, run_id):
-    return db.execute("SELECT COALESCE(SUM(actual_units),0) FROM kernel_attempts WHERE run_id=?",
-                      (run_id,)).fetchone()[0]
+def _reserved_or_spent(db, run_id) -> int:
+    return db.execute(
+        "SELECT COALESCE(SUM(CASE WHEN accepted IS NOT NULL THEN actual_units ELSE cost_units END), 0) "
+        "FROM kernel_attempts WHERE run_id=?",
+        (run_id,),
+    ).fetchone()[0]
 
 
 def _operation(job, op_id):
@@ -125,8 +132,41 @@ def _available(db, run_id):
     return dict(db.execute("SELECT name,sha256 FROM kernel_artifacts WHERE run_id=? ORDER BY name", (run_id,)))
 
 
+def _exhausted_ops(job: dict, settled_rows) -> set[str]:
+    counts = Counter(row["op_id"] for row in settled_rows)
+    limits = {op["id"]: int(op.get("max_attempts", 1)) for op in job["operations"]}
+    return {op_id for op_id, count in counts.items() if count >= limits.get(op_id, 1)}
+
+
+def _attempt_view(row) -> dict:
+    item = {k: row[k] for k in ("id", "op_id", "cost_units")}
+    item["attempt_no"] = row["attempt_no"]
+    item["superseded"] = bool(row["superseded"])
+    item["phase"] = "claimed"
+    if row["returned_json"] is not None:
+        item.update(
+            phase="returned",
+            value=json.loads(row["returned_json"]),
+            actual_units=row["returned_units"],
+        )
+        if row["receipt_id"] is not None:
+            item["receipt_id"] = row["receipt_id"]
+    return item
+
+
+def _logical_digest(db: sqlite3.Connection) -> str:
+    payload = {
+        "runs": [dict(r) for r in db.execute("SELECT * FROM kernel_runs ORDER BY run_id")],
+        "blobs": [dict(r) for r in db.execute("SELECT * FROM kernel_blobs ORDER BY sha256")],
+        "artifacts": [dict(r) for r in db.execute("SELECT * FROM kernel_artifacts ORDER BY run_id, name")],
+        "attempts": [dict(r) for r in db.execute("SELECT * FROM kernel_attempts ORDER BY id")],
+        "events": [dict(r) for r in db.execute("SELECT * FROM kernel_events ORDER BY seq")],
+    }
+    return _digest(_canonical(payload))
+
+
 class KernelStore:
-    """Each file operation is a short transaction. External I/O takes place between claim and settle."""
+    """Each state transition is a short transaction. External I/O takes place between claim and settle."""
 
     def __init__(self, db_path: str | Path):
         self._path = str(db_path)
@@ -136,6 +176,54 @@ class KernelStore:
             Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as db:
             db.executescript(_SCHEMA)
+            self._migrate_attempts(db)
+
+    def _migrate_attempts(self, db: sqlite3.Connection) -> None:
+        cols = {row["name"] for row in db.execute("PRAGMA table_info(kernel_attempts)")}
+        if {"attempt_no", "superseded", "risk_used"} <= cols:
+            db.execute("DROP INDEX IF EXISTS kernel_one_active_attempt")
+            db.execute("CREATE INDEX IF NOT EXISTS kernel_active_attempts ON kernel_attempts(run_id) WHERE accepted IS NULL")
+            return
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DROP INDEX IF EXISTS kernel_one_active_attempt")
+            db.execute("""
+                CREATE TABLE kernel_attempts_v2 (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES kernel_runs,
+                    op_id TEXT NOT NULL,
+                    attempt_no INTEGER NOT NULL DEFAULT 1,
+                    cost_units INTEGER NOT NULL CHECK(cost_units >= 0),
+                    actual_units INTEGER CHECK(actual_units BETWEEN 0 AND cost_units),
+                    accepted INTEGER CHECK(accepted IN (0,1)),
+                    superseded INTEGER NOT NULL DEFAULT 0 CHECK(superseded IN (0,1)),
+                    risk_used REAL NOT NULL DEFAULT 0.0,
+                    result_sha256 TEXT,
+                    returned_json TEXT,
+                    returned_units INTEGER CHECK(returned_units BETWEEN 0 AND cost_units),
+                    receipt_id TEXT,
+                    stop_reason TEXT,
+                    reason TEXT NOT NULL DEFAULT '',
+                    uncertain_reason TEXT,
+                    UNIQUE(run_id, op_id, attempt_no),
+                    CHECK ((actual_units IS NULL) = (accepted IS NULL)),
+                    CHECK ((returned_json IS NULL) = (returned_units IS NULL))
+                )
+            """)
+            db.execute("""
+                INSERT INTO kernel_attempts_v2 (
+                    id, run_id, op_id, attempt_no, cost_units, actual_units, accepted,
+                    superseded, risk_used, result_sha256, returned_json, returned_units,
+                    receipt_id, stop_reason, reason, uncertain_reason
+                )
+                SELECT id, run_id, op_id, 1, cost_units, actual_units, accepted,
+                       0, 0.0, result_sha256, returned_json, returned_units,
+                       receipt_id, stop_reason, reason, uncertain_reason
+                FROM kernel_attempts
+            """)
+            db.execute("DROP TABLE kernel_attempts")
+            db.execute("ALTER TABLE kernel_attempts_v2 RENAME TO kernel_attempts")
+            db.execute("CREATE INDEX IF NOT EXISTS kernel_active_attempts ON kernel_attempts(run_id) WHERE accepted IS NULL")
 
     def _connect(self):
         db = sqlite3.connect(self._path, timeout=10, isolation_level=None, check_same_thread=False)
@@ -193,31 +281,35 @@ class KernelStore:
     def snapshot(self, run_id: str) -> dict:
         with self._transaction() as db:
             run = _run(db, run_id)
+            job = json.loads(run["job"])
             rows = db.execute(
                 "SELECT a.name,a.sha256,b.json FROM kernel_artifacts a JOIN kernel_blobs b ON a.sha256=b.sha256 "
                 "WHERE a.run_id=? ORDER BY a.name", (run_id,)
             ).fetchall()
-            attempts = db.execute("SELECT * FROM kernel_attempts WHERE run_id=? ORDER BY op_id", (run_id,)).fetchall()
-            pending = next((a for a in attempts if a["accepted"] is None), None)
-            active = None
-            if pending:
-                active = {k: pending[k] for k in ("id", "op_id", "cost_units")}
-                active["phase"] = "claimed"
-                if pending["returned_json"] is not None:
-                    active.update(phase="returned", value=json.loads(pending["returned_json"]),
-                                  actual_units=pending["returned_units"])
-                    if pending["receipt_id"] is not None:
-                        active["receipt_id"] = pending["receipt_id"]
+            attempts = db.execute(
+                "SELECT * FROM kernel_attempts WHERE run_id=? ORDER BY attempt_no, op_id", (run_id,)
+            ).fetchall()
+            pending = [a for a in attempts if a["accepted"] is None]
+            settled = [a for a in attempts if a["accepted"] is not None]
+            active_attempts = [_attempt_view(a) for a in pending]
+            active = active_attempts[0] if active_attempts else None
+            first_pending = pending[0] if pending else None
+            counts = Counter(a["op_id"] for a in attempts)
             return {
-                "run_id": run_id, "job": json.loads(run["job"]), "job_sha256": run["job_sha256"],
+                "run_id": run_id,
+                "job": job,
+                "job_sha256": run["job_sha256"],
                 "status": "needs_reconciliation" if pending else run["status"],
-                "reason": (pending["uncertain_reason"] or "attempt_in_flight") if pending else run["reason"],
+                "reason": (first_pending["uncertain_reason"] or "attempt_in_flight") if first_pending else run["reason"],
                 "artifacts": {r["name"]: json.loads(r["json"]) for r in rows},
                 "artifact_hashes": {r["name"]: r["sha256"] for r in rows},
-                "excluded": [a["op_id"] for a in attempts if a["accepted"] is not None],
-                "spent_units": sum(a["actual_units"] for a in attempts if a["actual_units"] is not None),
-                "held_units": pending["cost_units"] if pending else 0,
+                "excluded": sorted(_exhausted_ops(job, settled)),
+                "attempt_counts": dict(counts),
+                "spent_units": sum(a["actual_units"] for a in settled),
+                "held_units": sum(a["cost_units"] for a in pending),
+                "risk_spent": sum(float(a["risk_used"]) for a in settled if a["accepted"] == 1),
                 "active_attempt": active,
+                "active_attempts": active_attempts,
             }
 
     def claim(self, run_id: str, op_id: str, *, expected_excluded=None, plan=None) -> str | None:
@@ -225,30 +317,46 @@ class KernelStore:
             run = _run(db, run_id)
             job = json.loads(run["job"])
             op = _operation(job, op_id)
-            busy = db.execute("SELECT 1 FROM kernel_attempts WHERE run_id=? AND (op_id=? OR accepted IS NULL)",
-                              (run_id, op_id)).fetchone()
+            attempts = db.execute(
+                "SELECT op_id,accepted,attempt_no FROM kernel_attempts WHERE run_id=?", (run_id,)
+            ).fetchall()
+            active_rows = [a for a in attempts if a["accepted"] is None]
+            settled_rows = [a for a in attempts if a["accepted"] is not None]
+            max_parallel = int(job.get("max_parallel", 1))
+            max_attempts = int(op.get("max_attempts", 1))
+            op_attempts = [a for a in attempts if a["op_id"] == op_id]
+            settled_for_op = sum(1 for a in op_attempts if a["accepted"] is not None)
+            active_for_op = any(a["accepted"] is None for a in op_attempts)
             available = _available(db, run_id)
-            if run["status"] != "active" or busy or op["produces"] in available:
+
+            if (
+                run["status"] != "active"
+                or len(active_rows) >= max_parallel
+                or active_for_op
+                or settled_for_op >= max_attempts
+                or op["produces"] in available
+            ):
                 return None
             if expected_excluded is not None:
-                settled = db.execute("SELECT op_id FROM kernel_attempts WHERE run_id=? AND accepted IS NOT NULL",
-                                     (run_id,)).fetchall()
-                if set(expected_excluded) != {row["op_id"] for row in settled}:
+                if set(expected_excluded) != _exhausted_ops(job, settled_rows):
                     return None
             if set(job["goals"]) <= available.keys() or not set(op["requires"]) <= available.keys():
                 return None
-            remaining = job["budget_units"] - _amount(db, run_id)
+            remaining = job["budget_units"] - _reserved_or_spent(db, run_id)
             if op["cost_units"] > remaining:
                 return None
             if plan is not None and (plan.status != "ready" or plan.operations[:1] != (op_id,) or
                                      plan.cost_units is None or plan.cost_units > remaining):
                 raise ValueError("plan does not authorize this attempt within its remaining budget")
+            attempt_no = len(op_attempts) + 1
             attempt_id = uuid.uuid4().hex
-            db.execute("INSERT INTO kernel_attempts(id,run_id,op_id,cost_units) VALUES (?,?,?,?)",
-                       (attempt_id, run_id, op_id, op["cost_units"]))
-            _event(db, run_id, "attempt_claimed", attempt_id=attempt_id, op_id=op_id, cost_units=op["cost_units"],
-                   input_hashes={key: available[key] for key in op["requires"]}, remaining_units=remaining,
-                   **({"plan": plan.to_dict()} if plan is not None else {}))
+            db.execute(
+                "INSERT INTO kernel_attempts(id,run_id,op_id,attempt_no,cost_units) VALUES (?,?,?,?,?)",
+                (attempt_id, run_id, op_id, attempt_no, op["cost_units"]),
+            )
+            _event(db, run_id, "attempt_claimed", attempt_id=attempt_id, op_id=op_id, attempt_no=attempt_no,
+                   cost_units=op["cost_units"], input_hashes={key: available[key] for key in op["requires"]},
+                   remaining_units=remaining, **({"plan": plan.to_dict()} if plan is not None else {}))
             return attempt_id
 
     def mark_uncertain(self, run_id: str, attempt_id: str, reason: str) -> None:
@@ -282,11 +390,12 @@ class KernelStore:
 
     def settle(self, run_id: str, attempt_id: str, *, accepted: bool, value=_NOT_SUPPLIED,
                reason: str = "", actual_units: int | None = None, stop_reason: str | None = None,
-               require_unreturned: bool = False) -> None:
+               require_unreturned: bool = False) -> list[str]:
         if type(accepted) is not bool or not isinstance(reason, str):
             raise ValueError("invalid settlement receipt")
         if stop_reason is not None and (accepted or not isinstance(stop_reason, str) or not stop_reason):
             raise ValueError("a terminal refusal requires a reason and a rejected outcome")
+        superseded_ids: list[str] = []
         with self._transaction(write=True) as db:
             attempt = _attempt(db, run_id, attempt_id)
             returned = attempt["returned_json"]
@@ -301,22 +410,51 @@ class KernelStore:
             if returned is not None and (encoded != returned or charge != attempt["returned_units"]):
                 raise ValueError("settlement differs from the executor receipt")
             digest = _digest(encoded)
+            job = json.loads(_run(db, run_id)["job"])
+            op = _operation(job, attempt["op_id"])
+
+            effective_accepted = accepted
+            effective_reason = reason
+            if attempt["accepted"] is None and attempt["superseded"] == 1 and accepted:
+                effective_accepted = False
+                effective_reason = "superseded" if reason in ("", "accepted") else reason
+
             if attempt["accepted"] is not None:
-                previous = (attempt["accepted"], attempt["actual_units"], attempt["result_sha256"],
+                previous = (bool(attempt["accepted"]), attempt["actual_units"], attempt["result_sha256"],
                             attempt["reason"], attempt["stop_reason"])
-                if previous != (accepted, charge, digest, reason, stop_reason):
+                if previous != (effective_accepted, charge, digest, effective_reason, stop_reason):
                     raise ValueError("conflicting settlement for the same attempt")
-                return
-            op = _operation(json.loads(_run(db, run_id)["job"]), attempt["op_id"])
-            if accepted:
-                _artifact(db, run_id, op["produces"], encoded, digest)
-            db.execute("UPDATE kernel_attempts SET actual_units=?,accepted=?,result_sha256=?,reason=?,stop_reason=? WHERE id=?",
-                       (charge, accepted, digest, reason, stop_reason, attempt_id))
-            _event(db, run_id, "attempt_settled", op_id=op["id"], attempt_id=attempt_id, accepted=accepted,
-                   artifact=op["produces"], sha256=digest, actual_units=charge, reason=reason)
+                return []
+
+            risk_used = float(op.get("false_pass_risk", 0.0)) if effective_accepted else 0.0
+            if effective_accepted:
+                available = _available(db, run_id)
+                if op["produces"] not in available:
+                    _artifact(db, run_id, op["produces"], encoded, digest)
+                competing_ops = [o["id"] for o in job["operations"] if o["produces"] == op["produces"]]
+                if competing_ops:
+                    placeholders = ",".join("?" for _ in competing_ops)
+                    rows = db.execute(
+                        f"SELECT id FROM kernel_attempts WHERE run_id=? AND id<>? AND accepted IS NULL AND op_id IN ({placeholders})",
+                        (run_id, attempt_id, *competing_ops),
+                    ).fetchall()
+                    superseded_ids = [r["id"] for r in rows]
+                    if superseded_ids:
+                        s_placeholders = ",".join("?" for _ in superseded_ids)
+                        db.execute(
+                            f"UPDATE kernel_attempts SET superseded=1 WHERE id IN ({s_placeholders})",
+                            superseded_ids,
+                        )
+            db.execute(
+                "UPDATE kernel_attempts SET actual_units=?,accepted=?,risk_used=?,result_sha256=?,reason=?,stop_reason=? WHERE id=?",
+                (charge, effective_accepted, risk_used, digest, effective_reason, stop_reason, attempt_id),
+            )
+            _event(db, run_id, "attempt_settled", op_id=op["id"], attempt_id=attempt_id, accepted=effective_accepted,
+                   artifact=op["produces"], sha256=digest, actual_units=charge, reason=effective_reason)
             if stop_reason is not None:
                 db.execute("UPDATE kernel_runs SET status='blocked',reason=? WHERE run_id=?", (stop_reason, run_id))
                 _event(db, run_id, "run_finished", status="blocked", reason=stop_reason)
+        return superseded_ids
 
     def finish(self, run_id: str, status: str, reason: str, *, expected_excluded=None) -> bool:
         if status not in {"complete", "blocked"} or not isinstance(reason, str):
@@ -328,11 +466,11 @@ class KernelStore:
             rows = db.execute("SELECT op_id,accepted FROM kernel_attempts WHERE run_id=?", (run_id,)).fetchall()
             if any(r["accepted"] is None for r in rows):
                 return False
-            if expected_excluded is not None and set(expected_excluded) != {r["op_id"] for r in rows}:
+            job = json.loads(run["job"])
+            if expected_excluded is not None and set(expected_excluded) != _exhausted_ops(job, rows):
                 return False
             if status == "blocked" and expected_excluded is None:
                 raise ValueError("blocked decisions require the snapshot's excluded operation IDs")
-            job = json.loads(run["job"])
             satisfied = set(job["goals"]) <= _available(db, run_id).keys()
             if (status == "complete") != satisfied:
                 return False
@@ -345,3 +483,25 @@ class KernelStore:
             _run(db, run_id)
             rows = db.execute("SELECT seq,type,data FROM kernel_events WHERE run_id=? ORDER BY seq", (run_id,))
             return [dict(seq=r["seq"], type=r["type"], **json.loads(r["data"])) for r in rows]
+
+    def backup_and_verify(self, target_path: str | Path) -> dict:
+        """Create an atomic SQLite backup and verify schema/logical SHA-256 parity."""
+        dest = Path(target_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with self._transaction() as src_db:
+            src_hash = _logical_digest(src_db)
+            dest_db = sqlite3.connect(str(dest), timeout=10, isolation_level=None)
+            dest_db.row_factory = sqlite3.Row
+            try:
+                src_db.backup(dest_db)
+                quick = dest_db.execute("PRAGMA quick_check").fetchone()[0]
+                fk_rows = dest_db.execute("PRAGMA foreign_key_check").fetchall()
+                dest_hash = _logical_digest(dest_db)
+            finally:
+                dest_db.close()
+        return {
+            "backup_path": str(dest),
+            "healthy": quick == "ok" and not fk_rows,
+            "logical_hash_match": src_hash == dest_hash,
+            "logical_sha256": dest_hash,
+        }

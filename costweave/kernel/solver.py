@@ -69,6 +69,112 @@ class BSAOResult:
     audit: DecisionAudit | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ParallelWavePlan:
+    primary_op: str
+    operations: tuple[str, ...]
+    reason: str
+    hedged: bool = False
+
+
+def select_parallel_wave(
+    job: Job,
+    primary_op_id: str,
+    pass_sequence: tuple[str, ...],
+    available: Collection[str],
+    exhausted: Collection[str],
+    in_flight_ops: Collection[str],
+    in_flight_outputs: Collection[str],
+    remaining_units: int,
+    risk_remaining: float,
+    elapsed_ms: int = 0,
+) -> ParallelWavePlan:
+    """Select an option-value-optimal parallel dispatch wave around primary_op_id."""
+    ops_by_id = {op.id: op for op in job.operations}
+    primary = ops_by_id[primary_op_id]
+    if job.max_parallel <= 1 or job.planning_policy != "bsao":
+        return ParallelWavePlan(primary.id, (primary.id,), "serial_policy")
+
+    avail = set(available)
+    exh = set(exhausted) | set(in_flight_ops)
+    produced = set(in_flight_outputs) | {primary.produces}
+    wave: list[Operation] = [primary]
+    rem_budget = remaining_units - primary.cost_units
+    rem_risk = risk_remaining - primary.false_pass_risk
+    failure_pen = (
+        float(job.failure_penalty_units)
+        if job.failure_penalty_units is not None
+        else float(max(1_000_000, job.budget_units * 100 + 10_000))
+    )
+
+    # 1. Option-Value AND-Sibling Parallelism
+    # Consider ready siblings that appear on the optimal pass continuation (or remaining rel_ops).
+    rel_ops = relevant_operations(job.operations, frozenset(job.goals), frozenset(avail), frozenset(exh))
+    seq_rank = {op_id: idx for idx, op_id in enumerate(pass_sequence)}
+    ready_siblings = [
+        op for op in rel_ops
+        if op.id != primary.id
+        and op.id not in exh
+        and op.produces not in avail
+        and op.produces not in produced
+        and avail.issuperset(op.requires)
+        and op.cost_units <= rem_budget
+        and op.false_pass_risk <= rem_risk + 1e-12
+        and (job.deadline_ms is None or elapsed_ms + op.latency_p50_ms <= job.deadline_ms)
+    ]
+    ready_siblings.sort(key=lambda o: (o.id not in seq_rank, seq_rank.get(o.id, 9999), o.cost_units, o.id))
+
+    reasons: list[str] = []
+    for sib in ready_siblings:
+        if len(wave) >= job.max_parallel:
+            break
+        if sib.cost_units > rem_budget or sib.false_pass_risk > rem_risk + 1e-12:
+            continue
+        latency_gain = job.latency_weight_units_per_sec * (min(primary.latency_p50_ms, sib.latency_p50_ms) / 1000.0)
+        option_loss = (1.0 - primary.pass_prob) * sib.effective_expected_units
+        deadline_pressure = (
+            job.deadline_ms is not None
+            and elapsed_ms + primary.latency_p50_ms + sib.latency_p50_ms > job.deadline_ms
+        )
+        if latency_gain > option_loss + 1e-9 or deadline_pressure:
+            wave.append(sib)
+            produced.add(sib.produces)
+            rem_budget -= sib.cost_units
+            rem_risk -= sib.false_pass_risk
+            reasons.append("deadline_parallel" if deadline_pressure else "option_value_parallel")
+
+    # 2. OR Deadline Hedging when serial retry would breach hard deadline
+    hedged = False
+    if (
+        len(wave) < job.max_parallel
+        and job.deadline_ms is not None
+        and primary.pass_prob < 1.0
+    ):
+        backups = [
+            op for op in rel_ops
+            if op.id != primary.id
+            and op.id not in exh
+            and op.produces == primary.produces
+            and avail.issuperset(op.requires)
+            and op.cost_units <= rem_budget
+            and op.false_pass_risk <= rem_risk + 1e-12
+            and elapsed_ms + op.latency_p95_ms <= job.deadline_ms
+        ]
+        backups.sort(key=lambda o: (-o.pass_prob, o.effective_expected_units, o.id))
+        for backup in backups:
+            serial_breach = elapsed_ms + primary.latency_p95_ms + backup.latency_p95_ms > job.deadline_ms
+            if serial_breach and (1.0 - primary.pass_prob) * failure_pen > backup.effective_expected_units:
+                wave.append(backup)
+                rem_budget -= backup.cost_units
+                rem_risk -= backup.false_pass_risk
+                hedged = True
+                reasons.append("or_deadline_hedge")
+                break
+
+    reason = ",".join(dict.fromkeys(reasons)) if reasons else "option_value_serialize"
+    return ParallelWavePlan(primary.id, tuple(op.id for op in wave), reason, hedged=hedged)
+
+
 def relevant_operations(
     operations: tuple[Operation, ...],
     goals: frozenset[str],

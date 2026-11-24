@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import threading
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -18,11 +20,49 @@ class KnownFailure(RuntimeError):
         self.actual_units = actual_units
 
 
+class CancelledAttempt(KnownFailure):
+    """Raised when an in-flight attempt is aborted cleanly via CancellationToken."""
+
+    def __init__(self, message: str = "cancelled", *, actual_units: int | None = 0):
+        super().__init__(message, actual_units=actual_units)
+
+
 class AdmissionDenied(KnownFailure):
     """A host policy denied dispatch; stop the run before considering substitutes."""
 
     def __init__(self, message: str):
         super().__init__(message, actual_units=0)
+
+
+class CancellationToken:
+    """Thread-safe cooperative cancellation signal for parallel attempts."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._reason: str | None = None
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    @property
+    def reason(self) -> str | None:
+        with self._lock:
+            return self._reason
+
+    def cancel(self, reason: str = "cancelled") -> None:
+        with self._lock:
+            if self._reason is None:
+                self._reason = reason
+            self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout)
+
+    def raise_if_cancelled(self, *, actual_units: int | None = 0) -> None:
+        if self._event.is_set():
+            raise CancelledAttempt(self.reason or "cancelled", actual_units=actual_units)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,17 +89,30 @@ def _inputs_for(op: Operation, inputs: Mapping[str, Any]) -> dict:
     return {name: deepcopy(inputs[name]) for name in op.requires}
 
 
+def _accepts_cancel_token(fn: Callable[..., Any]) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if "cancel_token" in params:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 class Registry:
     def __init__(self) -> None:
         self._executors: dict[str, Executor] = {}
         self._validators: dict[str, Validator] = {}
         self._executor_checks: dict[str, ConfigCheck] = {}
         self._validator_checks: dict[str, ConfigCheck] = {}
+        self._executor_accepts_cancel: set[str] = set()
 
     def register_executor(self, name: str, fn: Executor, *, check_config: ConfigCheck | None = None) -> None:
         if not isinstance(name, str) or not name.strip() or not callable(fn) or name in self._executors:
             raise ValueError(f"invalid or duplicate executor: {name!r}")
         self._executors[name] = fn
+        if _accepts_cancel_token(fn):
+            self._executor_accepts_cancel.add(name)
         if check_config is not None:
             self._executor_checks[name] = check_config
 
@@ -86,13 +139,23 @@ class Registry:
         for artifact, rule in job.acceptance.items():
             self._check_validator(_rule_operation(artifact, rule))
 
-    def perform(self, operation: Operation, inputs: Mapping, *, attempt_id: str) -> ExecutionResult:
-        raw = self._executors[operation.executor](operation, _inputs_for(operation, inputs), attempt_id=attempt_id)
+    def perform(
+        self,
+        operation: Operation,
+        inputs: Mapping,
+        *,
+        attempt_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> ExecutionResult:
+        fn = self._executors[operation.executor]
+        kwargs: dict[str, Any] = {"attempt_id": attempt_id}
+        if operation.executor in self._executor_accepts_cancel:
+            kwargs["cancel_token"] = cancel_token
+        raw = fn(operation, _inputs_for(operation, inputs), **kwargs)
         result = raw if isinstance(raw, ExecutionResult) else ExecutionResult(raw)
         if result.actual_units is not None and (
             type(result.actual_units) is not int or not 0 <= result.actual_units <= operation.cost_units
         ):
-            # The host reported a discrepant charge. Keep the reservation for reconciliation.
             raise ValueError("executor settlement exceeds its quote or is invalid")
         try:
             canonical_json(result.value)
@@ -100,8 +163,15 @@ class Registry:
             raise KnownFailure("executor returned invalid JSON", actual_units=result.actual_units) from exc
         return result
 
-    def execute(self, operation: Operation, inputs: Mapping, *, attempt_id: str) -> Any:
-        return self.perform(operation, inputs, attempt_id=attempt_id).value
+    def execute(
+        self,
+        operation: Operation,
+        inputs: Mapping,
+        *,
+        attempt_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> Any:
+        return self.perform(operation, inputs, attempt_id=attempt_id, cancel_token=cancel_token).value
 
     def validate(self, operation: Operation, value: Any, inputs: Mapping) -> bool:
         verdict = self._validators[operation.validator](operation, deepcopy(value), _inputs_for(operation, inputs))

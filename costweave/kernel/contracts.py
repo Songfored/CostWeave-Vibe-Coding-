@@ -117,7 +117,7 @@ class Operation:
         pass_prob: float = 1.0,
         false_pass_risk: float = 0.0,
         latency_p50_ms: int = 0,
-        latency_p95_ms: int = 0,
+        latency_p95_ms: int | None = None,
         provider_family: str = "local",
         max_attempts: int = 1,
     ):
@@ -134,7 +134,7 @@ class Operation:
         object.__setattr__(self, "pass_prob", _number(pass_prob, "pass_prob", 0.0, 1.0, allow_zero=False))
         object.__setattr__(self, "false_pass_risk", _number(false_pass_risk, "false_pass_risk", 0.0, 1.0))
         p50 = _integer(latency_p50_ms, "latency_p50_ms", 0, 86_400_000)
-        p95 = _integer(latency_p95_ms, "latency_p95_ms", p50, 86_400_000)
+        p95 = p50 if latency_p95_ms is None else _integer(latency_p95_ms, "latency_p95_ms", p50, 86_400_000)
         object.__setattr__(self, "latency_p50_ms", p50)
         object.__setattr__(self, "latency_p95_ms", p95)
         object.__setattr__(self, "provider_family", _name(provider_family, "provider_family"))
@@ -178,7 +178,7 @@ class Operation:
             result["false_pass_risk"] = self.false_pass_risk
         if self.latency_p50_ms != 0:
             result["latency_p50_ms"] = self.latency_p50_ms
-        if self.latency_p95_ms != 0:
+        if self.latency_p95_ms != self.latency_p50_ms:
             result["latency_p95_ms"] = self.latency_p95_ms
         if self.provider_family != "local":
             result["provider_family"] = self.provider_family
