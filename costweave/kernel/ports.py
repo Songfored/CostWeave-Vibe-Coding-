@@ -229,4 +229,6 @@ def default_registry() -> Registry:
                                 check_config=_required("expected"))
     registry.register_validator("json_object", lambda op, value, inputs: isinstance(value, dict) and
                                 all(key in value for key in op.config.get("required_keys", [])), check_config=_check_keys)
+    from .verifiers import register_tiered_verifiers
+    register_tiered_verifiers(registry)
     return registry
