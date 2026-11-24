@@ -8,6 +8,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from uuid import uuid4
 
+from .beliefs import BeliefEngine, BeliefStore
 from .contracts import Job
 from .catalog import compile_request
 from .compiler import ModelSpec, TaskSpec, compile_task_hypergraph
@@ -59,11 +60,36 @@ def main(argv=None):
     reconcile.add_argument("run_id")
     reconcile.add_argument("attempt_id")
     reconcile.add_argument("receipt")
+    beliefs_cmd = commands.add_parser("beliefs", help="inspect, promote, or rollback learned routing beliefs")
+    beliefs_sub = beliefs_cmd.add_subparsers(dest="belief_action", required=True)
+    beliefs_sub.add_parser("status")
+    beliefs_promote = beliefs_sub.add_parser("promote")
+    beliefs_promote.add_argument("candidate")
+    beliefs_promote.add_argument("observations")
+    beliefs_sub.add_parser("rollback")
     args = parser.parse_args(argv)
     if args.command == "serve":
         from ..server import main as serve
         serve(["--host", args.host, "--port", str(args.port)])
         return 0
+    if args.command == "beliefs":
+        bstore = BeliefStore(args.db)
+        try:
+            if args.belief_action == "status":
+                output = bstore.active_version()
+            elif args.belief_action == "promote":
+                cand = BeliefEngine.from_dict(_read(args.candidate))
+                obs = _read(args.observations)
+                output = bstore.evaluate_and_promote(cand, obs)
+            else:
+                output = bstore.rollback()
+            print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
+            return 0
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        finally:
+            bstore.close()
     store = KernelStore(":memory:" if args.command == "plan" else args.db)
     try:
         if args.command == "events":
