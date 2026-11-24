@@ -7,7 +7,15 @@ from .contracts import MAX_OPERATIONS, Job, Operation, _fields, _names
 
 
 def compile_request(request: Mapping, catalog: Mapping) -> Job:
-    _fields(request, {"goals", "inputs", "budget_units"}, {"search_limit", "planning_policy"}, "goal request")
+    _fields(
+        request,
+        {"goals", "inputs", "budget_units"},
+        {
+            "search_limit", "planning_policy", "max_risk_alpha", "failure_penalty_units",
+            "corruption_penalty_units", "deadline_ms", "latency_weight_units_per_sec", "max_parallel",
+        },
+        "goal request",
+    )
     _fields(catalog, {"operations", "acceptance"}, set(), "recipe catalog")
     goals = _names(request["goals"], "goals")
     if not isinstance(request["inputs"], dict) or not isinstance(catalog["acceptance"], dict):

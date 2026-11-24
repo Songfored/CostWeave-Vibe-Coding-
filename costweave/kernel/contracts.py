@@ -29,6 +29,16 @@ def _integer(value: Any, field: str, minimum: int, maximum: int) -> int:
     return value
 
 
+def _number(value: Any, field: str, minimum: float, maximum: float, *, allow_zero: bool = True) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
+    numeric = float(value)
+    if (numeric < minimum if allow_zero else numeric <= minimum) or numeric > maximum:
+        bound = f"[{minimum}, {maximum}]" if allow_zero else f"({minimum}, {maximum}]"
+        raise ValueError(f"{field} must be in {bound}")
+    return numeric
+
+
 def _names(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)) or len(value) > MAX_ARTIFACTS:
         raise ValueError(f"{field} must be an array of at most {MAX_ARTIFACTS} names")
@@ -83,18 +93,57 @@ class Operation:
     validator: str
     cost_units: int
     route_role: str
+    expected_units: float | None
+    pass_prob: float
+    false_pass_risk: float
+    latency_p50_ms: int
+    latency_p95_ms: int
+    provider_family: str
+    max_attempts: int
     _config_json: str
 
-    def __init__(self, id: str, requires: list[str] | tuple[str, ...], produces: str, executor: str,
-                 validator: str, cost_units: int, config: dict | None = None, *, route_role: str = "standard"):
+    def __init__(
+        self,
+        id: str,
+        requires: list[str] | tuple[str, ...],
+        produces: str,
+        executor: str,
+        validator: str,
+        cost_units: int,
+        config: dict | None = None,
+        *,
+        route_role: str = "standard",
+        expected_units: float | None = None,
+        pass_prob: float = 1.0,
+        false_pass_risk: float = 0.0,
+        latency_p50_ms: int = 0,
+        latency_p95_ms: int = 0,
+        provider_family: str = "local",
+        max_attempts: int = 1,
+    ):
         for field, value in (("id", id), ("produces", produces), ("executor", executor), ("validator", validator)):
             object.__setattr__(self, field, _name(value, field))
         if route_role not in ("standard", "speculative", "fallback"):
             raise ValueError("route_role must be standard, speculative, or fallback")
         object.__setattr__(self, "route_role", route_role)
         object.__setattr__(self, "requires", _names(requires, "requires"))
-        object.__setattr__(self, "cost_units", _integer(cost_units, "cost_units", 0, MAX_UNITS))
+        units = _integer(cost_units, "cost_units", 0, MAX_UNITS)
+        object.__setattr__(self, "cost_units", units)
+        exp = None if expected_units is None else _number(expected_units, "expected_units", 0.0, float(units))
+        object.__setattr__(self, "expected_units", exp)
+        object.__setattr__(self, "pass_prob", _number(pass_prob, "pass_prob", 0.0, 1.0, allow_zero=False))
+        object.__setattr__(self, "false_pass_risk", _number(false_pass_risk, "false_pass_risk", 0.0, 1.0))
+        p50 = _integer(latency_p50_ms, "latency_p50_ms", 0, 86_400_000)
+        p95 = _integer(latency_p95_ms, "latency_p95_ms", p50, 86_400_000)
+        object.__setattr__(self, "latency_p50_ms", p50)
+        object.__setattr__(self, "latency_p95_ms", p95)
+        object.__setattr__(self, "provider_family", _name(provider_family, "provider_family"))
+        object.__setattr__(self, "max_attempts", _integer(max_attempts, "max_attempts", 1, 16))
         object.__setattr__(self, "_config_json", _json_object({} if config is None else config, "config"))
+
+    @property
+    def effective_expected_units(self) -> float:
+        return float(self.cost_units) if self.expected_units is None else self.expected_units
 
     @property
     def config(self) -> dict:
@@ -102,8 +151,15 @@ class Operation:
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> Operation:
-        _fields(raw, {"id", "requires", "produces", "executor", "validator", "cost_units"},
-                {"config", "route_role"}, "operation")
+        _fields(
+            raw,
+            {"id", "requires", "produces", "executor", "validator", "cost_units"},
+            {
+                "config", "route_role", "expected_units", "pass_prob", "false_pass_risk",
+                "latency_p50_ms", "latency_p95_ms", "provider_family", "max_attempts",
+            },
+            "operation",
+        )
         if "config" in raw and raw["config"] is None:
             raise ValueError("config must be a JSON object")
         return cls(**raw)
@@ -114,6 +170,20 @@ class Operation:
                   "config": self.config}
         if self.route_role != "standard":
             result["route_role"] = self.route_role
+        if self.expected_units is not None:
+            result["expected_units"] = self.expected_units
+        if self.pass_prob != 1.0:
+            result["pass_prob"] = self.pass_prob
+        if self.false_pass_risk != 0.0:
+            result["false_pass_risk"] = self.false_pass_risk
+        if self.latency_p50_ms != 0:
+            result["latency_p50_ms"] = self.latency_p50_ms
+        if self.latency_p95_ms != 0:
+            result["latency_p95_ms"] = self.latency_p95_ms
+        if self.provider_family != "local":
+            result["provider_family"] = self.provider_family
+        if self.max_attempts != 1:
+            result["max_attempts"] = self.max_attempts
         return result
 
 
@@ -124,15 +194,43 @@ class Job:
     budget_units: int
     search_limit: int
     planning_policy: str
+    max_risk_alpha: float
+    failure_penalty_units: int | None
+    corruption_penalty_units: int
+    deadline_ms: int | None
+    latency_weight_units_per_sec: float
+    max_parallel: int
     _inputs_json: str
     _acceptance_json: str
 
-    def __init__(self, goals: list[str] | tuple[str, ...], inputs: dict, budget_units: int,
-                 operations: list[Operation] | tuple[Operation, ...], search_limit: int = DEFAULT_SEARCH_LIMIT,
-                 acceptance: dict | None = None, *, planning_policy: str = "lowest_cost"):
-        if planning_policy not in ("lowest_cost", "preserve_fallback"):
-            raise ValueError("planning_policy must be lowest_cost or preserve_fallback")
+    def __init__(
+        self,
+        goals: list[str] | tuple[str, ...],
+        inputs: dict,
+        budget_units: int,
+        operations: list[Operation] | tuple[Operation, ...],
+        search_limit: int = DEFAULT_SEARCH_LIMIT,
+        acceptance: dict | None = None,
+        *,
+        planning_policy: str = "lowest_cost",
+        max_risk_alpha: float = 1.0,
+        failure_penalty_units: int | None = None,
+        corruption_penalty_units: int = 0,
+        deadline_ms: int | None = None,
+        latency_weight_units_per_sec: float = 0.0,
+        max_parallel: int = 1,
+    ):
+        if planning_policy not in ("lowest_cost", "preserve_fallback", "bsao"):
+            raise ValueError("planning_policy must be lowest_cost, preserve_fallback, or bsao")
         object.__setattr__(self, "planning_policy", planning_policy)
+        object.__setattr__(self, "max_risk_alpha", _number(max_risk_alpha, "max_risk_alpha", 0.0, 1.0))
+        fail_pen = None if failure_penalty_units is None else _integer(failure_penalty_units, "failure_penalty_units", 0, MAX_UNITS)
+        object.__setattr__(self, "failure_penalty_units", fail_pen)
+        object.__setattr__(self, "corruption_penalty_units", _integer(corruption_penalty_units, "corruption_penalty_units", 0, MAX_UNITS))
+        deadline = None if deadline_ms is None else _integer(deadline_ms, "deadline_ms", 1, 86_400_000)
+        object.__setattr__(self, "deadline_ms", deadline)
+        object.__setattr__(self, "latency_weight_units_per_sec", _number(latency_weight_units_per_sec, "latency_weight_units_per_sec", 0.0, float(MAX_UNITS)))
+        object.__setattr__(self, "max_parallel", _integer(max_parallel, "max_parallel", 1, 64))
         goals = _names(goals, "goals")
         if not goals:
             raise ValueError("at least one goal is required")
@@ -183,16 +281,36 @@ class Job:
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> Job:
-        _fields(raw, {"goals", "inputs", "operations", "budget_units"},
-                {"search_limit", "acceptance", "planning_policy"}, "job")
+        _fields(
+            raw,
+            {"goals", "inputs", "operations", "budget_units"},
+            {
+                "search_limit", "acceptance", "planning_policy",
+                "max_risk_alpha", "failure_penalty_units", "corruption_penalty_units",
+                "deadline_ms", "latency_weight_units_per_sec", "max_parallel",
+            },
+            "job",
+        )
         rows = raw["operations"]
         if not isinstance(rows, (list, tuple)) or len(rows) > MAX_OPERATIONS:
             raise ValueError(f"operations must be an array of at most {MAX_OPERATIONS} items")
         if "acceptance" in raw and raw["acceptance"] is None:
             raise ValueError("acceptance must be an object")
-        return cls(raw["goals"], raw["inputs"], raw["budget_units"], tuple(Operation.from_dict(row) for row in rows),
-                   raw.get("search_limit", DEFAULT_SEARCH_LIMIT), raw.get("acceptance"),
-                   planning_policy=raw.get("planning_policy", "lowest_cost"))
+        return cls(
+            raw["goals"],
+            raw["inputs"],
+            raw["budget_units"],
+            tuple(Operation.from_dict(row) for row in rows),
+            raw.get("search_limit", DEFAULT_SEARCH_LIMIT),
+            raw.get("acceptance"),
+            planning_policy=raw.get("planning_policy", "lowest_cost"),
+            max_risk_alpha=raw.get("max_risk_alpha", 1.0),
+            failure_penalty_units=raw.get("failure_penalty_units"),
+            corruption_penalty_units=raw.get("corruption_penalty_units", 0),
+            deadline_ms=raw.get("deadline_ms"),
+            latency_weight_units_per_sec=raw.get("latency_weight_units_per_sec", 0.0),
+            max_parallel=raw.get("max_parallel", 1),
+        )
 
     def to_dict(self) -> dict:
         result = {"goals": list(self.goals), "inputs": self.inputs, "budget_units": self.budget_units,
@@ -201,4 +319,16 @@ class Job:
         # Omitting defaults preserves the canonical hashes of previously stored jobs.
         if self.planning_policy != "lowest_cost":
             result["planning_policy"] = self.planning_policy
+        if self.max_risk_alpha != 1.0:
+            result["max_risk_alpha"] = self.max_risk_alpha
+        if self.failure_penalty_units is not None:
+            result["failure_penalty_units"] = self.failure_penalty_units
+        if self.corruption_penalty_units != 0:
+            result["corruption_penalty_units"] = self.corruption_penalty_units
+        if self.deadline_ms is not None:
+            result["deadline_ms"] = self.deadline_ms
+        if self.latency_weight_units_per_sec != 0.0:
+            result["latency_weight_units_per_sec"] = self.latency_weight_units_per_sec
+        if self.max_parallel != 1:
+            result["max_parallel"] = self.max_parallel
         return result

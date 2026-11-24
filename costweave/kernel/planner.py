@@ -8,6 +8,7 @@ from collections.abc import Collection
 from dataclasses import asdict, dataclass, replace
 
 from .contracts import Job, Operation
+from .solver import BSAOPlanner
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,12 +27,15 @@ class Plan:
     optimal: bool = False
     states_examined: int = 0
     fallback: FallbackAssessment | None = None
+    audit: dict | None = None
 
     def to_dict(self) -> dict:
         result = {"status": self.status, "operations": list(self.operations), "cost_units": self.cost_units,
                   "optimal": self.optimal, "states_examined": self.states_examined}
         if self.fallback is not None:
             result["fallback"] = asdict(self.fallback)
+        if self.audit is not None:
+            result["audit"] = self.audit
         return result
 
 
@@ -99,7 +103,15 @@ def _witness(operations: list[Operation], available: set[str], goals: set[str]) 
     return tuple(reversed(path))
 
 
-def plan(job: Job, available: Collection[str], excluded: Collection[str], remaining_units: int) -> Plan:
+def plan(
+    job: Job,
+    available: Collection[str],
+    excluded: Collection[str],
+    remaining_units: int,
+    *,
+    risk_remaining: float | None = None,
+    elapsed_ms: int = 0,
+) -> Plan:
     """Select the next step from accepted artifacts, settled attempts and the remaining budget."""
     if type(remaining_units) is not int or not 0 <= remaining_units <= job.budget_units:
         raise ValueError("remaining_units must be an integer within the job budget")
@@ -113,6 +125,22 @@ def plan(job: Job, available: Collection[str], excluded: Collection[str], remain
     goals = set(job.goals)
     if goals <= available:
         return Plan("complete", (), 0, True)
+    if job.planning_policy == "bsao":
+        bsao = BSAOPlanner(job).plan(
+            available,
+            excluded,
+            remaining_units,
+            risk_remaining=risk_remaining,
+            elapsed_ms=elapsed_ms,
+        )
+        return Plan(
+            status=bsao.status,
+            operations=bsao.operations,
+            cost_units=bsao.cost_units,
+            optimal=bsao.optimal,
+            states_examined=bsao.states_examined,
+            audit=bsao.audit.to_dict() if bsao.audit is not None else None,
+        )
     operations = _relevant(job, available, excluded)
     cheapest = _cheapest_plan(operations, available, goals, remaining_units, job.search_limit)
     if job.planning_policy != "preserve_fallback" or cheapest.status != "ready":
