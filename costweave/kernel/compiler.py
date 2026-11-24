@@ -283,17 +283,49 @@ def _validator_payload(
     return validator, out_cfg
 
 
-def _pick_distinct_cheapest_to_strongest(models: Sequence[ModelSpec], limit: int = 3) -> list[ModelSpec]:
+def _pick_distinct_cheapest_to_strongest(
+    models: Sequence[ModelSpec],
+    limit: int = 3,
+    *,
+    prompt_text: str = "",
+    inputs_payload: Mapping[str, Any] = (),
+    prompt_tokens: int = 500,
+    beliefs: Any | None = None,
+) -> list[ModelSpec]:
     if not models:
         return []
-    ordered = sorted(models, key=lambda m: (_price_micro_usd(m, 500, m.quote_output_tokens), -m.base_pass_prob, m.id))
+    inp_map = dict(inputs_payload) if inputs_payload else {}
+
+    def _stats(m: ModelSpec) -> tuple[int, float]:
+        if beliefs is not None and prompt_text:
+            p, exp_u, _ = _route_estimates(m, prompt_text, inp_map, prompt_tokens, min(m.quote_output_tokens, 384), beliefs)
+            return int(exp_u), p
+        return _price_micro_usd(m, prompt_tokens, m.quote_output_tokens), float(m.base_pass_prob)
+
+    scored = {m.id: _stats(m) for m in models}
+    ordered = sorted(models, key=lambda m: (scored[m.id][0], -scored[m.id][1], m.id))
     if len(ordered) <= limit:
         return list(ordered)
-    strongest = max(ordered, key=lambda m: (m.base_pass_prob, _price_micro_usd(m, 500, m.quote_output_tokens), m.id))
+    strongest = max(ordered, key=lambda m: (scored[m.id][1], scored[m.id][0], m.id))
+    if limit == 2:
+        # Pair the best cost-effective candidate (learned pass/cost ratio, or cheapest) with strongest.
+        best_cheap = max(
+            (m for m in ordered if m.id != strongest.id),
+            key=lambda m: (scored[m.id][1] / max(1.0, scored[m.id][0]), scored[m.id][1], -scored[m.id][0], m.id),
+        )
+        return [best_cheap, strongest]
     picks: list[ModelSpec] = [ordered[0]]
-    mid = ordered[len(ordered) // 2]
-    if mid.id != ordered[0].id and mid.id != strongest.id:
-        picks.append(mid)
+    # Pick highest learned pass_prob among remaining non-frontier / mid-tier candidates.
+    best_mid = max(
+        (m for m in ordered if m.id != strongest.id),
+        key=lambda m: (scored[m.id][1], -scored[m.id][0], m.id),
+    )
+    if best_mid.id != ordered[0].id:
+        picks.append(best_mid)
+    elif len(ordered) > 2:
+        mid = ordered[len(ordered) // 2]
+        if mid.id != ordered[0].id and mid.id != strongest.id:
+            picks.append(mid)
     if all(p.id != strongest.id for p in picks):
         picks.append(strongest)
     for cand in ordered:
@@ -358,7 +390,14 @@ def compile_task_hypergraph(
     )
 
     # 1. Monolithic Baselines (up to 3 cost-distinct options)
-    monolithic = _pick_distinct_cheapest_to_strongest(eligible_full, limit=3)
+    monolithic = _pick_distinct_cheapest_to_strongest(
+        eligible_full,
+        limit=3,
+        prompt_text=task.prompt,
+        inputs_payload=task.inputs,
+        prompt_tokens=full_input_tokens,
+        beliefs=beliefs,
+    )
     strongest_full = max(
         eligible_full,
         key=lambda m: (m.base_pass_prob, _price_micro_usd(m, full_input_tokens, m.quote_output_tokens), m.id),
@@ -420,7 +459,7 @@ def compile_task_hypergraph(
                     config={"prompt": draft_prompt},
                     route_role="speculative",
                     expected_units=exp_draft,
-                    pass_prob=max(0.8, p_draft),
+                    pass_prob=p_draft if beliefs is not None else max(0.8, p_draft),
                     false_pass_risk=0.0,
                     latency_p50_ms=max(50, int(cheap_gvr.latency_p50_ms * 0.7)),
                     latency_p95_ms=max(50, int(cheap_gvr.latency_p95_ms * 0.7)),
@@ -455,7 +494,7 @@ def compile_task_hypergraph(
                     config=repair_cfg,
                     route_role="standard",
                     expected_units=exp_rep,
-                    pass_prob=min(0.9999, max(p_rep, 0.94)),
+                    pass_prob=p_rep if beliefs is not None else min(0.9999, max(p_rep, 0.94)),
                     false_pass_risk=0.0,
                     latency_p50_ms=max(50, int(repair_model.latency_p50_ms * 0.6)),
                     latency_p95_ms=max(50, int(repair_model.latency_p95_ms * 0.6)),
@@ -531,6 +570,7 @@ def compile_task_hypergraph(
                         latency_p50_ms=max(50, int(map_model.latency_p50_ms * 0.5)),
                         latency_p95_ms=max(50, int(map_model.latency_p95_ms * 0.5)),
                         provider_family=map_model.provider_family,
+                        max_attempts=2,
                     )
                 )
             add_op(
@@ -586,7 +626,18 @@ def compile_task_hypergraph(
 
     # 4. Contract-Locked Parallel Subtask Fan-Out
     if len(task.subtasks) >= 2 and base_routable:
-        fanout_models = _pick_distinct_cheapest_to_strongest(eligible_full or base_routable, limit=2)
+        fanout_models = _pick_distinct_cheapest_to_strongest(
+            eligible_full or base_routable,
+            limit=3,
+            prompt_text=task.subtasks[0].prompt,
+            inputs_payload=task.inputs,
+            prompt_tokens=estimate_tokens(task.subtasks[0].prompt),
+            beliefs=beliefs,
+        )
+        # Keep fanout DAG concise (cheapest/best-learned + strongest)
+        if len(fanout_models) > 2:
+            fanout_models = [fanout_models[1] if beliefs is not None else fanout_models[0], fanout_models[-1]]
+            fanout_models = list(dict.fromkeys(fanout_models))
         synth_model = strongest_full or eligible_full[-1] if eligible_full else max(base_routable, key=lambda m: m.base_pass_prob)
         sub_artifacts: list[str] = []
         fanout_valid = True
@@ -647,32 +698,42 @@ def compile_task_hypergraph(
             ) else tuple(sub_artifacts)
             synth_prompt = task.reduce_prompt or f"{task.prompt}\n[Synthesize verified sub-artifacts]"
             synth_tokens = estimate_tokens(synth_prompt) + len(sub_artifacts) * 256
-            synth_val, synth_cfg = _validator_payload(
-                task.acceptance_validator, task.acceptance_config, synth_prompt, synth_reqs, is_artifact_acceptance=False
-            )
-            p_syn, exp_syn, quote_syn = _route_estimates(
-                synth_model, synth_prompt, {"subtasks": sub_artifacts}, synth_tokens, 256, beliefs,
-            )
             for op in pending_fanout:
                 add_op(op)
             acceptance.update(pending_acc)
-            add_op(
-                Operation(
-                    id=_safe_id(f"synth_{synth_model.id}"),
-                    requires=synth_reqs,
-                    produces=task.goal_name,
-                    executor=synth_model.executor,
-                    validator=synth_val,
-                    cost_units=quote_syn,
-                    config=synth_cfg,
-                    expected_units=exp_syn,
-                    pass_prob=min(0.9999, max(0.95, p_syn)),
-                    false_pass_risk=0.0 if has_v0 else max(0.0, round(1.0 - p_syn, 6)),
-                    latency_p50_ms=max(50, int(synth_model.latency_p50_ms * 0.5)),
-                    latency_p95_ms=max(50, int(synth_model.latency_p95_ms * 0.5)),
-                    provider_family=synth_model.provider_family,
-                )
+            synth_candidates = _pick_distinct_cheapest_to_strongest(
+                eligible_full or base_routable,
+                limit=2,
+                prompt_text=synth_prompt,
+                inputs_payload={"subtasks": sub_artifacts},
+                prompt_tokens=synth_tokens,
+                beliefs=beliefs,
             )
+            for s_idx, synth_model in enumerate(synth_candidates):
+                synth_val, synth_cfg = _validator_payload(
+                    task.acceptance_validator, task.acceptance_config, synth_prompt, synth_reqs, is_artifact_acceptance=False
+                )
+                p_syn, exp_syn, quote_syn = _route_estimates(
+                    synth_model, synth_prompt, {"subtasks": sub_artifacts}, synth_tokens, 256, beliefs,
+                )
+                s_pass = p_syn if beliefs is not None else min(0.9999, max(0.88 if s_idx == 0 else 0.96, p_syn))
+                add_op(
+                    Operation(
+                        id=_safe_id(f"synth_{synth_model.id}"),
+                        requires=synth_reqs,
+                        produces=task.goal_name,
+                        executor=synth_model.executor,
+                        validator=synth_val,
+                        cost_units=quote_syn,
+                        config=synth_cfg,
+                        expected_units=exp_syn,
+                        pass_prob=s_pass,
+                        false_pass_risk=0.0 if has_v0 else max(0.0, round(1.0 - s_pass, 6)),
+                        latency_p50_ms=max(50, int(synth_model.latency_p50_ms * 0.5)),
+                        latency_p95_ms=max(50, int(synth_model.latency_p95_ms * 0.5)),
+                        provider_family=synth_model.provider_family,
+                    )
+                )
 
     # 5. Cross-Family Orthogonal Dual-Cheap Consensus V1 (when no objective V0 exists)
     if not has_v0 and len(eligible_full) >= 2:

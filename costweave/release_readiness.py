@@ -416,6 +416,84 @@ def public_release_policy() -> dict[str, Any]:
     }
 
 
+def audit_artifact_kernel_v2() -> dict[str, Any]:
+    """Verify BSAO* cliff safety, parallel budget conservation, Split-CRC fail-closed, and gateway default-off."""
+    from .kernel.contracts import Job, Operation
+    from .kernel.ports import default_registry
+    from .kernel.provider_port import register_streaming_model_route
+    from .kernel.runtime import Runtime
+    from .kernel.solver import BSAOPlanner
+    from .kernel.store import KernelStore
+    from .kernel.transports import ModelEndpointConfig
+    from .kernel.verifiers import CRCCalibrator
+
+    # 1. BSAO* cliff safety + 2. Parallel budget conservation
+    ops = [
+        Operation("probe", ["in"], "out", "literal", "present", 2, {"value": 1}, route_role="speculative", pass_prob=0.5),
+        Operation("safe", ["in"], "out", "literal", "present", 5, {"value": 2}, route_role="fallback", pass_prob=1.0),
+    ]
+    cliff_job = Job(
+        ["out"], {"in": 0}, 5, ops,
+        acceptance={"out": {"validator": "present", "config": {}}},
+        planning_policy="bsao", failure_penalty_units=100_000,
+    )
+    cliff_plan = BSAOPlanner(cliff_job).plan(["in"], [], 5)
+    cliff_safe = cliff_plan.operations == ("safe",)
+
+    reg = default_registry()
+    par_ops = [
+        Operation("p1", ["in"], "a", "literal", "present", 3, {"value": 1}, pass_prob=1.0, latency_p50_ms=50),
+        Operation("p2", ["in"], "b", "literal", "present", 3, {"value": 2}, pass_prob=1.0, latency_p50_ms=50),
+        Operation("join", ["a", "b"], "out", "collect", "present", 0, {}, pass_prob=1.0),
+    ]
+    par_job = Job(
+        ["out"], {"in": 0}, 10, par_ops,
+        acceptance={"out": {"validator": "present", "config": {}}},
+        planning_policy="bsao", max_parallel=2, latency_weight_units_per_sec=100.0,
+    )
+    st = KernelStore(":memory:")
+    try:
+        par_state = Runtime(st, reg).submit("v2-audit-par", par_job)
+    finally:
+        st.close()
+    budget_ok = (
+        par_state["status"] == "complete"
+        and (par_state["spent_units"] + par_state["held_units"]) <= 10
+    )
+
+    # 3. Split-CRC fail-closed on zero calibration samples
+    crc_uncal = CRCCalibrator().calibrate((), alpha=0.05)
+    crc_fail_closed = (not crc_uncal.admissible) and crc_uncal.risk_ucb == 1.0
+
+    # 4. Streaming route default-off (0 spend)
+    s_reg = default_registry()
+    cfg = ModelEndpointConfig(
+        name="v2-audit-ep", provider_family="openai",
+        endpoint="https://api.example.invalid/v1/chat/completions", model_id="audit-m",
+    )
+    register_streaming_model_route(s_reg, cfg, live_enabled=False)
+    s_job = Job(
+        ["out"], {}, 100,
+        [Operation("call", [], "out", "v2-audit-ep", "present", 10, {"prompt": "hi"})],
+        acceptance={"out": {"validator": "present", "config": {}}},
+    )
+    s_st = KernelStore(":memory:")
+    try:
+        s_state = Runtime(s_st, s_reg).submit("v2-audit-off", s_job)
+    finally:
+        s_st.close()
+    default_off = s_state["status"] == "blocked" and s_state["reason"] == "admission_denied" and s_state["spent_units"] == 0
+
+    healthy = bool(cliff_safe and budget_ok and crc_fail_closed and default_off)
+    return {
+        "healthy": healthy,
+        "bsao_cliff_safe": cliff_safe,
+        "parallel_budget_conserved": budget_ok,
+        "crc_fail_closed": crc_fail_closed,
+        "streaming_default_off": default_off,
+    }
+
+
 def build_release_status(
     kernel: Any,
     *,
@@ -433,6 +511,7 @@ def build_release_status(
     runtime_backend_audit = audit_runtime_backend_contract()
     small_budget_shadow_audit = audit_small_budget_shadow_contract()
     security_foundation_audit = audit_security_foundation()
+    kernel_v2_audit = audit_artifact_kernel_v2()
     adapter = dict(adapter_policy or {})
     experimental_enabled = bool(adapter.get("experimental_calls_enabled", False))
     paid_enabled = bool(adapter.get("paid_calls_enabled", False))
@@ -635,6 +714,18 @@ def build_release_status(
             "observed": observability_audit["deeply_immutable"],
             "expected": True,
         },
+        {
+            "gate_id": "artifact-kernel-v2-self-test",
+            "passed": kernel_v2_audit["healthy"],
+            "observed": kernel_v2_audit,
+            "expected": {
+                "healthy": True,
+                "bsao_cliff_safe": True,
+                "parallel_budget_conserved": True,
+                "crc_fail_closed": True,
+                "streaming_default_off": True,
+            },
+        },
     ]
     engineering_ready = all(bool(item["passed"]) for item in gates)
     manifest = {
@@ -657,6 +748,7 @@ def build_release_status(
         "runtime_backend_audit": runtime_backend_audit,
         "small_budget_shadow_audit": small_budget_shadow_audit,
         "security_foundation_audit": security_foundation_audit,
+        "artifact_kernel_v2_audit": kernel_v2_audit,
     }
     manifest["manifest_hash"] = _sha256(manifest)
     return manifest
@@ -666,6 +758,7 @@ __all__ = [
     "EXPECTED_MIGRATIONS",
     "EXPECTED_RUNTIME_SCHEMA",
     "RELEASE_SCHEMA_VERSION",
+    "audit_artifact_kernel_v2",
     "audit_event_replay",
     "audit_security_foundation",
     "audit_observability_safety",

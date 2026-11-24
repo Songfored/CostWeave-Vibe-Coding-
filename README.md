@@ -12,6 +12,16 @@ python -m costweave events first-handoff
 
 示例先读工单摘要。摘要缺少工时，系统随后从工单中分别读取负责人和工时，合并为通过验收的交接单。重复提交同一编号可以查看同一次运行。该示例在本地执行，计费单位是测试报价。[新架构、接口和基线对照](docs/ARTIFACT_RUNTIME.md)
 
+### Kernel v2.0（CostWeave Next 随机超图执行内核）
+
+在保留上述 v0.6.9 兼容路径的前提下，`costweave/kernel/` 已升级至 `2.0.0`（默认外部付费调用仍为关闭）：支持 **BSAO\* 随机 AND/OR 超图动态规划**、`max_parallel > 1` 期权价值并行波次调度、SSE 极速中止与 `micro-USD` 整数结算、`V0`/`V1` 跨家族正交共识与 Split Conformal Risk Control、`compile_task_hypergraph` 任务编译器，以及 **Laplace 2PL-IRT LCB + Clipped-DR** 安全学习与回滚。
+
+```sh
+python -m costweave plan examples/tasks/coding_fanout.json --compile-models examples/tasks/coding_fanout.json
+python -m costweave beliefs status
+python -m scripts.run_paired_benchmark --seed 20261124 --bootstrap-samples 500
+```
+
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)
