@@ -44,8 +44,9 @@ editor.value = JSON.stringify(example, null, 2);
 
 function clearResult() {
   byId("status").textContent = "待查询";
-  for (const field of ["scope", "budget", "reason"]) byId(field).textContent = "";
+  for (const field of ["scope", "budget", "risk", "reason"]) byId(field).textContent = "";
   byId("outputs").textContent = "暂无产物";
+  byId("audit-view").textContent = "暂无审计记录";
   byId("events").replaceChildren();
   byId("events-note").textContent = "查询或提交任务后显示。";
   message.textContent = "";
@@ -55,8 +56,27 @@ function showState(state) {
   byId("status").textContent = statusNames[state.status] || state.status;
   byId("scope").textContent = project.value + " / " + state.run_id;
   byId("budget").textContent = `已结算 ${state.spent_units} · 已预留 ${state.held_units} · 总预算 ${state.budget_units} 单位`;
+  const riskSpent = Number(state.risk_spent || 0);
+  byId("risk").textContent = `累计误放风险 ${riskSpent.toFixed(4)} · 在途尝试 ${(state.active_attempts || []).length}`;
   byId("reason").textContent = reasonNames[state.reason] || state.reason || "";
   byId("outputs").textContent = Object.keys(state.outputs).length ? JSON.stringify(state.outputs, null, 2) : "暂无产物";
+  if (state.active_attempt && state.active_attempt.id) {
+    byId("rec-attempt").value = state.active_attempt.id;
+  }
+}
+
+function showAudit(audit) {
+  if (!audit || !Array.isArray(audit.decisions) || !audit.decisions.length) {
+    byId("audit-view").textContent = "暂无决策记录。";
+    return;
+  }
+  const lines = audit.decisions.map(d => {
+    const plan = d.plan || {};
+    const ops = (plan.operations || []).join(" -> ");
+    const altCount = plan.audit && Array.isArray(plan.audit.alternatives) ? plan.audit.alternatives.length : 0;
+    return `#${d.seq} 选择 ${d.op_id} (${ops}) | 方案数=${altCount}`;
+  });
+  byId("audit-view").textContent = lines.join("\n");
 }
 
 function showEvents(events) {
@@ -124,8 +144,14 @@ async function runAction(action) {
     let state;
     if (action === "submit") state = await request(root, {method: "POST", body, submit: true});
     else if (action === "resume") state = await request(path + "/resume", {method: "POST", body: "{}"});
+    else if (action === "reconcile") state = await request(path + "/reconcile", {method: "POST", body: optionsReconcileBody()});
     else state = await request(path);
     showState(state);
+    try {
+      showAudit(await request(path + "/audit"));
+    } catch (_) {
+      byId("audit-view").textContent = "审计记录读取失败。";
+    }
     byId("events").replaceChildren();
     byId("events-note").textContent = "正在读取执行记录…";
     try {
@@ -144,7 +170,35 @@ async function runAction(action) {
   }
 }
 
+function optionsReconcileBody() {
+  const attemptId = byId("rec-attempt").value.trim();
+  const outcome = byId("rec-outcome").value;
+  const unitsRaw = byId("rec-units").value.trim();
+  const receipt = {outcome};
+  if (outcome === "returned") {
+    receipt.value = JSON.parse(byId("rec-value").value || "null");
+  }
+  if (unitsRaw !== "") {
+    receipt.actual_units = Number(unitsRaw);
+  }
+  return JSON.stringify({attempt_id: attemptId, receipt});
+}
+
 form.addEventListener("submit", event => { event.preventDefault(); runAction("submit"); });
+byId("reconcile-form").addEventListener("submit", event => {
+  event.preventDefault();
+  if (!byId("rec-attempt").value.trim()) {
+    message.textContent = "请填写需要核对的 attempt_id。";
+    return;
+  }
+  try {
+    optionsReconcileBody();
+  } catch (error) {
+    message.textContent = "核对 JSON 无法解析。" + error.message;
+    return;
+  }
+  runAction("reconcile");
+});
 byId("inspect").addEventListener("click", () => runAction("inspect"));
 byId("resume").addEventListener("click", () => runAction("resume"));
 byId("example").addEventListener("click", () => {

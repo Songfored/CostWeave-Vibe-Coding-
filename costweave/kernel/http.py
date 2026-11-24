@@ -13,6 +13,46 @@ ROOT = "/api/v2/runs"
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}")
 
 
+def _build_audit_view(snapshot: dict, events: list[dict]) -> dict:
+    decisions = [
+        {
+            "seq": event["seq"],
+            "op_id": event.get("op_id"),
+            "attempt_id": event.get("attempt_id"),
+            "plan": event.get("plan"),
+        }
+        for event in events
+        if event.get("type") == "attempt_claimed"
+    ]
+    settled = [
+        {
+            "seq": event["seq"],
+            "op_id": event.get("op_id"),
+            "attempt_id": event.get("attempt_id"),
+            "accepted": event.get("accepted"),
+            "actual_units": event.get("actual_units"),
+            "reason": event.get("reason"),
+        }
+        for event in events
+        if event.get("type") == "attempt_settled"
+    ]
+    return {
+        "run_id": snapshot["run_id"],
+        "status": snapshot["status"],
+        "reason": snapshot["reason"],
+        "planning_policy": snapshot["job"].get("planning_policy", "lowest_cost"),
+        "budget_units": snapshot["job"]["budget_units"],
+        "spent_units": snapshot["spent_units"],
+        "held_units": snapshot["held_units"],
+        "remaining_units": snapshot["job"]["budget_units"] - snapshot["spent_units"] - snapshot["held_units"],
+        "max_risk_alpha": snapshot["job"].get("max_risk_alpha", 1.0),
+        "risk_spent": snapshot.get("risk_spent", 0.0),
+        "active_attempts": snapshot.get("active_attempts", []),
+        "decisions": decisions,
+        "settlements": settled,
+    }
+
+
 def dispatch(method, path, body, key, kernel, project_id):
     if kernel is None:
         return HTTPStatus.SERVICE_UNAVAILABLE, {"error": "persistent_runtime_disabled"}
@@ -33,6 +73,8 @@ def dispatch(method, path, body, key, kernel, project_id):
             result = store.snapshot(parts[0])
         elif method == "GET" and len(parts) == 2 and parts[1] == "events":
             return HTTPStatus.OK, {"events": store.events(parts[0])}
+        elif method == "GET" and len(parts) == 2 and parts[1] == "audit":
+            return HTTPStatus.OK, _build_audit_view(store.snapshot(parts[0]), store.events(parts[0]))
         elif method == "POST" and len(parts) == 2 and parts[1] == "resume" and body == {}:
             result = runtime.resume(parts[0])
         elif method == "POST" and len(parts) == 2 and parts[1] == "reconcile":

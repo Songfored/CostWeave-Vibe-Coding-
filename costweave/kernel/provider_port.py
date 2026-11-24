@@ -13,7 +13,8 @@ from ..experimental_calls import ExternalBudgetExceededError, ExternalCallsDisab
 from ..planning_contracts import WorkOrder
 from ..security_boundary import AdapterAdmissionError, DEFAULT_DATA_RESIDENCY, DEFAULT_PROJECT_ID, PromptInjectionError
 from .contracts import Operation, canonical_json
-from .ports import AdmissionDenied, ExecutionResult, KnownFailure, Registry
+from .ports import AdmissionDenied, CancelledAttempt, ExecutionResult, KnownFailure, Registry
+from .transports import ModelEndpointConfig, OpenAICompatibleTransport, StreamChunkTransport
 
 
 def _unique_fields(pairs: list[tuple]) -> dict:
@@ -106,3 +107,59 @@ def register_model_route(
         return ExecutionResult(value, units, receipt.external_call_id)
 
     registry.register_executor(name, generate, check_config=check_config)
+
+
+def _strip_json_fences(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 2 and lines[-1].strip() == "```":
+            text = "\n".join(lines[1:-1]).strip()
+    return text
+
+
+def register_streaming_model_route(
+    registry: Registry,
+    config: ModelEndpointConfig,
+    *,
+    transport: StreamChunkTransport | None = None,
+    live_enabled: bool = False,
+    stream: bool = True,
+) -> None:
+    """Register a lock-free streaming model route using exact integer micro-USD billing."""
+
+    def check_config(op: Operation) -> None:
+        prompt = op.config.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError(f"{op.id} requires config.prompt")
+
+    def generate(op: Operation, inputs: Mapping, *, attempt_id: str, cancel_token=None) -> ExecutionResult:
+        check_config(op)
+        if not live_enabled and transport is None:
+            raise AdmissionDenied("live_model_calls_disabled")
+        if cancel_token is not None and cancel_token.cancelled:
+            raise CancelledAttempt(cancel_token.reason or "cancelled", actual_units=0)
+        client = OpenAICompatibleTransport(config, transport=transport)
+        receipt = client.invoke(
+            prompt=op.config["prompt"],
+            inputs_payload=inputs,
+            idempotency_key=f"kernel_stream_{op.id}_{attempt_id}",
+            stream=stream,
+            cancel_token=cancel_token,
+        )
+        if receipt.actual_units is not None and receipt.actual_units > op.cost_units:
+            # Preserve hold for reconciliation if actual cost exceeded the quote.
+            raise ValueError("model receipt exceeds the kernel reservation")
+        if receipt.aborted:
+            raise CancelledAttempt("aborted_mid_stream", actual_units=receipt.actual_units)
+        raw_content = receipt.content
+        if op.config.get("allow_markdown_json", True):
+            raw_content = _strip_json_fences(raw_content)
+        try:
+            value = json.loads(raw_content, object_pairs_hook=_unique_fields)
+            canonical_json(value)
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise KnownFailure("model returned an invalid JSON artifact", actual_units=receipt.actual_units) from exc
+        return ExecutionResult(value, receipt.actual_units, receipt.receipt_id)
+
+    registry.register_executor(config.name, generate, check_config=check_config)

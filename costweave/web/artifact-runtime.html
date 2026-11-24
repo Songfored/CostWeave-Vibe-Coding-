@@ -45,9 +45,27 @@
         <div class="panel-heading"><h2 id="result-title">运行结果</h2><span id="status" class="status-pill" role="status">待提交</span></div>
         <p id="scope"></p>
         <p id="budget"></p>
+        <p id="risk"></p>
         <p id="reason"></p>
         <h3>已验收的目标产物</h3>
         <pre id="outputs">暂无产物</pre>
+        <h3>人工核对（Reconcile）</h3>
+        <form id="reconcile-form" class="reconcile-box">
+          <div class="identity-fields">
+            <label>尝试编号<input id="rec-attempt" type="text" placeholder="attempt_id" autocomplete="off"></label>
+            <label>核对结果
+              <select id="rec-outcome">
+                <option value="returned">已获得结果 (returned)</option>
+                <option value="confirmed_failed">确认已失败 (confirmed_failed)</option>
+              </select>
+            </label>
+          </div>
+          <label class="rec-label">实际扣费（微美分/单位，可留空按报价）<input id="rec-units" type="number" min="0" step="1"></label>
+          <label class="rec-label">返回 JSON 值（outcome=returned 时必填）<textarea id="rec-value" rows="3" spellcheck="false">{}</textarea></label>
+          <div class="buttons"><button type="submit" class="secondary-button">提交核对并恢复</button></div>
+        </form>
+        <h3>决策审计与微美分账本（BSAO*）</h3>
+        <pre id="audit-view">暂无审计记录</pre>
         <h3>执行记录</h3>
         <p id="events-note">查询或提交任务后显示。</p>
         <ol id="events"></ol>
