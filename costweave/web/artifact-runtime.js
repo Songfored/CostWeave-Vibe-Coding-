@@ -39,6 +39,10 @@ const errorNames = {session_auth_required: "本地会话已失效，请通过启
   run_or_attempt_not_found: "当前项目中没有这个运行编号。",
   persistent_runtime_disabled: "当前服务未开启持久化运行。"};
 const reasonNames = {complete: "目标产物均已通过验收。", over_budget: "剩余预算不足。",
+  quality_threshold_not_met: "没有路线达到按时正确交付的最低要求。",
+  deadline_expired: "任务时限已到。", deadline_unreachable: "剩余时间不足以完成可用路线。",
+  insufficient_evidence: "现有样本不足以支持路线选择。", no_eligible_verification_route: "没有路线同时满足当前约束。",
+  verification_route_failed: "本次核验路线未能交付。", unavailable: "缺少所需的路线输入。",
   unreachable: "当前没有可用路线生成所有目标。", search_limit: "已达到规划搜索上限。",
   evidence_action_rejected: "核验报告指定的操作未通过验收。", evidence_prerequisite_missing: "核验报告指定的操作缺少前置资料。",
   execution_outcome_unknown: "执行结果待核对。", validator_error: "验收器出错，已保留待验收的结果。"};

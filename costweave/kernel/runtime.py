@@ -36,6 +36,15 @@ class Runtime:
         self._check_contract(job)
         return decide(job, job.inputs, (), job.budget_units)
 
+    def inspect(self, run_id: str) -> dict:
+        snapshot = self.store.snapshot(run_id)
+        if (snapshot["status"] == "waiting_for_input" and "deadline_at_ms" in snapshot
+                and self.clock_ms() >= snapshot["deadline_at_ms"]):
+            # A read-only lookup can report expiry without mutating the ledger.
+            snapshot.update(status="blocked", reason="deadline_expired")
+            snapshot.pop("clarification")
+        return snapshot
+
     def submit(self, run_id: str, job: Job) -> dict:
         self._check_contract(job)
         self._write(self.store.create, run_id, job.to_dict(), clock_ms=self.clock_ms)
@@ -100,6 +109,7 @@ class Runtime:
                     return self.store.snapshot(run_id)
             else:
                 remaining = job.budget_units - snapshot["spent_units"] - snapshot["held_units"]
+
                 def choose(left_ms):
                     return decide(job, snapshot["artifacts"], snapshot["excluded"], remaining, remaining_ms=left_ms)
 
@@ -135,6 +145,8 @@ class Runtime:
         if artifact_name not in snapshot["artifacts"]:
             if snapshot.get("clarification", {}).get("artifact") != artifact_name:
                 raise ValueError("this artifact was not requested")
+            if "deadline_at_ms" in snapshot and self.clock_ms() >= snapshot["deadline_at_ms"]:
+                return self.resume(run_id)
             rule = job.acceptance[artifact_name]
             if not self.registry.accept(artifact_name, rule, answer):
                 raise ValueError(f"supplied artifact {artifact_name!r} failed its acceptance rule")

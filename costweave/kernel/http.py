@@ -30,7 +30,7 @@ def dispatch(method, path, body, key, kernel, project_id):
         if not parts:
             result = runtime.submit(key, Job.from_dict(body))
         elif method == "GET" and len(parts) == 1:
-            result = store.snapshot(parts[0])
+            result = runtime.inspect(parts[0])
         elif method == "GET" and len(parts) == 2 and parts[1] == "events":
             return HTTPStatus.OK, {"events": store.events(parts[0])}
         elif method == "POST" and len(parts) == 2 and parts[1] == "resume" and body == {}:

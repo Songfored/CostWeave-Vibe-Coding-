@@ -20,6 +20,8 @@ python -m costweave provide invoice-17 line_items examples/evidence-invoice/line
 python -m scripts.compare_invoice_evidence
 ```
 
+核验选择器还可从同一批任务的多条执行结果估算收益，将报价、剩余时限和按时正确率下界一起用于实际派发。已在独立标注的 CORD 真实小票上评测；本次三条路线与自适应策略均未达到预先设定的质量和交付门槛。[冻结实验、结果和复现方法](examples/verification-value/README.md)
+
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)

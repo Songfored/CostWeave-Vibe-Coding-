@@ -71,7 +71,7 @@ def main(argv=None):
         if args.command == "events":
             output = store.events(args.run_id)
         elif args.command == "show":
-            output = public_state(store.snapshot(args.run_id))
+            output = public_state(Runtime(store).inspect(args.run_id))
         else:
             runtime = Runtime(store, _registry(args.registry))
             if args.command in {"plan", "run"}:

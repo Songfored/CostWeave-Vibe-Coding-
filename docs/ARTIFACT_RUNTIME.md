@@ -45,6 +45,21 @@ flowchart LR
 
 将操作换成 `"request":"line_items","reason":"请提供发票原始明细"` 即可请求补件。状态为 `waiting_for_input` 时，CLI 返回退出码 4，输出中给出所需产物与原因。通过 `costweave provide RUN_ID ARTIFACT VALUE.json`、产物运行台的补件表单，或向 `POST /api/v2/runs/{id}/provide` 发送 `{"artifact":"line_items","value":...}` 可以继续。资料须通过作业预先声明的验收器。等待期间可关闭进程，重复提交已验收的相同资料沿用原记录，已提交的资料内容发生变化会返回冲突。
 
+### 使用已校准的路线
+
+单一终产物也支持 `verification_policy`。作业指定一个已验收的观察产物及用于分组的字符串字段，并放入 `fit_verification_model` 返回的冻结模型。下面的 Python 片段展示作业的可选字段，其中 `frozen` 是真实小票实验的 `frozen.json` 内容。宿主为每条路线注册能独立完成终产物的操作，操作 ID 与模型中的路线名一致。
+
+```python
+verification_policy = {
+    "artifact": "signal", "field": "stratum", "model": frozen["model"],
+    "route_ms": {"direct": 400, "check": 850, "original": 1800},
+    "deadline_ms": 1200, "min_on_time_correct": 0.90,
+    "fallback_operation": None,
+}
+```
+
+首次提交时固定到期时间。决策从实际剩余时长、每条路线的硬报价和历史配对观测出发，记录每条路线被排除或选中的原因。样本不足时可以显式指定固定后备操作。证据已经显示质量下界不够时，直接停止。超时返回的结果仍结算本次尝试，终产物不会发布。外部调用结果未知时，任务仍保留预算等待对账。校准模型适用于一次完整路线的选择；路线返回后被拒绝时结束本次决定，失败子集需要另行校准。有关校准样本、时限和质量下界的定义，见[真实小票实验](../examples/verification-value/README.md)。
+
 ### 执行、验收与恢复
 
 每个终产物、每个有多个生产者的中间产物都要声明独立验收器。生产者通过自己的局部检查后，还必须通过这一公共条件。预填的初始产物如有关联规则，也要先验收。内置 `json_object` 检查结构和必需字段；内容正确性需要与任务相符的验收器。
