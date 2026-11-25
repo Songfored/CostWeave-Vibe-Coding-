@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import socket
 import sqlite3
+import ssl
 import tempfile
 import threading
 import time
@@ -805,7 +806,9 @@ class EndpointBindingTests(unittest.TestCase):
                 url="https://provider.example/v1/chat/completions",
                 headers={"Content-Type": "application/json"},
                 body=b"{}",
-                timeout_seconds=1.0,
+                # This success-path fixture starts a resolver process. Deadline
+                # enforcement is exercised separately with deliberately slow I/O.
+                timeout_seconds=10.0,
             )
             self.assertEqual(
                 1, len(list(Path(marker_directory).glob("resolver-*.txt")))
@@ -834,6 +837,10 @@ class EndpointBindingTests(unittest.TestCase):
         wrapped = WrappedSocket()
 
         class Context:
+            # HTTPSConnection inspects both settings on Python 3.11.
+            verify_mode = ssl.CERT_REQUIRED
+            check_hostname = True
+
             @staticmethod
             def wrap_socket(_raw, *, server_hostname):
                 if server_hostname != "provider.example":

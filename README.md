@@ -1,6 +1,28 @@
 # CostWeave
 
-整图 P95 回放与返修预算分配现已接入离线决策接口。[输入格式、运行示例与验证方法](docs/ADAPTIVE_EXECUTION.md)
+这个分支提供新的**产物执行内核**。任务声明要交付的产物、独立验收条件和预算。CostWeave 从可用操作中选择一条生产路径，实际执行并结算；如果结果未通过验收，已通过的产物可以供下一条路径复用。
+
+在仓库根目录用 Python 3.11 或更新版本运行：
+
+```sh
+python -m costweave plan examples/artifact-runtime/handoff.json --catalog examples/artifact-runtime/catalog.json
+python -m costweave run examples/artifact-runtime/handoff.json --catalog examples/artifact-runtime/catalog.json --id first-handoff
+python -m costweave events first-handoff
+```
+
+示例先读工单摘要。摘要缺少工时，系统随后从工单中分别读取负责人和工时，合并为通过验收的交接单。重复提交同一编号可以查看同一次运行。该示例在本地执行，计费单位是测试报价。[新架构、接口和基线对照](docs/ARTIFACT_RUNTIME.md)
+
+发票补件示例会暂停并指出缺少的资料。第二条命令验收明细后继续同一次运行。第三条命令在独立核定金额的七个本地案例上比较固定查原件、最低报价和按证据选路三种策略。
+
+```sh
+python -m costweave run examples/evidence-invoice/job.json --id invoice-17
+python -m costweave provide invoice-17 line_items examples/evidence-invoice/line-items.json
+python -m scripts.compare_invoice_evidence
+```
+
+核验选择器可从同一批任务的多条执行结果估算收益，将报价、剩余时限和按时正确率下界用于实际派发。首轮 CORD 真实小票实验中，三条读取路线与自适应策略均未达到预设的质量和交付门槛。[首轮实验和复现方法](examples/verification-value/README.md)
+
+新版小票读取器按文字位置重建票面行，并用实收、找零、小计、折扣和税费交叉核对应付总额。在同一批 191 张可评分小票上，直接读取按时答对数由 78 升至 110，错误交付由 73 降至 53。各条路线仍未同时达到两项交付标准。可用 `python -m costweave receipt-total` 在本机读取一张印尼盾小票。[命令用法和新旧版对照实验](examples/receipt-readers/README.md)
 
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
@@ -9,9 +31,9 @@
 [![Version](https://img.shields.io/badge/version-0.6.9-blue.svg)](costweave/version.py)
 [![Status](https://img.shields.io/badge/production_ready-false-orange.svg)](docs/ACCEPTANCE-v0.6.9.md)
 
-## 项目状态
+## v1 工程基线
 
-CostWeave 当前处于 **v0.6.9 权威决策桥阶段**。
+原有自由文本工作流与 `/api/v1` 服务沿用 **v0.6.9 决策桥**，整图 P95 回放和返修预算分配可通过离线决策接口使用。[v1 输入格式和验证方法](docs/ADAPTIVE_EXECUTION.md)
 
 | 项目 | 当前结论 |
 |---|---|
@@ -209,7 +231,8 @@ WP07 只允许影子指标进入证据链，不允许改变基线路由、晋升
 
 - 每个新 Run 在原路由冻结后生成 `AuthoritativeDecisionEnvelopeV1`；
 - 统一保存任务/目录/价格/容量快照、候选管理拓扑、候选模型组合、分布、预算和 baseline/shadow 差异；
-- 五个现有智能服务通过 Adapter 接入，同用 Run ID、Trace ID 与输入指纹；
+- 五个建议模块共用运行编号、追踪编号和输入指纹。执行前没有观测结果时，安全学习模块记录 `insufficient_evidence`。
+- 影子路线的费用按所选操作和各自的报价汇总。`structured_diff.cost_comparable` 为 `true` 时可以比较两条路线的预计费用。字段为 `false` 或历史记录缺少该字段时，费用差额未知。
 - 影子链不写任务状态、不改 DAG、不占正式预算、不调用 Provider、不晋级策略；
 - 任一模块异常都生成完整失败关闭信封，原 baseline 继续执行；
 - `GET /api/v1/runs/{run_id}/decision-bridge` 与运行页面提供只读追踪入口；

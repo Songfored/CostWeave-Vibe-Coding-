@@ -1940,17 +1940,19 @@ class RunManager:
                 self.records[record.id] = record
             if recover:
                 for record in list(self.records.values()):
+                    if record.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+                        continue
+                    # Another service may still own the running attempt. If
+                    # it crashed, reconcile the outcome before rescheduling.
+                    if self.control_kernel.reservations.pending_settlements(str(record.id)):
+                        continue
                     if record.status == RunStatus.CANCELLING:
                         self.control_kernel.set_run_status(
                             record,
                             RunStatus.CANCELLED,
                             source="run_manager.startup_cancel_finalize",
                         )
-                    elif record.status not in {
-                        RunStatus.COMPLETED,
-                        RunStatus.FAILED,
-                        RunStatus.CANCELLED,
-                    }:
+                    else:
                         self.control_kernel.prepare_recovery(record)
                         self._start(record, resume=True)
 

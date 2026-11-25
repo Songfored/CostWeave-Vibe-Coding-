@@ -12,8 +12,11 @@ license = { text = "MIT" }
 authors = [{ name = "CostWeave Contributors" }]
 keywords = ["agent", "orchestration", "dag", "llm-router", "multi-agent"]
 
+[project.optional-dependencies]
+receipt-ocr = ["Pillow>=11.3", "tesserocr>=2.13"]
+
 [project.scripts]
-costweave = "costweave.server:main"
+costweave = "costweave.kernel.cli:main"
 costweave-evaluate = "costweave.baseline_runner:main"
 costweave-dataset = "costweave.outcome_dataset:main"
 costweave-release = "costweave.release_cli:main"

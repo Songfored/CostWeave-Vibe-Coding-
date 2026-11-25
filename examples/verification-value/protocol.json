@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "dataset": "NAVER CLOVA CORD v2, revision 7f0115a4b758a71d6473b8d085751692da2fef98",
+  "task": "Recover the printed receipt total from pixels, in hundredths of one Indonesian rupiah.",
+  "split": "Use every scoreable document in official validation for calibration and official test for holdout. Reject duplicate image hashes across splits. No merchant-disjointness claim.",
+  "eligibility": "An independently annotated total.total_price parses unambiguously as one nonnegative amount. Log each excluded ID and reason. Empty OCR answers are abstentions, not exclusions.",
+  "signal": "Use tall or normal according to whether source image height >= 2 * width. No text, answers, target labels, or run times in the initial signal.",
+  "min_support": 12,
+  "alpha": 0.05,
+  "max_error_rate": 0.10,
+  "max_false_delivery_rate": 0.10,
+  "min_on_time_correct_rate": 0.70,
+  "fallback_operation": "original",
+  "quotes": {"direct": 1, "check": 2, "original": 4},
+  "route_ms": {"direct": 400, "check": 850, "original": 1800},
+  "budget_units": 4,
+  "deadline_assignment": "First byte of SHA-256 of source image bytes even: 1200 ms; odd: 5000 ms.",
+  "timing": "Actual elapsed warm local OCR and parsing time for each complete route, rounded up to milliseconds. Nominal admission estimates are fixed before measurement. Common image decoding and engine startup are excluded.",
+  "cost": "Illustrative integer quotes per attempted complete route, charged on empty answers and late returns; no provider calls, billing or human wait.",
+  "primary": "False deliveries / all tasks <= 0.10 and on-time correct deliveries / all tasks >= 0.70. Compare total units / on-time correct delivery at these gates. If either policy misses a gate, costs alone cannot establish an advantage.",
+  "fixed_selection": "Choose a fixed action using calibration only. Among qualified fixed actions minimize cost per on-time correct. If none qualify, compare descriptively against highest on-time correct rate, then lower false-delivery rate and lower cost. Deterministic action-ID tie break.",
+  "deployment": "A single public benchmark and illustrative prices cannot establish provider economics or production performance."
+}

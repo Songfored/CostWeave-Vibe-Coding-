@@ -1,0 +1,11 @@
+{
+  "goals": ["handoff"],
+  "inputs": {
+    "ticket": {
+      "preview": {"owner": "Lin"},
+      "assignment": {"owner": "Lin"},
+      "estimate": {"hours": 4}
+    }
+  },
+  "budget_units": 5
+}

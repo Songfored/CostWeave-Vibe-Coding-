@@ -914,14 +914,13 @@ class BaselineRunner:
         for observation in observations:
             task = task_lookup[observation.task_id]
             route = observation.route
+            packet_digest = stable_digest({
+                "experiment": self.spec.experiment_id,
+                "alias": observation.blind_alias,
+            })
             packets.append(
                 {
-                    "review_packet_id": (
-                        f"review_{stable_digest({
-                            'experiment': self.spec.experiment_id,
-                            'alias': observation.blind_alias,
-                        })}"
-                    ),
+                    "review_packet_id": f"review_{packet_digest}",
                     "experiment_id": self.spec.experiment_id,
                     "task_id": observation.task_id,
                     "output_alias": observation.blind_alias,

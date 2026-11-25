@@ -1,0 +1,20 @@
+{
+  "goals": ["handoff"],
+  "inputs": {
+    "check": {"invoice_id": "INV-17", "finding": "missing_lines", "source": "invoice intake"}
+  },
+  "budget_units": 1,
+  "operations": [
+    {"id": "assemble-handoff", "requires": ["check", "line_items"], "produces": "handoff",
+     "executor": "collect", "validator": "present", "cost_units": 1}
+  ],
+  "acceptance": {
+    "check": {"validator": "json_object", "config": {"required_keys": ["invoice_id", "finding", "source"]}},
+    "line_items": {"validator": "json_object", "config": {"required_keys": ["source_document", "items"]}},
+    "handoff": {"validator": "json_object", "config": {"required_keys": ["check", "line_items"]}}
+  },
+  "evidence_rules": [
+    {"artifact": "check", "field": "finding", "equals": "missing_lines",
+     "request": "line_items", "reason": "请补充发票 INV-17 的原始明细和凭据编号。"}
+  ]
+}

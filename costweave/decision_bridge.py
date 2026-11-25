@@ -24,7 +24,7 @@ from .safe_learning_service import SafeLearningService
 
 
 DECISION_BRIDGE_SCHEMA_VERSION = "v0.6.9"
-DECISION_BRIDGE_POLICY_VERSION = "authoritative-decision-bridge-v1"
+DECISION_BRIDGE_POLICY_VERSION = "authoritative-decision-bridge-v2"
 MODULE_ORDER = (
     "meta_controller",
     "capability_graph",
@@ -386,7 +386,6 @@ class DecisionOrchestratorV1:
             "price": price_snapshot,
             "capacity": capacity_snapshot,
         }
-        shared_fingerprint = _digest(shared)
         objective_hash = hashlib.sha256(record.request.goal.encode("utf-8")).hexdigest()
         task_family = self._task_family(tasks)
         risk = self._overall_risk(tasks)
@@ -401,10 +400,20 @@ class DecisionOrchestratorV1:
             risk=risk,
             baseline_route=baseline_route,
         )
+        route_sets = payloads["joint_search"]["problem"]["route_sets"]
+        input_snapshot["joint_route_sets"] = route_sets
+        shared_fingerprint = _digest(shared)
+
         def invoke(name: str) -> ModuleDecisionReceiptV1:
+            if name == "safe_learning" and not payloads[name]["observations"]:
+                return ModuleDecisionReceiptV1(
+                    module=name, module_schema_version="v0.6.5", status="insufficient_evidence",
+                    evidence_level="E0-missing",
+                    decision_json=_json({"reason": "no_observed_outcomes", "observation_count": 0}),
+                )
             try:
                 receipt = self.adapters[name].decide(
-                    payloads[name], f"bridge:{record.id}:{name}:v1"
+                    payloads[name], f"bridge:{record.id}:{name}:v2"
                 )
                 if (
                     not receipt.advisory_only
@@ -434,10 +443,11 @@ class DecisionOrchestratorV1:
             thread_name_prefix="decision-bridge",
         ) as pool:
             receipts = list(pool.map(invoke, MODULE_ORDER))
-        failure_closed = any(item.status != "ok" for item in receipts)
+        failure_closed = any(item.status != "ok" and (item.module, item.status) != ("safe_learning", "insufficient_evidence")
+                             for item in receipts)
         receipt_map = {item.module: item.to_dict() for item in receipts}
         shadow_route = self._shadow_route(
-            baseline_route, receipt_map, failure_closed=failure_closed
+            receipt_map, route_sets, failure_closed=failure_closed
         )
         topologies = [
             {
@@ -453,7 +463,7 @@ class DecisionOrchestratorV1:
                 "task_id": task["id"],
                 "baseline_worker": task.get("selected_worker"),
                 "candidates": [
-                    item.get("worker_id") or item.get("id")
+                    item.get("model_id") or item.get("worker_id") or item.get("id")
                     for item in task.get("routing_candidates", [])
                 ][:8],
                 "rejections": [
@@ -498,6 +508,8 @@ class DecisionOrchestratorV1:
         structured_diff = {
             "input_diff": [],
             "route_diff": self._route_diff(baseline_route, shadow_route),
+            "cost_comparable": (baseline_route["estimated_total_cost_usd"] is not None
+                                and shadow_route["estimated_total_cost_usd"] is not None),
             "reason_codes": (
                 ["module_failure_fail_closed"]
                 if failure_closed
@@ -569,47 +581,61 @@ class DecisionOrchestratorV1:
             ),
             "tasks": tasks,
             "estimated_total_cost_usd": record.plan.routing_summary.get(
-                "estimated_total_cost_usd", 0
+                "estimated_total_cost_usd"
             ),
             "applied": True,
         }
 
     @staticmethod
     def _shadow_route(
-        baseline: Mapping[str, Any],
         receipts: Mapping[str, Mapping[str, Any]],
+        route_sets: Sequence[Mapping[str, Any]],
         *,
         failure_closed: bool,
     ) -> dict[str, Any]:
+        shadow = {"source": "joint_search_advisory", "management_mode": None, "tasks": None,
+                  "estimated_total_cost_usd": None, "applied": False,
+                  "reason_codes": ["module_failure_fail_closed" if failure_closed else "no_selected_route"]}
         if failure_closed:
-            return {
-                **dict(baseline),
-                "source": "fail_closed_baseline_copy",
-                "applied": False,
-                "reason_codes": ["module_failure_fail_closed"],
-            }
+            return shadow
         meta = receipts["meta_controller"]["decision"].get("decision") or {}
         joint = receipts["joint_search"]["decision"].get("decision") or {}
         capability = receipts["capability_graph"]["decision"].get("decision") or {}
-        return {
-            "source": "v0.6.9_shadow_advisory",
-            "management_mode": _management_mode(meta.get("action")),
+        shadow.update({
             "meta_action": meta.get("action"),
             "capability_action": capability.get("action"),
             "joint_action": joint.get("action"),
             "selected_candidate_id": joint.get("selected_candidate_id"),
-            "tasks": list(baseline.get("tasks", ())),
-            "estimated_total_cost_usd": baseline.get("estimated_total_cost_usd", 0),
-            "applied": False,
-            "reason_codes": ["shadow_recommendation_not_applied"],
-        }
+        })
+        candidate = joint.get("selected_candidate")
+        if (joint.get("action") != "SELECT" or not candidate or not candidate.get("candidate_id")
+                or joint.get("selected_candidate_id") != candidate["candidate_id"]):
+            return shadow
+        choices = dict(candidate["node_routes"])
+        if len(choices) != len(candidate["node_routes"]) or set(choices) != {item["node_id"] for item in route_sets}:
+            return shadow
+        rows = []
+        for entry in route_sets:
+            option = next((item for item in entry["options"] if item["route_id"] == choices[entry["node_id"]]), None)
+            if option is None:
+                return shadow
+            quote = option["predicted_cost_usd"]["mean"] if option["cost_known"] else None
+            rows.append({"task_id": entry["node_id"], "worker_id": option["executor_id"],
+                         "estimated_cost_usd": quote})
+        shadow.update(tasks=rows, management_mode=candidate["strategy"]["management_mode"],
+                      reason_codes=["shadow_recommendation_not_applied"])
+        # Match the baseline's task-quote total. The joint search's objective
+        # also includes planning overhead and failure penalties on other scales.
+        if rows and all(row["estimated_cost_usd"] is not None for row in rows):
+            shadow["estimated_total_cost_usd"] = round(sum(row["estimated_cost_usd"] for row in rows), 6)
+        return shadow
 
     @staticmethod
     def _route_diff(baseline: Mapping[str, Any], shadow: Mapping[str, Any]) -> list[dict[str, Any]]:
         fields = ("management_mode", "estimated_total_cost_usd")
         result = []
         for field in fields:
-            if baseline.get(field) != shadow.get(field):
+            if baseline.get(field) is not None and shadow.get(field) is not None and baseline[field] != shadow[field]:
                 result.append(
                     {
                         "field": field,
@@ -618,6 +644,12 @@ class DecisionOrchestratorV1:
                         "reason_code": "advisory_route_difference",
                     }
                 )
+        baseline_workers = {row["task_id"]: row["worker_id"] for row in baseline["tasks"]}
+        for row in shadow.get("tasks") or ():
+            old = baseline_workers.get(row["task_id"])
+            if old is not None and old != row["worker_id"]:
+                result.append({"field": "worker_id", "task_id": row["task_id"], "baseline": old,
+                               "shadow": row["worker_id"], "reason_code": "advisory_route_difference"})
         return result
 
     @staticmethod
@@ -711,30 +743,37 @@ class DecisionOrchestratorV1:
                 "context_tokens": int(task.get("estimated_input_tokens", 0)), "schema_version": "v0.6.3",
             })
             selected = str(task.get("selected_worker") or "")
-            candidate_ids = [selected] if selected else []
-            candidate_ids.extend(
-                str(item.get("worker_id") or item.get("id") or "")
-                for item in task.get("routing_candidates", ())
-            )
-            candidate_ids.extend(str(item.get("id")) for item in workers[:2])
+            quotes = {item.get("model_id") or item.get("worker_id") or item.get("id"): item
+                      for item in task.get("routing_candidates", ())}
+            if task.get("placement"):
+                # Placement totals and direct model prices use different cost
+                # bases. A model-only choice cannot distinguish two profiles.
+                quotes = {}
+                for placement in task.get("backup_placements", ()):
+                    model = placement["model_id"]
+                    quotes[model] = {} if model in quotes else {
+                        "estimated_cost": placement.get("expected_total_cost_usd"),
+                        "estimated_latency_ms": placement.get("execution_p50_ms"),
+                        "predicted_success": placement.get("predicted_quality_mean"),
+                    }
+            candidate_ids = [selected, *quotes, *(item.get("id") for item in workers[:2])]
             options = []
             for worker_id in list(dict.fromkeys(item for item in candidate_ids if item))[:3]:
                 worker = worker_lookup.get(worker_id, {})
-                success = _bounded_probability(
-                    task.get("predicted_success") or worker.get("reliability"), 0.7
-                )
-                cost = max(0.0, float(task.get("estimated_cost") or worker.get("cost_per_task", 0)))
-                latency = max(1.0, float(task.get("estimated_latency_ms") or 100))
+                quote = task if worker_id == selected else quotes.get(worker_id, {})
+                success = _bounded_probability(quote.get("predicted_success"), 0.7)
+                cost = quote.get("estimated_cost")
+                latency = quote.get("estimated_latency_ms")
                 options.append({
                     "route_id": f"{task['id']}:{worker_id}"[:200], "executor_id": worker_id,
                     "reasoning_tier": str(worker.get("tier") or "medium"), "validator_id": "validator:contract",
                     "tool_ids": tools, "authority_scopes": ["workspace"], "predicted_success": self._interval(success),
-                    "predicted_cost_usd": self._estimate(cost), "validation_cost_usd": self._estimate(0),
-                    "predicted_latency_ms": self._estimate(latency), "validation_latency_ms": self._estimate(0),
+                    "predicted_cost_usd": self._estimate(cost or 0), "validation_cost_usd": self._estimate(0),
+                    "predicted_latency_ms": self._estimate(latency or 0), "validation_latency_ms": self._estimate(0),
                     "failure_correlation_group": str(worker.get("provider") or "unknown"),
                     "handoff_fields": {"objective": str(task.get("objective", ""))[:500]},
-                    "information_loss": 0.02, "capacity_units": 1, "cost_known": True,
-                    "latency_known": True, "schema_version": "v0.6.3",
+                    "information_loss": 0.02, "capacity_units": 1, "cost_known": cost is not None,
+                    "latency_known": latency is not None, "schema_version": "v0.6.3",
                 })
             route_sets.append({"node_id": task["id"], "options": options, "schema_version": "v0.6.3"})
         recovery_nodes = [
@@ -756,19 +795,6 @@ class DecisionOrchestratorV1:
                 "schema_version": "v0.6.4",
             }
             for index, task in enumerate(tasks)
-        ]
-        observations = [
-            {
-                "observation_id": f"bridge-{record.id}-{index:02d}", "project_id": project,
-                "task_family": task_family, "risk_level": risk, "logged_action": "baseline",
-                "logging_action_probabilities": {"baseline": 0.75, "shadow": 0.25},
-                "candidate_action_probabilities": {"baseline": 0.6, "shadow": 0.4},
-                "predicted_rewards": {"baseline": 0.65, "shadow": 0.68},
-                "observed_reward": 0.65 + (index % 3) * 0.01, "evidence_level": "E0-simulated",
-                "data_origin": "test_fixture", "independently_validated": False,
-                "created_at": now, "schema_version": "v0.6.5",
-            }
-            for index in range(12)
         ]
         return {
             "meta_controller": {
@@ -840,7 +866,7 @@ class DecisionOrchestratorV1:
                 "candidate_policy_id": "decision-bridge-shadow", "candidate_policy_version": "1",
                 "champion_policy_id": "existing-predictive-router", "champion_policy_version": str(record.plan.model_snapshot or "1"),
                 "champion_estimate": record.plan.predicted_success, "rollback_policy_id": "existing-predictive-router",
-                "task_family": task_family, "method": "dr", "stage": "shadow", "observations": observations,
+                "task_family": task_family, "method": "dr", "stage": "shadow", "observations": [],
             },
         }
 
@@ -937,12 +963,8 @@ def failure_closed_envelope(record: Any, error: Exception | str) -> Authoritativ
         if record.plan is not None
         else {"source": "baseline_unavailable", "tasks": [], "applied": True}
     )
-    shadow = {
-        **baseline,
-        "source": "fail_closed_baseline_copy",
-        "applied": False,
-        "reason_codes": ["decision_bridge_setup_failed"],
-    }
+    shadow = DecisionOrchestratorV1._shadow_route({}, (), failure_closed=True)
+    shadow["reason_codes"] = ["decision_bridge_setup_failed"]
     receipts = tuple(
         ModuleDecisionReceiptV1(
             module=name,
@@ -974,7 +996,7 @@ def failure_closed_envelope(record: Any, error: Exception | str) -> Authoritativ
         "baseline_route_json": _json(baseline),
         "shadow_route_json": _json(shadow),
         "structured_diff_json": _json({
-            "input_diff": [], "route_diff": [],
+            "input_diff": [], "route_diff": [], "cost_comparable": False,
             "reason_codes": ["decision_bridge_setup_failed"], "applied": False,
         }),
         "module_receipts": receipts,

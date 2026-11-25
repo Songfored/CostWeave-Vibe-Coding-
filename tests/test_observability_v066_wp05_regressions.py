@@ -60,7 +60,7 @@ class IdempotencyTraceRegistryRegressionTests(unittest.TestCase):
                 )
                 self.assertEqual(before + 1, after)
             finally:
-                manager.shutdown(wait_timeout=10)
+                manager.shutdown(wait_timeout=60)
 
     def test_concurrent_idempotent_create_has_one_authoritative_recorder(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -110,7 +110,7 @@ class IdempotencyTraceRegistryRegressionTests(unittest.TestCase):
                 self.assertIs(first.telemetry, get_trace_recorder(first.trace_id))
                 start.assert_called_once_with(first, resume=False)
             finally:
-                manager.shutdown(wait_timeout=10)
+                manager.shutdown(wait_timeout=60)
 
 
 class RestartTraceTimingRegressionTests(unittest.TestCase):

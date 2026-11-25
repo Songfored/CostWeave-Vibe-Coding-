@@ -34,6 +34,10 @@ class ExternalBudgetExceededError(ExperimentalCallError):
     """Raised before network I/O when a hard limit cannot be reserved."""
 
 
+class ExternalCostOverrunError(ExternalBudgetExceededError):
+    """A completed attempt was charged above its reservation."""
+
+
 class ExternalIdempotencyError(ExperimentalCallError):
     """Raised when an idempotency key is reused for different content."""
 
@@ -576,7 +580,7 @@ class ExperimentalCallStore:
                         (utc_now(), external_call_id),
                     )
                     connection.execute("COMMIT")
-                    raise ExternalBudgetExceededError(
+                    raise ExternalCostOverrunError(
                         "actual cost exceeded the reserved worst case"
                     )
                 connection.execute(
