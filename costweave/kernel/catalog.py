@@ -7,7 +7,8 @@ from .contracts import MAX_OPERATIONS, Job, Operation, _fields, _names, parse_ev
 
 
 def compile_request(request: Mapping, catalog: Mapping) -> Job:
-    _fields(request, {"goals", "inputs", "budget_units"}, {"search_limit", "planning_policy", "evidence_rules"}, "goal request")
+    _fields(request, {"goals", "inputs", "budget_units"},
+            {"search_limit", "planning_policy", "evidence_rules", "verification_policy"}, "goal request")
     _fields(catalog, {"operations", "acceptance"}, set(), "recipe catalog")
     goals = _names(request["goals"], "goals")
     if not isinstance(request["inputs"], dict) or not isinstance(catalog["acceptance"], dict):
@@ -20,6 +21,7 @@ def compile_request(request: Mapping, catalog: Mapping) -> Job:
         raise ValueError("catalog operation IDs must be unique")
 
     evidence = parse_evidence_rules(request.get("evidence_rules", []))
+    verification = request.get("verification_policy")
     requested = {rule.request for rule in evidence if rule.request is not None}
     actions = {rule.operation for rule in evidence if rule.operation is not None}
     # Compilation includes possible future inputs. Dispatch still requires their actual acceptance.
@@ -38,6 +40,10 @@ def compile_request(request: Mapping, catalog: Mapping) -> Job:
         if available.issuperset(op.requires):
             producers[op.produces].append(op)
     pending = list(goals) + [rule.artifact for rule in evidence] + list(requested)
+    if verification is not None:
+        if not isinstance(verification, dict) or not isinstance(verification.get("artifact"), str):
+            raise ValueError("verification_policy requires an observation artifact")
+        pending.append(verification["artifact"])
     required = set(request["inputs"])
     selected = {op.id: op for op in ops if op.id in actions}
     for op in selected.values():

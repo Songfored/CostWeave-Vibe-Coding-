@@ -6,11 +6,12 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from .contracts import Job, canonical_json
+from .contracts import MAX_UNITS, Job, canonical_json
 
 
 _SCHEMA = """
@@ -68,6 +69,10 @@ CREATE TABLE IF NOT EXISTS kernel_clarifications (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS kernel_one_pending_clarification
     ON kernel_clarifications(run_id) WHERE supplied_sha256 IS NULL;
+CREATE TABLE IF NOT EXISTS kernel_deadlines (
+    run_id TEXT PRIMARY KEY REFERENCES kernel_runs,
+    deadline_at_ms INTEGER NOT NULL
+);
 COMMIT;
 """
 
@@ -139,6 +144,29 @@ def _pending_clarification(db, run_id):
                       "WHERE run_id=? AND supplied_sha256 IS NULL", (run_id,)).fetchone()
 
 
+def wall_clock_ms():
+    return time.time_ns() // 1_000_000
+
+
+def _deadline(db, run_id):
+    row = db.execute("SELECT deadline_at_ms FROM kernel_deadlines WHERE run_id=?", (run_id,)).fetchone()
+    return row[0] if row else None
+
+
+def _expire_wait(db, run_id, clock_ms):
+    deadline = _deadline(db, run_id)
+    if deadline is None or not _pending_clarification(db, run_id):
+        return False
+    now = clock_ms()
+    if now < deadline:
+        return False
+    changed = db.execute("UPDATE kernel_runs SET status='blocked',reason='deadline_expired' "
+                         "WHERE run_id=? AND status='active'", (run_id,)).rowcount
+    if changed:
+        _event(db, run_id, "run_finished", status="blocked", reason="deadline_expired", decided_at_ms=now)
+    return True
+
+
 class KernelStore:
     """Each file operation is a short transaction. External I/O takes place between claim and settle."""
 
@@ -184,7 +212,7 @@ class KernelStore:
                 self._memory.close()
                 self._memory = None
 
-    def create(self, run_id: str, job_dict: dict) -> None:
+    def create(self, run_id: str, job_dict: dict, *, clock_ms=wall_clock_ms) -> None:
         if not isinstance(run_id, str) or not 1 <= len(run_id) <= 200 or not run_id.isprintable() or run_id != run_id.strip():
             raise ValueError("invalid run ID")
         job = Job.from_dict(job_dict).to_dict()
@@ -197,7 +225,15 @@ class KernelStore:
                     raise RunConflictError("run ID is already bound to a different job")
                 return
             db.execute("INSERT INTO kernel_runs VALUES (?,?,?,'active','')", (run_id, encoded, digest))
-            _event(db, run_id, "run_created", job_sha256=digest, budget_units=job["budget_units"])
+            timing = {}
+            if "verification_policy" in job:
+                started = clock_ms()
+                deadline = started + job["verification_policy"]["deadline_ms"]
+                if type(started) is not int or started < 0 or deadline > MAX_UNITS:
+                    raise ValueError("run deadline must fit an integer UTC millisecond timestamp")
+                db.execute("INSERT INTO kernel_deadlines VALUES (?,?)", (run_id, deadline))
+                timing = {"started_at_ms": started, "deadline_at_ms": deadline}
+            _event(db, run_id, "run_created", job_sha256=digest, budget_units=job["budget_units"], **timing)
             for key, value in sorted(job["inputs"].items()):
                 payload = _canonical(value)
                 sha = _digest(payload)
@@ -234,11 +270,15 @@ class KernelStore:
                 "held_units": pending["cost_units"] if pending else 0,
                 "active_attempt": active,
             }
-            if waiting:
+            deadline = _deadline(db, run_id)
+            if deadline is not None:
+                state["deadline_at_ms"] = deadline
+            if waiting and run["status"] == "active":
                 state.update(status="waiting_for_input", reason=waiting["reason"], clarification=dict(waiting))
             return state
 
-    def claim(self, run_id: str, op_id: str, *, expected_excluded=None, expected_hashes=None, plan=None) -> str | None:
+    def claim(self, run_id: str, op_id: str, *, expected_excluded=None, expected_hashes=None, plan=None,
+              clock_ms=wall_clock_ms, replan=None) -> str | None:
         with self._transaction(write=True) as db:
             run = _run(db, run_id)
             job = json.loads(run["job"])
@@ -260,6 +300,22 @@ class KernelStore:
             remaining = job["budget_units"] - _amount(db, run_id)
             if op["cost_units"] > remaining:
                 return None
+            deadline = _deadline(db, run_id)
+            if deadline is not None:
+                policy = job["verification_policy"]
+                if plan is None or plan.verification is None or op_id not in policy["route_ms"]:
+                    raise ValueError("timed dispatch requires a calibrated route decision")
+                left = max(0, min(policy["deadline_ms"], deadline - clock_ms()))
+                if left != plan.verification["remaining_ms"]:
+                    if replan is None:
+                        return None
+                    plan = replan(left)
+                    if plan.operations[:1] != (op_id,):
+                        return None
+                # Check again after planner work and acquisition of the write lock.
+                now = clock_ms()
+                if now >= deadline or policy["route_ms"][op_id] > deadline - now:
+                    return None
             if plan is not None and (plan.status != "ready" or plan.operations[:1] != (op_id,) or
                                      plan.cost_units is None or plan.cost_units > remaining):
                 raise ValueError("plan does not authorize this attempt within its remaining budget")
@@ -268,6 +324,7 @@ class KernelStore:
                        (attempt_id, run_id, op_id, op["cost_units"]))
             _event(db, run_id, "attempt_claimed", attempt_id=attempt_id, op_id=op_id, cost_units=op["cost_units"],
                    input_hashes={key: available[key] for key in op["requires"]}, remaining_units=remaining,
+                   **({"admitted_at_ms": now} if deadline is not None else {}),
                    **({"plan": plan.to_dict()} if plan is not None else {}))
             return attempt_id
 
@@ -297,7 +354,11 @@ class KernelStore:
             _event(db, run_id, "input_requested", artifact=evidence.request, reason=evidence.reason, plan=plan.to_dict())
             return True
 
-    def provide_validated(self, run_id: str, artifact: str, value) -> None:
+    def expire_wait(self, run_id: str, *, clock_ms=wall_clock_ms) -> bool:
+        with self._transaction(write=True) as db:
+            return _expire_wait(db, run_id, clock_ms)
+
+    def provide_validated(self, run_id: str, artifact: str, value, *, clock_ms=wall_clock_ms) -> None:
         """Commit a host-validated answer to its open request, or acknowledge an exact replay."""
         encoded = canonical_json(value)
         digest = _digest(encoded)
@@ -313,6 +374,8 @@ class KernelStore:
                 return
             if run["status"] != "active":
                 raise ValueError("the run is no longer waiting for input")
+            if _expire_wait(db, run_id, clock_ms):
+                return
             _artifact(db, run_id, artifact, encoded, digest)
             db.execute("UPDATE kernel_clarifications SET supplied_sha256=? WHERE run_id=? AND artifact=?",
                        (digest, run_id, artifact))
@@ -349,7 +412,7 @@ class KernelStore:
 
     def settle(self, run_id: str, attempt_id: str, *, accepted: bool, value=_NOT_SUPPLIED,
                reason: str = "", actual_units: int | None = None, stop_reason: str | None = None,
-               require_unreturned: bool = False) -> None:
+               require_unreturned: bool = False, clock_ms=wall_clock_ms) -> None:
         if type(accepted) is not bool or not isinstance(reason, str):
             raise ValueError("invalid settlement receipt")
         if stop_reason is not None and (accepted or not isinstance(stop_reason, str) or not stop_reason):
@@ -368,6 +431,16 @@ class KernelStore:
             if returned is not None and (encoded != returned or charge != attempt["returned_units"]):
                 raise ValueError("settlement differs from the executor receipt")
             digest = _digest(encoded)
+            deadline = _deadline(db, run_id)
+            timing = {}
+            if deadline is not None:
+                now = clock_ms()
+                timing = {"settled_at_ms": now}
+                if attempt["accepted"] is None and accepted and now > deadline:
+                    accepted, reason, stop_reason = False, "deadline_expired", "deadline_expired"
+                elif attempt["reason"] == "deadline_expired" and accepted:
+                    # A retry observes the original admission/publication outcome.
+                    accepted, reason, stop_reason = False, "deadline_expired", "deadline_expired"
             if attempt["accepted"] is not None:
                 previous = (attempt["accepted"], attempt["actual_units"], attempt["result_sha256"],
                             attempt["reason"], attempt["stop_reason"])
@@ -380,7 +453,7 @@ class KernelStore:
             db.execute("UPDATE kernel_attempts SET actual_units=?,accepted=?,result_sha256=?,reason=?,stop_reason=? WHERE id=?",
                        (charge, accepted, digest, reason, stop_reason, attempt_id))
             _event(db, run_id, "attempt_settled", op_id=op["id"], attempt_id=attempt_id, accepted=accepted,
-                   artifact=op["produces"], sha256=digest, actual_units=charge, reason=reason)
+                   artifact=op["produces"], sha256=digest, actual_units=charge, reason=reason, **timing)
             if stop_reason is not None:
                 db.execute("UPDATE kernel_runs SET status='blocked',reason=? WHERE run_id=?", (stop_reason, run_id))
                 _event(db, run_id, "run_finished", status="blocked", reason=stop_reason)

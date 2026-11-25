@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from .contracts import Job, Operation, canonical_json
+from .verification_value import estimate_action
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class Plan:
     states_examined: int = 0
     fallback: FallbackAssessment | None = None
     evidence: EvidenceDecision | None = None
+    verification: dict | None = None
 
     def to_dict(self) -> dict:
         result = {"status": self.status, "operations": list(self.operations), "cost_units": self.cost_units,
@@ -53,6 +55,8 @@ class Plan:
             result["fallback"] = asdict(self.fallback)
         if self.evidence is not None:
             result["evidence"] = self.evidence.to_dict()
+        if self.verification is not None:
+            result["verification"] = self.verification
         return result
 
 
@@ -155,22 +159,96 @@ def _evidence_choice(job: Job, artifacts: Mapping, excluded: set[str], remaining
     return None
 
 
-def decide(job: Job, artifacts: Mapping[str, Any], excluded: Collection[str], remaining_units: int) -> Plan:
+def _verification_choice(job, policy, artifacts, excluded, remaining_units, remaining_ms):
+    source = artifacts.get(policy["artifact"])
+    stratum = source.get(policy["field"]) if isinstance(source, dict) else None
+    model = policy["model"]
+    decision = {
+        "version": 1, "model_sha256": hashlib.sha256(canonical_json(model).encode()).hexdigest(),
+        "artifact": policy["artifact"], "field": policy["field"],
+        "remaining_ms": remaining_ms, "remaining_units": remaining_units,
+        "min_on_time_correct": policy["min_on_time_correct"], "candidates": {},
+    }
+    if policy["artifact"] in artifacts:
+        decision["artifact_sha256"] = hashlib.sha256(canonical_json(source).encode()).hexdigest()
+    # This model is calibrated for complete routes at their initial decision, not conditional retries.
+    if excluded.intersection(policy["route_ms"]):
+        decision["selected_reason"] = "verification_route_failed"
+        return Plan("verification_route_failed", verification=decision)
+    eligible = []
+    fallback = None
+    reasons = set()
+    for op in job.operations:
+        if op.id not in policy["route_ms"]:
+            continue
+        duration = policy["route_ms"][op.id]
+        row = {"quote_units": op.cost_units, "estimated_ms": duration}
+        decision["candidates"][op.id] = row
+        if op.id in excluded or not set(op.requires) <= artifacts.keys():
+            reason = "unavailable"
+        elif op.cost_units > remaining_units:
+            reason = "over_budget"
+        elif duration > remaining_ms or remaining_ms == 0:
+            reason = "deadline_unreachable"
+        else:
+            estimate = (estimate_action(model, stratum, op.id, remaining_ms=remaining_ms)
+                        if isinstance(stratum, str) and stratum else {"status": "missing_stratum"})
+            row.update(estimate)
+            if estimate["status"] != "supported":
+                reason = "insufficient_evidence"
+                if op.id == policy["fallback_operation"]:
+                    fallback = op
+            elif estimate["quality_lower"] < policy["min_on_time_correct"]:
+                reason = "quality_threshold_not_met"
+            else:
+                reason = "eligible"
+                # Among routes meeting the floor, compare spend per on-time correct delivery.
+                probability = estimate["quality"]
+                ratio = estimate["mean_cost_units"] / probability if probability else None
+                row["estimated_cost_per_on_time_correct"] = ratio
+                eligible.append((ratio is None, ratio or 0, -estimate["quality_lower"], duration, op.id, op))
+        row["eligibility"] = reason
+        reasons.add(reason)
+    if eligible:
+        operation = min(eligible)[-1]
+        decision["selected_reason"] = "lowest_estimated_cost_per_on_time_correct"
+    elif fallback is not None:
+        operation = fallback
+        decision["selected_reason"] = "fixed_fallback_without_quality_estimate"
+    else:
+        # Mixed causes remain visible per action in the persisted decision.
+        status = "deadline_expired" if remaining_ms == 0 else "no_eligible_verification_route"
+        if len(reasons) == 1 and remaining_ms > 0:
+            status = next(iter(reasons))
+        decision["selected_reason"] = status
+        return Plan(status, verification=decision)
+    return Plan("ready", (operation.id,), operation.cost_units, verification=decision)
+
+
+def decide(job: Job, artifacts: Mapping[str, Any], excluded: Collection[str], remaining_units: int,
+           *, remaining_ms: int | None = None) -> Plan:
     """Choose the next action from admitted artifact values and the frozen job rules."""
     if not isinstance(artifacts, Mapping):
         raise ValueError("artifacts must map names to accepted JSON values")
-    return plan(job, artifacts, excluded, remaining_units)
+    return plan(job, artifacts, excluded, remaining_units, remaining_ms=remaining_ms)
 
 
-def plan(job: Job, available: Collection[str], excluded: Collection[str], remaining_units: int) -> Plan:
+def plan(job: Job, available: Collection[str], excluded: Collection[str], remaining_units: int,
+         *, remaining_ms: int | None = None) -> Plan:
     """Select the next step from accepted artifacts, settled attempts and the remaining budget."""
     if type(remaining_units) is not int or not 0 <= remaining_units <= job.budget_units:
         raise ValueError("remaining_units must be an integer within the job budget")
     if isinstance(available, (str, bytes)) or isinstance(excluded, (str, bytes)):
         raise ValueError("available and excluded must be collections of names")
     artifacts = available if isinstance(available, Mapping) else None
-    if job.evidence_rules and artifacts is None:
+    verification = job.verification_policy
+    if (job.evidence_rules or verification) and artifacts is None:
         raise ValueError("evidence rules require an artifact mapping with accepted values")
+    if verification:
+        horizon = verification["deadline_ms"]
+        remaining_ms = horizon if remaining_ms is None else remaining_ms
+        if type(remaining_ms) is not int or not 0 <= remaining_ms <= horizon:
+            raise ValueError("remaining_ms must be inside the job deadline")
     available = set(available)
     excluded = set(excluded)
     declared = job.inputs.keys() | {op.produces for op in job.operations}
@@ -180,10 +258,12 @@ def plan(job: Job, available: Collection[str], excluded: Collection[str], remain
     goals = set(job.goals)
     if goals <= available:
         return Plan("complete", (), 0, True)
-    if job.evidence_rules:
+    if job.evidence_rules and (not verification or remaining_ms > 0):
         choice = _evidence_choice(job, artifacts, excluded, remaining_units)
         if choice is not None:
             return choice
+    if verification:
+        return _verification_choice(job, verification, artifacts, excluded, remaining_units, remaining_ms)
     operations = _relevant(job, goals, available, excluded)
     cheapest = _cheapest_plan(operations, available, goals, remaining_units, job.search_limit)
     if job.planning_policy != "preserve_fallback" or cheapest.status != "ready":

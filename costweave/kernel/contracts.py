@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .verification_value import validate_verification_model
+
 
 MAX_UNITS = 2**63 - 1
 DEFAULT_SEARCH_LIMIT = 10_000
@@ -169,11 +171,12 @@ class Job:
     evidence_rules: tuple[EvidenceRule, ...]
     _inputs_json: str
     _acceptance_json: str
+    _verification_json: str | None
 
     def __init__(self, goals: list[str] | tuple[str, ...], inputs: dict, budget_units: int,
                  operations: list[Operation] | tuple[Operation, ...], search_limit: int = DEFAULT_SEARCH_LIMIT,
                  acceptance: dict | None = None, *, planning_policy: str = "lowest_cost",
-                 evidence_rules: list[dict] | tuple[dict, ...] = ()):
+                 evidence_rules: list[dict] | tuple[dict, ...] = (), verification_policy: dict | None = None):
         if planning_policy not in ("lowest_cost", "preserve_fallback"):
             raise ValueError("planning_policy must be lowest_cost or preserve_fallback")
         object.__setattr__(self, "planning_policy", planning_policy)
@@ -215,6 +218,14 @@ class Job:
         for artifact, count in outputs.items():
             if count > 1 and artifact not in acceptance:
                 raise ValueError(f"multiple producers for {artifact!r} require an artifact acceptance contract")
+        if verification_policy is not None:
+            _validate_verification_policy(verification_policy, goals, operations, acceptance)
+            if planning_policy != "lowest_cost" or any(rule.operation or rule.acquire for rule in rules):
+                raise ValueError("verification_policy supports clarification rules before terminal route selection")
+            if any(rule.request in goals for rule in rules):
+                raise ValueError("a clarification cannot supply the calibrated terminal goal")
+        object.__setattr__(self, "_verification_json",
+                           canonical_json(verification_policy) if verification_policy is not None else None)
         object.__setattr__(self, "goals", tuple(sorted(goals)))
         object.__setattr__(self, "operations", operations)
         object.__setattr__(self, "evidence_rules", rules)
@@ -232,18 +243,25 @@ class Job:
     def acceptance(self) -> dict:
         return json.loads(self._acceptance_json)
 
+    @property
+    def verification_policy(self) -> dict | None:
+        return json.loads(self._verification_json) if self._verification_json is not None else None
+
     @classmethod
     def from_dict(cls, raw: Mapping) -> Job:
         _fields(raw, {"goals", "inputs", "operations", "budget_units"},
-                {"search_limit", "acceptance", "planning_policy", "evidence_rules"}, "job")
+                {"search_limit", "acceptance", "planning_policy", "evidence_rules", "verification_policy"}, "job")
         rows = raw["operations"]
         if not isinstance(rows, (list, tuple)) or len(rows) > MAX_OPERATIONS:
             raise ValueError(f"operations must be an array of at most {MAX_OPERATIONS} items")
+        if "verification_policy" in raw and raw["verification_policy"] is None:
+            raise ValueError("verification_policy must be an object")
         if "acceptance" in raw and raw["acceptance"] is None:
             raise ValueError("acceptance must be an object")
         return cls(raw["goals"], raw["inputs"], raw["budget_units"], tuple(Operation.from_dict(row) for row in rows),
                    raw.get("search_limit", DEFAULT_SEARCH_LIMIT), raw.get("acceptance"),
-                   planning_policy=raw.get("planning_policy", "lowest_cost"), evidence_rules=raw.get("evidence_rules", ()))
+                   planning_policy=raw.get("planning_policy", "lowest_cost"), evidence_rules=raw.get("evidence_rules", ()),
+                   verification_policy=raw.get("verification_policy"))
 
     def to_dict(self) -> dict:
         result = {"goals": list(self.goals), "inputs": self.inputs, "budget_units": self.budget_units,
@@ -254,4 +272,32 @@ class Job:
             result["planning_policy"] = self.planning_policy
         if self.evidence_rules:
             result["evidence_rules"] = [rule.to_dict() for rule in self.evidence_rules]
+        if self._verification_json is not None:
+            result["verification_policy"] = self.verification_policy
         return result
+
+
+def _validate_verification_policy(policy, goals, operations, acceptance):
+    _fields(policy, {"artifact", "field", "model", "min_on_time_correct", "fallback_operation",
+                     "route_ms", "deadline_ms"}, set(), "verification_policy")
+    if len(goals) != 1 or _name(policy["artifact"], "verification artifact") not in acceptance:
+        raise ValueError("verification_policy requires one goal and an accepted observation artifact")
+    if policy["artifact"] == goals[0]:
+        raise ValueError("the calibrated outcome cannot be its own observation")
+    _name(policy["field"], "verification field")
+    _integer(policy["deadline_ms"], "deadline_ms", 1, MAX_UNITS)
+    floor = policy["min_on_time_correct"]
+    if type(floor) not in (int, float) or not 0 <= floor <= 1:
+        raise ValueError("min_on_time_correct must be a probability")
+    validate_verification_model(policy["model"])
+    durations = policy["route_ms"]
+    if not isinstance(durations, dict) or not durations or durations.keys() - set(policy["model"]["actions"]):
+        raise ValueError("route_ms must declare a nonempty subset of calibrated actions")
+    terminal = {op.id for op in operations if op.produces == goals[0]}
+    if durations.keys() - terminal:
+        raise ValueError("every calibrated route must be a declared operation producing the final goal")
+    for duration in durations.values():
+        _integer(duration, "route duration estimate", 0, MAX_UNITS)
+    fallback = policy["fallback_operation"]
+    if fallback is not None and _name(fallback, "fallback_operation") not in durations:
+        raise ValueError("fallback_operation must be a configured route")

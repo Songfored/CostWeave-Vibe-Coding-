@@ -93,8 +93,10 @@ def main(argv=None):
             return 3
         if state == "waiting_for_input":
             return 4
-        if state in {"blocked", "unreachable", "over_budget", "search_limit",
-                     "evidence_action_rejected", "evidence_prerequisite_missing"}:
+        if state in {"blocked", "unreachable", "over_budget", "search_limit", "unavailable",
+                     "evidence_action_rejected", "evidence_prerequisite_missing", "deadline_expired",
+                     "deadline_unreachable", "quality_threshold_not_met", "insufficient_evidence",
+                     "no_eligible_verification_route", "verification_route_failed"}:
             return 2
         return 0
     except (OSError, ValueError, TypeError, KeyError) as error:

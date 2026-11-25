@@ -1,0 +1,757 @@
+{
+  "version": "paired-document-replay-v1",
+  "protocol_sha256": "92e3a1a33daf540f2069ef645415259b0f0fc5b35aea9c0b3c854d06a2244d0f",
+  "calibration_sha256": "ff2ffd60b0c4999e0df44ecf7be0b15f905be4aaa5a216a13fa98b63ed322010",
+  "model": {
+    "version": 1,
+    "baseline": "direct",
+    "actions": [
+      "check",
+      "direct",
+      "original"
+    ],
+    "min_support": 12,
+    "alpha": 0.05,
+    "strata": {
+      "normal": {
+        "cases": 95,
+        "routes": {
+          "direct": {
+            "cost_units": 95,
+            "baseline_cost_units": 95,
+            "elapsed_ms": 7511,
+            "baseline_elapsed_ms": 7511,
+            "times": [
+              [
+                null,
+                null,
+                52
+              ],
+              [
+                16,
+                16,
+                1
+              ],
+              [
+                20,
+                20,
+                1
+              ],
+              [
+                26,
+                26,
+                1
+              ],
+              [
+                35,
+                35,
+                1
+              ],
+              [
+                36,
+                36,
+                2
+              ],
+              [
+                43,
+                43,
+                1
+              ],
+              [
+                45,
+                45,
+                1
+              ],
+              [
+                48,
+                48,
+                1
+              ],
+              [
+                54,
+                54,
+                1
+              ],
+              [
+                63,
+                63,
+                1
+              ],
+              [
+                64,
+                64,
+                1
+              ],
+              [
+                66,
+                66,
+                1
+              ],
+              [
+                68,
+                68,
+                1
+              ],
+              [
+                69,
+                69,
+                2
+              ],
+              [
+                71,
+                71,
+                1
+              ],
+              [
+                76,
+                76,
+                1
+              ],
+              [
+                77,
+                77,
+                2
+              ],
+              [
+                79,
+                79,
+                2
+              ],
+              [
+                80,
+                80,
+                1
+              ],
+              [
+                87,
+                87,
+                1
+              ],
+              [
+                89,
+                89,
+                1
+              ],
+              [
+                93,
+                93,
+                1
+              ],
+              [
+                94,
+                94,
+                1
+              ],
+              [
+                101,
+                101,
+                1
+              ],
+              [
+                102,
+                102,
+                1
+              ],
+              [
+                107,
+                107,
+                2
+              ],
+              [
+                109,
+                109,
+                2
+              ],
+              [
+                121,
+                121,
+                1
+              ],
+              [
+                127,
+                127,
+                1
+              ],
+              [
+                129,
+                129,
+                1
+              ],
+              [
+                137,
+                137,
+                1
+              ],
+              [
+                141,
+                141,
+                2
+              ],
+              [
+                149,
+                149,
+                1
+              ],
+              [
+                160,
+                160,
+                1
+              ],
+              [
+                164,
+                164,
+                1
+              ],
+              [
+                197,
+                197,
+                1
+              ]
+            ]
+          },
+          "check": {
+            "cost_units": 190,
+            "baseline_cost_units": 95,
+            "elapsed_ms": 9402,
+            "baseline_elapsed_ms": 7511,
+            "times": [
+              [
+                null,
+                null,
+                50
+              ],
+              [
+                null,
+                40,
+                1
+              ],
+              [
+                null,
+                81,
+                1
+              ],
+              [
+                16,
+                null,
+                1
+              ],
+              [
+                20,
+                null,
+                1
+              ],
+              [
+                26,
+                null,
+                1
+              ],
+              [
+                35,
+                77,
+                1
+              ],
+              [
+                36,
+                null,
+                2
+              ],
+              [
+                43,
+                null,
+                1
+              ],
+              [
+                45,
+                null,
+                1
+              ],
+              [
+                48,
+                null,
+                1
+              ],
+              [
+                54,
+                null,
+                1
+              ],
+              [
+                63,
+                null,
+                1
+              ],
+              [
+                64,
+                null,
+                1
+              ],
+              [
+                66,
+                null,
+                1
+              ],
+              [
+                68,
+                86,
+                1
+              ],
+              [
+                69,
+                null,
+                2
+              ],
+              [
+                71,
+                null,
+                1
+              ],
+              [
+                76,
+                null,
+                1
+              ],
+              [
+                77,
+                null,
+                2
+              ],
+              [
+                79,
+                null,
+                2
+              ],
+              [
+                80,
+                null,
+                1
+              ],
+              [
+                87,
+                98,
+                1
+              ],
+              [
+                89,
+                null,
+                1
+              ],
+              [
+                93,
+                null,
+                1
+              ],
+              [
+                94,
+                126,
+                1
+              ],
+              [
+                101,
+                154,
+                1
+              ],
+              [
+                102,
+                null,
+                1
+              ],
+              [
+                107,
+                null,
+                1
+              ],
+              [
+                107,
+                159,
+                1
+              ],
+              [
+                109,
+                null,
+                1
+              ],
+              [
+                109,
+                113,
+                1
+              ],
+              [
+                121,
+                null,
+                1
+              ],
+              [
+                127,
+                null,
+                1
+              ],
+              [
+                129,
+                149,
+                1
+              ],
+              [
+                137,
+                null,
+                1
+              ],
+              [
+                141,
+                null,
+                1
+              ],
+              [
+                141,
+                161,
+                1
+              ],
+              [
+                149,
+                52,
+                1
+              ],
+              [
+                160,
+                266,
+                1
+              ],
+              [
+                164,
+                null,
+                1
+              ],
+              [
+                197,
+                null,
+                1
+              ]
+            ]
+          },
+          "original": {
+            "cost_units": 380,
+            "baseline_cost_units": 95,
+            "elapsed_ms": 22410,
+            "baseline_elapsed_ms": 7511,
+            "times": [
+              [
+                null,
+                null,
+                52
+              ],
+              [
+                16,
+                null,
+                1
+              ],
+              [
+                20,
+                null,
+                1
+              ],
+              [
+                26,
+                null,
+                1
+              ],
+              [
+                35,
+                133,
+                1
+              ],
+              [
+                36,
+                null,
+                2
+              ],
+              [
+                43,
+                null,
+                1
+              ],
+              [
+                45,
+                null,
+                1
+              ],
+              [
+                48,
+                null,
+                1
+              ],
+              [
+                54,
+                null,
+                1
+              ],
+              [
+                63,
+                null,
+                1
+              ],
+              [
+                64,
+                null,
+                1
+              ],
+              [
+                66,
+                341,
+                1
+              ],
+              [
+                68,
+                190,
+                1
+              ],
+              [
+                69,
+                null,
+                2
+              ],
+              [
+                71,
+                null,
+                1
+              ],
+              [
+                76,
+                null,
+                1
+              ],
+              [
+                77,
+                null,
+                2
+              ],
+              [
+                79,
+                null,
+                2
+              ],
+              [
+                80,
+                null,
+                1
+              ],
+              [
+                87,
+                127,
+                1
+              ],
+              [
+                89,
+                null,
+                1
+              ],
+              [
+                93,
+                null,
+                1
+              ],
+              [
+                94,
+                319,
+                1
+              ],
+              [
+                101,
+                233,
+                1
+              ],
+              [
+                102,
+                null,
+                1
+              ],
+              [
+                107,
+                null,
+                1
+              ],
+              [
+                107,
+                226,
+                1
+              ],
+              [
+                109,
+                null,
+                2
+              ],
+              [
+                121,
+                null,
+                1
+              ],
+              [
+                127,
+                null,
+                1
+              ],
+              [
+                129,
+                281,
+                1
+              ],
+              [
+                137,
+                null,
+                1
+              ],
+              [
+                141,
+                null,
+                1
+              ],
+              [
+                141,
+                270,
+                1
+              ],
+              [
+                149,
+                190,
+                1
+              ],
+              [
+                160,
+                506,
+                1
+              ],
+              [
+                164,
+                null,
+                1
+              ],
+              [
+                197,
+                null,
+                1
+              ]
+            ]
+          }
+        }
+      },
+      "tall": {
+        "cases": 3,
+        "routes": {
+          "direct": {
+            "cost_units": 3,
+            "baseline_cost_units": 3,
+            "elapsed_ms": 296,
+            "baseline_elapsed_ms": 296,
+            "times": [
+              [
+                null,
+                null,
+                2
+              ],
+              [
+                123,
+                123,
+                1
+              ]
+            ]
+          },
+          "check": {
+            "cost_units": 6,
+            "baseline_cost_units": 3,
+            "elapsed_ms": 300,
+            "baseline_elapsed_ms": 296,
+            "times": [
+              [
+                null,
+                null,
+                2
+              ],
+              [
+                123,
+                null,
+                1
+              ]
+            ]
+          },
+          "original": {
+            "cost_units": 12,
+            "baseline_cost_units": 3,
+            "elapsed_ms": 709,
+            "baseline_elapsed_ms": 296,
+            "times": [
+              [
+                null,
+                null,
+                2
+              ],
+              [
+                123,
+                null,
+                1
+              ]
+            ]
+          }
+        }
+      }
+    }
+  },
+  "calibration_fixed": {
+    "direct": {
+      "tasks": 98,
+      "delivered": 76,
+      "abstained": 22,
+      "correct": 44,
+      "false_delivery": 32,
+      "on_time_correct": 44,
+      "coverage_rate": 0.7755102040816326,
+      "false_per_task": 0.32653061224489793,
+      "false_per_delivery": 0.42105263157894735,
+      "on_time_correct_rate": 0.4489795918367347,
+      "spent_units": 98,
+      "spent_per_correct": 2.227272727272727,
+      "spent_per_on_time_correct": 2.227272727272727,
+      "qualifies": false,
+      "operations": {
+        "direct": 98
+      }
+    },
+    "check": {
+      "tasks": 98,
+      "delivered": 23,
+      "abstained": 75,
+      "correct": 13,
+      "false_delivery": 10,
+      "on_time_correct": 13,
+      "coverage_rate": 0.23469387755102042,
+      "false_per_task": 0.10204081632653061,
+      "false_per_delivery": 0.43478260869565216,
+      "on_time_correct_rate": 0.1326530612244898,
+      "spent_units": 196,
+      "spent_per_correct": 15.076923076923077,
+      "spent_per_on_time_correct": 15.076923076923077,
+      "qualifies": false,
+      "operations": {
+        "check": 98
+      }
+    },
+    "original": {
+      "tasks": 98,
+      "delivered": 4,
+      "abstained": 94,
+      "correct": 2,
+      "false_delivery": 2,
+      "on_time_correct": 2,
+      "coverage_rate": 0.04081632653061224,
+      "false_per_task": 0.02040816326530612,
+      "false_per_delivery": 0.5,
+      "on_time_correct_rate": 0.02040816326530612,
+      "spent_units": 188,
+      "spent_per_correct": 94.0,
+      "spent_per_on_time_correct": 94.0,
+      "qualifies": false,
+      "operations": {
+        "original": 47
+      }
+    }
+  },
+  "fixed_comparator": "direct",
+  "freeze_sha256": "a5c6c184340219a0f406616d5a0f8a19329bde2b74568fc82ba8bd67b830b28c"
+}
