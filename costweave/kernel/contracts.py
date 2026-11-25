@@ -74,6 +74,48 @@ def _json_object(value: Any, label: str) -> str:
     return canonical_json(value)
 
 
+@dataclass(frozen=True, slots=True)
+class EvidenceRule:
+    artifact: str
+    field: str
+    equals: str | int | float | bool | None
+    operation: str | None = None
+    request: str | None = None
+    reason: str | None = None
+    acquire: bool = False
+
+    def to_dict(self) -> dict:
+        row = {"artifact": self.artifact, "field": self.field, "equals": self.equals}
+        if self.operation is not None:
+            row["operation"] = self.operation
+        else:
+            row.update(request=self.request, reason=self.reason)
+        if self.acquire:
+            row["acquire"] = True
+        return row
+
+
+def parse_evidence_rules(raw: Any) -> tuple[EvidenceRule, ...]:
+    """Parse ordered equality rules over one field of an accepted JSON object."""
+    if not isinstance(raw, (list, tuple)) or len(raw) > MAX_OPERATIONS:
+        raise ValueError(f"evidence_rules must be an array of at most {MAX_OPERATIONS} items")
+    rules = []
+    for row in raw:
+        keys = {"artifact", "field", "equals"}
+        selects_operation = isinstance(row, Mapping) and "operation" in row
+        keys.update({"operation"} if selects_operation else {"request", "reason"})
+        _fields(row, keys, {"acquire"}, "evidence rule")
+        if "acquire" in row and type(row["acquire"]) is not bool:
+            raise ValueError("evidence acquire must be a boolean")
+        for key in keys - {"equals"}:
+            _name(row[key], f"evidence {key}")
+        if row["equals"] is not None and type(row["equals"]) not in (str, int, float, bool):
+            raise ValueError("evidence equals requires a finite JSON scalar")
+        canonical_json(dict(row))
+        rules.append(EvidenceRule(**row))
+    return tuple(rules)
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class Operation:
     id: str
@@ -124,12 +166,14 @@ class Job:
     budget_units: int
     search_limit: int
     planning_policy: str
+    evidence_rules: tuple[EvidenceRule, ...]
     _inputs_json: str
     _acceptance_json: str
 
     def __init__(self, goals: list[str] | tuple[str, ...], inputs: dict, budget_units: int,
                  operations: list[Operation] | tuple[Operation, ...], search_limit: int = DEFAULT_SEARCH_LIMIT,
-                 acceptance: dict | None = None, *, planning_policy: str = "lowest_cost"):
+                 acceptance: dict | None = None, *, planning_policy: str = "lowest_cost",
+                 evidence_rules: list[dict] | tuple[dict, ...] = ()):
         if planning_policy not in ("lowest_cost", "preserve_fallback"):
             raise ValueError("planning_policy must be lowest_cost or preserve_fallback")
         object.__setattr__(self, "planning_policy", planning_policy)
@@ -146,7 +190,9 @@ class Job:
         inputs_json = _json_object(inputs, "inputs")
         inputs_keys = {_name(key, "input artifact") for key in inputs}
         outputs = Counter(op.produces for op in operations)
-        declared = inputs_keys | outputs.keys()
+        rules = parse_evidence_rules(evidence_rules)
+        requestable = {rule.request for rule in rules if rule.request is not None}
+        declared = inputs_keys | outputs.keys() | requestable
         if len(declared) > MAX_ARTIFACTS:
             raise ValueError(f"a job may declare at most {MAX_ARTIFACTS} artifacts")
         references = set(goals).union(*(op.requires for op in operations))
@@ -157,6 +203,10 @@ class Job:
             raise ValueError("acceptance must map declared artifacts to validator contracts")
         if missing := set(goals) - acceptance.keys():
             raise ValueError(f"final goals require an artifact acceptance contract: {sorted(missing)}")
+        if missing := ({rule.artifact for rule in rules} | requestable) - acceptance.keys():
+            raise ValueError(f"evidence and requested inputs require an artifact acceptance contract: {sorted(missing)}")
+        if missing := {rule.operation for rule in rules if rule.operation is not None} - {op.id for op in operations}:
+            raise ValueError(f"unknown evidence operations: {sorted(missing)}")
         for artifact, contract in acceptance.items():
             _fields(contract, {"validator", "config"}, set(), f"acceptance for {artifact}")
             _name(contract["validator"], "artifact validator")
@@ -167,6 +217,7 @@ class Job:
                 raise ValueError(f"multiple producers for {artifact!r} require an artifact acceptance contract")
         object.__setattr__(self, "goals", tuple(sorted(goals)))
         object.__setattr__(self, "operations", operations)
+        object.__setattr__(self, "evidence_rules", rules)
         object.__setattr__(self, "budget_units", _integer(budget_units, "budget_units", 0, MAX_UNITS))
         object.__setattr__(self, "search_limit", _integer(search_limit, "search_limit", 1, MAX_SEARCH_LIMIT))
         object.__setattr__(self, "_inputs_json", inputs_json)
@@ -184,7 +235,7 @@ class Job:
     @classmethod
     def from_dict(cls, raw: Mapping) -> Job:
         _fields(raw, {"goals", "inputs", "operations", "budget_units"},
-                {"search_limit", "acceptance", "planning_policy"}, "job")
+                {"search_limit", "acceptance", "planning_policy", "evidence_rules"}, "job")
         rows = raw["operations"]
         if not isinstance(rows, (list, tuple)) or len(rows) > MAX_OPERATIONS:
             raise ValueError(f"operations must be an array of at most {MAX_OPERATIONS} items")
@@ -192,7 +243,7 @@ class Job:
             raise ValueError("acceptance must be an object")
         return cls(raw["goals"], raw["inputs"], raw["budget_units"], tuple(Operation.from_dict(row) for row in rows),
                    raw.get("search_limit", DEFAULT_SEARCH_LIMIT), raw.get("acceptance"),
-                   planning_policy=raw.get("planning_policy", "lowest_cost"))
+                   planning_policy=raw.get("planning_policy", "lowest_cost"), evidence_rules=raw.get("evidence_rules", ()))
 
     def to_dict(self) -> dict:
         result = {"goals": list(self.goals), "inputs": self.inputs, "budget_units": self.budget_units,
@@ -201,4 +252,6 @@ class Job:
         # Omitting defaults preserves the canonical hashes of previously stored jobs.
         if self.planning_policy != "lowest_cost":
             result["planning_policy"] = self.planning_policy
+        if self.evidence_rules:
+            result["evidence_rules"] = [rule.to_dict() for rule in self.evidence_rules]
         return result

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from contextlib import nullcontext
 from typing import Any
 
-from .contracts import Job
-from .planner import Plan, plan
+from .contracts import Job, canonical_json
+from .planner import Plan, decide
 from .ports import AdmissionDenied, KnownFailure, Registry, default_registry
 from .store import KernelStore
 
@@ -31,7 +32,7 @@ class Runtime:
 
     def preview(self, job: Job) -> Plan:
         self._check_contract(job)
-        return plan(job, job.inputs.keys(), (), job.budget_units)
+        return decide(job, job.inputs, (), job.budget_units)
 
     def submit(self, run_id: str, job: Job) -> dict:
         self._check_contract(job)
@@ -78,7 +79,7 @@ class Runtime:
         self.registry.check(job)
         by_id = {op.id: op for op in job.operations}
         rules = job.acceptance
-        while snapshot["status"] not in {"complete", "blocked"}:
+        while snapshot["status"] not in {"complete", "blocked", "waiting_for_input"}:
             attempt = snapshot["active_attempt"]
             if attempt is not None:
                 if attempt["phase"] != "returned":
@@ -89,19 +90,40 @@ class Runtime:
                     return self.store.snapshot(run_id)
             else:
                 remaining = job.budget_units - snapshot["spent_units"] - snapshot["held_units"]
-                choice = plan(job, snapshot["artifacts"].keys(), snapshot["excluded"], remaining)
-                if choice.status != "ready":
+                choice = decide(job, snapshot["artifacts"], snapshot["excluded"], remaining)
+                expected = {"expected_excluded": snapshot["excluded"], "expected_hashes": snapshot["artifact_hashes"]}
+                if choice.status == "waiting_for_input":
+                    self._write(self.store.request_input, run_id, choice, **expected)
+                elif choice.status != "ready":
                     status = "complete" if choice.status == "complete" else "blocked"
-                    self._write(self.store.finish, run_id, status, choice.status, expected_excluded=snapshot["excluded"])
+                    self._write(self.store.finish, run_id, status, choice.status,
+                                plan=choice if choice.evidence is not None else None, **expected)
                 else:
                     op = by_id[choice.operations[0]]
-                    attempt_id = self._write(self.store.claim, run_id, op.id,
-                                             expected_excluded=snapshot["excluded"], plan=choice)
+                    attempt_id = self._write(self.store.claim, run_id, op.id, plan=choice, **expected)
                     if attempt_id is not None:
                         inputs = {key: snapshot["artifacts"][key] for key in op.requires}
                         self._dispatch(run_id, op, inputs, attempt_id)
             snapshot = self.store.snapshot(run_id)
         return snapshot
+
+    def provide(self, run_id: str, artifact_name: str, value: Any) -> dict:
+        """Validate a clarification against the frozen job, persist it, and resume."""
+        if not isinstance(artifact_name, str) or not artifact_name:
+            raise ValueError("supply a requested artifact name")
+        snapshot = self.store.snapshot(run_id)
+        job = Job.from_dict(snapshot["job"])
+        self.registry.check(job)
+        answer = json.loads(canonical_json(value))
+        if artifact_name not in snapshot["artifacts"]:
+            if snapshot.get("clarification", {}).get("artifact") != artifact_name:
+                raise ValueError("this artifact was not requested")
+            rule = job.acceptance[artifact_name]
+            if not self.registry.accept(artifact_name, rule, answer):
+                raise ValueError(f"supplied artifact {artifact_name!r} failed its acceptance rule")
+        # The store distinguishes a replay of a previous answer from an unsolicited initial/operation output.
+        self._write(self.store.provide_validated, run_id, artifact_name, answer)
+        return self.resume(run_id)
 
     def reconcile(self, run_id: str, attempt_id: str, receipt: Mapping[str, Any]) -> dict:
         """Apply an operator-confirmed outcome. A returned value still faces normal validation."""
@@ -133,4 +155,5 @@ def public_state(snapshot: Mapping[str, Any]) -> dict:
         "budget_units": snapshot["job"]["budget_units"],
         "active_attempt": ({key: attempt[key] for key in ("id", "op_id", "phase", "cost_units")}
                            if attempt is not None else None),
+        **({"clarification": dict(snapshot["clarification"])} if "clarification" in snapshot else {}),
     }

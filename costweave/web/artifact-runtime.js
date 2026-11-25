@@ -25,15 +25,22 @@ const project = byId("project");
 const runId = byId("run-id");
 const editor = byId("job");
 const message = byId("message");
-const statusNames = {complete: "已完成", blocked: "已停止", active: "运行中", needs_reconciliation: "等待核对"};
+const clarificationForm = byId("clarification-form");
+const clarificationValue = byId("clarification-value");
+let requestedArtifact = null;
+const statusNames = {complete: "已完成", blocked: "已停止", active: "运行中", needs_reconciliation: "等待核对",
+  waiting_for_input: "等待补充资料"};
 const eventNames = {run_created: "创建运行", input_recorded: "记录输入", attempt_claimed: "预留预算",
+  input_requested: "请求补充资料", input_supplied: "资料已验收",
   result_recorded: "已收到结果", attempt_uncertain: "等待核对", run_finished: "运行结束"};
 const errorNames = {session_auth_required: "本地会话已失效，请通过启动时提供的链接重新打开调度台。",
   run_id_conflict: "该运行编号已绑定另一份任务。请查询原记录，或为新任务更换编号。",
+  clarification_conflict: "该项资料已提交，内容与此次不同。请查询记录。",
   run_or_attempt_not_found: "当前项目中没有这个运行编号。",
   persistent_runtime_disabled: "当前服务未开启持久化运行。"};
 const reasonNames = {complete: "目标产物均已通过验收。", over_budget: "剩余预算不足。",
   unreachable: "当前没有可用路线生成所有目标。", search_limit: "已达到规划搜索上限。",
+  evidence_action_rejected: "核验报告指定的操作未通过验收。", evidence_prerequisite_missing: "核验报告指定的操作缺少前置资料。",
   execution_outcome_unknown: "执行结果待核对。", validator_error: "验收器出错，已保留待验收的结果。"};
 let busy = false;
 
@@ -43,6 +50,9 @@ storage.setItem("costweave.artifact.run", runId.value);
 editor.value = JSON.stringify(example, null, 2);
 
 function clearResult() {
+  requestedArtifact = null;
+  clarificationForm.hidden = true;
+  clarificationValue.value = "";
   byId("status").textContent = "待查询";
   for (const field of ["scope", "budget", "reason"]) byId(field).textContent = "";
   byId("outputs").textContent = "暂无产物";
@@ -55,8 +65,20 @@ function showState(state) {
   byId("status").textContent = statusNames[state.status] || state.status;
   byId("scope").textContent = project.value + " / " + state.run_id;
   byId("budget").textContent = `已结算 ${state.spent_units} · 已预留 ${state.held_units} · 总预算 ${state.budget_units} 单位`;
-  byId("reason").textContent = reasonNames[state.reason] || state.reason || "";
+  byId("reason").textContent = state.clarification ? "" : reasonNames[state.reason] || state.reason || "";
   byId("outputs").textContent = Object.keys(state.outputs).length ? JSON.stringify(state.outputs, null, 2) : "暂无产物";
+  const clarification = state.clarification;
+  if (state.status === "waiting_for_input" && clarification) {
+    if (requestedArtifact !== clarification.artifact) clarificationValue.value = "";
+    requestedArtifact = clarification.artifact;
+    byId("clarification-label").textContent = "补充 " + requestedArtifact + "（JSON）";
+    byId("clarification-note").textContent = clarification.reason;
+    clarificationForm.hidden = false;
+  } else {
+    clarificationForm.hidden = true;
+    requestedArtifact = null;
+    clarificationValue.value = "";
+  }
 }
 
 function showEvents(events) {
@@ -111,18 +133,29 @@ async function runAction(action) {
       return;
     }
   }
+  if (action === "provide") {
+    if (!requestedArtifact) return;
+    try {
+      body = JSON.stringify({artifact: requestedArtifact, value: JSON.parse(clarificationValue.value)});
+    } catch (error) {
+      message.textContent = "补充资料的 JSON 无法解析。" + error.message;
+      clarificationValue.focus();
+      return;
+    }
+  }
   const root = "/api/v2/runs";
   const path = root + "/" + encodeURIComponent(runId.value);
-  clearResult();
+  if (action !== "provide") clearResult();
   byId("status").textContent = "请求中";
   busy = true;
-  for (const control of form.elements) control.disabled = true;
+  for (const control of [...form.elements, ...clarificationForm.elements]) control.disabled = true;
   byId("result-panel").setAttribute("aria-busy", "true");
   storage.setItem("costweave.artifact.project", project.value);
   storage.setItem("costweave.artifact.run", runId.value);
   try {
     let state;
     if (action === "submit") state = await request(root, {method: "POST", body, submit: true});
+    else if (action === "provide") state = await request(path + "/provide", {method: "POST", body});
     else if (action === "resume") state = await request(path + "/resume", {method: "POST", body: "{}"});
     else state = await request(path);
     showState(state);
@@ -135,16 +168,17 @@ async function runAction(action) {
       byId("events-note").textContent = "执行记录读取失败。" + error.message;
     }
   } catch (error) {
-    byId("status").textContent = "请求失败";
+    byId("status").textContent = action === "provide" ? "请查询或重新提交资料" : "请求失败";
     message.textContent = error.message;
   } finally {
     byId("result-panel").setAttribute("aria-busy", "false");
-    for (const control of form.elements) control.disabled = false;
+    for (const control of [...form.elements, ...clarificationForm.elements]) control.disabled = false;
     busy = false;
   }
 }
 
 form.addEventListener("submit", event => { event.preventDefault(); runAction("submit"); });
+clarificationForm.addEventListener("submit", event => { event.preventDefault(); runAction("provide"); });
 byId("inspect").addEventListener("click", () => runAction("inspect"));
 byId("resume").addEventListener("click", () => runAction("resume"));
 byId("example").addEventListener("click", () => {

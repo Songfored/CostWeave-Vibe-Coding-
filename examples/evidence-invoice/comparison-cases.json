@@ -1,0 +1,37 @@
+[
+  {
+    "id": "matching_statement", "summary_cents": 2000, "statement_cents": 2000,
+    "statement_origin": "bank_feed", "archive": [1200, 800], "audited_cents": 2000,
+    "budget": 6, "deadline_ms": 50
+  },
+  {
+    "id": "disputed_statement", "summary_cents": 2800, "statement_cents": 2500,
+    "statement_origin": "bank_feed", "archive": [1200, 1300], "audited_cents": 2500,
+    "budget": 6, "deadline_ms": 70
+  },
+  {
+    "id": "same_ocr_source", "summary_cents": 4900, "statement_cents": 4900,
+    "statement_origin": "invoice_ocr", "archive": [3000, 2400], "audited_cents": 5400,
+    "budget": 6, "deadline_ms": 70
+  },
+  {
+    "id": "matching_but_wrong", "summary_cents": 4180, "statement_cents": 4180,
+    "statement_origin": "bank_feed", "archive": [4000, 200], "audited_cents": 4200,
+    "budget": 6, "deadline_ms": 70
+  },
+  {
+    "id": "missing_replied_late", "summary_cents": 8100, "statement_cents": 8000,
+    "statement_origin": "bank_feed", "reply": [3500, 4500], "reply_ms": 90, "audited_cents": 8000,
+    "budget": 6, "deadline_ms": 70
+  },
+  {
+    "id": "missing_unresolved", "summary_cents": 1510, "statement_cents": 1500,
+    "statement_origin": "bank_feed", "audited_cents": 1500,
+    "budget": 6, "deadline_ms": 70
+  },
+  {
+    "id": "budget_exhausted", "summary_cents": 1000, "statement_cents": 1050,
+    "statement_origin": "bank_feed", "archive": [1000, 50], "audited_cents": 1050,
+    "budget": 2, "deadline_ms": 70
+  }
+]

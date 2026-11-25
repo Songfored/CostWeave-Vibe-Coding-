@@ -46,6 +46,12 @@
         <p id="scope"></p>
         <p id="budget"></p>
         <p id="reason"></p>
+        <form id="clarification-form" hidden>
+          <label for="clarification-value" id="clarification-label">补充资料（JSON）</label>
+          <p id="clarification-note"></p>
+          <textarea id="clarification-value" rows="4" required spellcheck="false" aria-describedby="clarification-note"></textarea>
+          <button type="submit" class="secondary-button">提交资料并继续</button>
+        </form>
         <h3>已验收的目标产物</h3>
         <pre id="outputs">暂无产物</pre>
         <h3>执行记录</h3>

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import heapq
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
-from .contracts import Job, Operation
+from .contracts import Job, Operation, canonical_json
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +21,22 @@ class FallbackAssessment:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceDecision:
+    rule_index: int
+    artifact: str
+    field: str
+    artifact_sha256: str | None
+    operation: str | None
+    request: str | None
+    reason: str | None
+    policy_version: int = 1
+    kind: str | None = None
+
+    def to_dict(self) -> dict:
+        return {key: value for key, value in asdict(self).items() if value is not None}
+
+
+@dataclass(frozen=True, slots=True)
 class Plan:
     status: str
     operations: tuple[str, ...] = ()
@@ -26,21 +44,24 @@ class Plan:
     optimal: bool = False
     states_examined: int = 0
     fallback: FallbackAssessment | None = None
+    evidence: EvidenceDecision | None = None
 
     def to_dict(self) -> dict:
         result = {"status": self.status, "operations": list(self.operations), "cost_units": self.cost_units,
                   "optimal": self.optimal, "states_examined": self.states_examined}
         if self.fallback is not None:
             result["fallback"] = asdict(self.fallback)
+        if self.evidence is not None:
+            result["evidence"] = self.evidence.to_dict()
         return result
 
 
-def _relevant(job: Job, available: set[str], excluded: set[str]) -> list[Operation]:
+def _relevant(job: Job, goals: set[str], available: set[str], excluded: set[str]) -> list[Operation]:
     producers = defaultdict(list)
     for op in job.operations:
         if op.id not in excluded:
             producers[op.produces].append(op)
-    pending = list(job.goals)
+    pending = list(goals)
     seen = set(available)
     useful = []
     while pending:
@@ -99,21 +120,71 @@ def _witness(operations: list[Operation], available: set[str], goals: set[str]) 
     return tuple(reversed(path))
 
 
+def _evidence_choice(job: Job, artifacts: Mapping, excluded: set[str], remaining_units: int) -> Plan | None:
+    operations = {op.id: op for op in job.operations}
+    for index, rule in enumerate(job.evidence_rules):
+        op = operations.get(rule.operation)
+        if (op.produces if op is not None else rule.request) in artifacts:
+            continue
+        if rule.acquire and rule.artifact not in artifacts:
+            goal = {rule.artifact}
+            available = set(artifacts)
+            producers = _relevant(job, goal, available, excluded)
+            acquisition = _cheapest_plan(producers, available, goal, remaining_units, job.search_limit)
+            evidence = EvidenceDecision(index, rule.artifact, rule.field, None, None, None, None, kind="acquire")
+            # This plan prices the report only. The terminal path depends on its value.
+            return replace(acquisition, optimal=False, evidence=evidence)
+        report = artifacts.get(rule.artifact)
+        if not isinstance(report, dict) or rule.field not in report:
+            continue
+        value = report[rule.field]
+        if type(value) is not type(rule.equals) or value != rule.equals:
+            continue
+        digest = hashlib.sha256(canonical_json(report).encode("utf-8")).hexdigest()
+        evidence = EvidenceDecision(index, rule.artifact, rule.field, digest, rule.operation, rule.request, rule.reason)
+        if op is None:
+            return Plan("waiting_for_input", evidence=evidence)
+        if op.id in excluded:
+            return Plan("evidence_action_rejected", evidence=evidence)
+        if not set(op.requires) <= artifacts.keys():
+            return Plan("evidence_prerequisite_missing", evidence=evidence)
+        if op.cost_units > remaining_units:
+            return Plan("over_budget", evidence=evidence)
+        # Only this observation-conditioned action is authorized. Later costs depend on its outcome.
+        return Plan("ready", (op.id,), op.cost_units, evidence=evidence)
+    return None
+
+
+def decide(job: Job, artifacts: Mapping[str, Any], excluded: Collection[str], remaining_units: int) -> Plan:
+    """Choose the next action from admitted artifact values and the frozen job rules."""
+    if not isinstance(artifacts, Mapping):
+        raise ValueError("artifacts must map names to accepted JSON values")
+    return plan(job, artifacts, excluded, remaining_units)
+
+
 def plan(job: Job, available: Collection[str], excluded: Collection[str], remaining_units: int) -> Plan:
     """Select the next step from accepted artifacts, settled attempts and the remaining budget."""
     if type(remaining_units) is not int or not 0 <= remaining_units <= job.budget_units:
         raise ValueError("remaining_units must be an integer within the job budget")
     if isinstance(available, (str, bytes)) or isinstance(excluded, (str, bytes)):
         raise ValueError("available and excluded must be collections of names")
+    artifacts = available if isinstance(available, Mapping) else None
+    if job.evidence_rules and artifacts is None:
+        raise ValueError("evidence rules require an artifact mapping with accepted values")
     available = set(available)
     excluded = set(excluded)
     declared = job.inputs.keys() | {op.produces for op in job.operations}
+    declared.update(rule.request for rule in job.evidence_rules if rule.request is not None)
     if available - declared or excluded - {op.id for op in job.operations}:
         raise ValueError("unknown available artifact or excluded operation")
     goals = set(job.goals)
     if goals <= available:
         return Plan("complete", (), 0, True)
-    operations = _relevant(job, available, excluded)
+    if job.evidence_rules:
+        choice = _evidence_choice(job, artifacts, excluded, remaining_units)
+        if choice is not None:
+            return choice
+    operations = _relevant(job, goals, available, excluded)
     cheapest = _cheapest_plan(operations, available, goals, remaining_units, job.search_limit)
     if job.planning_policy != "preserve_fallback" or cheapest.status != "ready":
         return cheapest

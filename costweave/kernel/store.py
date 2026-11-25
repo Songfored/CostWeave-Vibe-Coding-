@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS kernel_events (
     data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS kernel_events_order ON kernel_events(run_id, seq);
+CREATE TABLE IF NOT EXISTS kernel_clarifications (
+    run_id TEXT NOT NULL REFERENCES kernel_runs,
+    artifact TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    supplied_sha256 TEXT REFERENCES kernel_blobs,
+    PRIMARY KEY(run_id, artifact)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS kernel_one_pending_clarification
+    ON kernel_clarifications(run_id) WHERE supplied_sha256 IS NULL;
 COMMIT;
 """
 
@@ -75,7 +84,7 @@ _NOT_SUPPLIED = object()
 
 
 class RunConflictError(ValueError):
-    """This run ID already names a different immutable job."""
+    """An immutable job or supplied input conflicts with an earlier submission."""
 
 
 def _charge(attempt, actual):
@@ -123,6 +132,11 @@ def _operation(job, op_id):
 
 def _available(db, run_id):
     return dict(db.execute("SELECT name,sha256 FROM kernel_artifacts WHERE run_id=? ORDER BY name", (run_id,)))
+
+
+def _pending_clarification(db, run_id):
+    return db.execute("SELECT artifact,reason FROM kernel_clarifications "
+                      "WHERE run_id=? AND supplied_sha256 IS NULL", (run_id,)).fetchone()
 
 
 class KernelStore:
@@ -208,7 +222,8 @@ class KernelStore:
                                   actual_units=pending["returned_units"])
                     if pending["receipt_id"] is not None:
                         active["receipt_id"] = pending["receipt_id"]
-            return {
+            waiting = _pending_clarification(db, run_id)
+            state = {
                 "run_id": run_id, "job": json.loads(run["job"]), "job_sha256": run["job_sha256"],
                 "status": "needs_reconciliation" if pending else run["status"],
                 "reason": (pending["uncertain_reason"] or "attempt_in_flight") if pending else run["reason"],
@@ -219,8 +234,11 @@ class KernelStore:
                 "held_units": pending["cost_units"] if pending else 0,
                 "active_attempt": active,
             }
+            if waiting:
+                state.update(status="waiting_for_input", reason=waiting["reason"], clarification=dict(waiting))
+            return state
 
-    def claim(self, run_id: str, op_id: str, *, expected_excluded=None, plan=None) -> str | None:
+    def claim(self, run_id: str, op_id: str, *, expected_excluded=None, expected_hashes=None, plan=None) -> str | None:
         with self._transaction(write=True) as db:
             run = _run(db, run_id)
             job = json.loads(run["job"])
@@ -228,7 +246,9 @@ class KernelStore:
             busy = db.execute("SELECT 1 FROM kernel_attempts WHERE run_id=? AND (op_id=? OR accepted IS NULL)",
                               (run_id, op_id)).fetchone()
             available = _available(db, run_id)
-            if run["status"] != "active" or busy or op["produces"] in available:
+            if run["status"] != "active" or busy or op["produces"] in available or _pending_clarification(db, run_id):
+                return None
+            if expected_hashes is not None and available != expected_hashes:
                 return None
             if expected_excluded is not None:
                 settled = db.execute("SELECT op_id FROM kernel_attempts WHERE run_id=? AND accepted IS NOT NULL",
@@ -250,6 +270,53 @@ class KernelStore:
                    input_hashes={key: available[key] for key in op["requires"]}, remaining_units=remaining,
                    **({"plan": plan.to_dict()} if plan is not None else {}))
             return attempt_id
+
+    def request_input(self, run_id: str, plan, *, expected_excluded, expected_hashes) -> bool:
+        """Publish a wait only if the decision's entire observed state still holds."""
+        evidence = plan.evidence
+        if plan.status != "waiting_for_input" or evidence is None or evidence.request is None:
+            raise ValueError("expected a clarification decision")
+        with self._transaction(write=True) as db:
+            run = _run(db, run_id)
+            available = _available(db, run_id)
+            if (run["status"] != "active" or available != expected_hashes or
+                    evidence.request in available or _pending_clarification(db, run_id)):
+                return False
+            attempts = db.execute("SELECT op_id,accepted FROM kernel_attempts WHERE run_id=?", (run_id,)).fetchall()
+            if any(a["accepted"] is None for a in attempts) or {a["op_id"] for a in attempts} != set(expected_excluded):
+                return False
+            job = json.loads(run["job"])
+            rules = job.get("evidence_rules", [])
+            if (not 0 <= evidence.rule_index < len(rules) or
+                    rules[evidence.rule_index].get("request") != evidence.request or
+                    rules[evidence.rule_index].get("reason") != evidence.reason or
+                    evidence.request not in job["acceptance"] or available.get(evidence.artifact) != evidence.artifact_sha256):
+                raise ValueError("clarification does not match frozen evidence and input contract")
+            db.execute("INSERT INTO kernel_clarifications(run_id,artifact,reason) VALUES (?,?,?)",
+                       (run_id, evidence.request, evidence.reason))
+            _event(db, run_id, "input_requested", artifact=evidence.request, reason=evidence.reason, plan=plan.to_dict())
+            return True
+
+    def provide_validated(self, run_id: str, artifact: str, value) -> None:
+        """Commit a host-validated answer to its open request, or acknowledge an exact replay."""
+        encoded = canonical_json(value)
+        digest = _digest(encoded)
+        with self._transaction(write=True) as db:
+            run = _run(db, run_id)
+            row = db.execute("SELECT supplied_sha256 FROM kernel_clarifications WHERE run_id=? AND artifact=?",
+                             (run_id, artifact)).fetchone()
+            if row is None:
+                raise ValueError("this artifact was not requested")
+            if row["supplied_sha256"] is not None:
+                if row["supplied_sha256"] != digest:
+                    raise RunConflictError("the requested input already has a different value")
+                return
+            if run["status"] != "active":
+                raise ValueError("the run is no longer waiting for input")
+            _artifact(db, run_id, artifact, encoded, digest)
+            db.execute("UPDATE kernel_clarifications SET supplied_sha256=? WHERE run_id=? AND artifact=?",
+                       (digest, run_id, artifact))
+            _event(db, run_id, "input_supplied", artifact=artifact, sha256=digest)
 
     def mark_uncertain(self, run_id: str, attempt_id: str, reason: str) -> None:
         if not isinstance(reason, str) or not reason:
@@ -318,13 +385,16 @@ class KernelStore:
                 db.execute("UPDATE kernel_runs SET status='blocked',reason=? WHERE run_id=?", (stop_reason, run_id))
                 _event(db, run_id, "run_finished", status="blocked", reason=stop_reason)
 
-    def finish(self, run_id: str, status: str, reason: str, *, expected_excluded=None) -> bool:
+    def finish(self, run_id: str, status: str, reason: str, *, expected_excluded=None,
+               expected_hashes=None, plan=None) -> bool:
         if status not in {"complete", "blocked"} or not isinstance(reason, str):
             raise ValueError("invalid terminal state")
         with self._transaction(write=True) as db:
             run = _run(db, run_id)
             if run["status"] != "active":
                 return run["status"] == status and run["reason"] == reason
+            if _pending_clarification(db, run_id):
+                return False
             rows = db.execute("SELECT op_id,accepted FROM kernel_attempts WHERE run_id=?", (run_id,)).fetchall()
             if any(r["accepted"] is None for r in rows):
                 return False
@@ -333,11 +403,15 @@ class KernelStore:
             if status == "blocked" and expected_excluded is None:
                 raise ValueError("blocked decisions require the snapshot's excluded operation IDs")
             job = json.loads(run["job"])
-            satisfied = set(job["goals"]) <= _available(db, run_id).keys()
+            available = _available(db, run_id)
+            if expected_hashes is not None and available != expected_hashes:
+                return False
+            satisfied = set(job["goals"]) <= available.keys()
             if (status == "complete") != satisfied:
                 return False
             db.execute("UPDATE kernel_runs SET status=?,reason=? WHERE run_id=?", (status, reason, run_id))
-            _event(db, run_id, "run_finished", status=status, reason=reason)
+            _event(db, run_id, "run_finished", status=status, reason=reason,
+                   **({"plan": plan.to_dict()} if plan is not None else {}))
             return True
 
     def events(self, run_id: str) -> list[dict]:

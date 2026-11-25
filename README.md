@@ -12,6 +12,14 @@ python -m costweave events first-handoff
 
 示例先读工单摘要。摘要缺少工时，系统随后从工单中分别读取负责人和工时，合并为通过验收的交接单。重复提交同一编号可以查看同一次运行。该示例在本地执行，计费单位是测试报价。[新架构、接口和基线对照](docs/ARTIFACT_RUNTIME.md)
 
+发票补件示例会暂停并指出缺少的资料。第二条命令验收明细后继续同一次运行。第三条命令在独立核定金额的七个本地案例上比较固定查原件、最低报价和按证据选路三种策略。
+
+```sh
+python -m costweave run examples/evidence-invoice/job.json --id invoice-17
+python -m costweave provide invoice-17 line_items examples/evidence-invoice/line-items.json
+python -m scripts.compare_invoice_evidence
+```
+
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/)

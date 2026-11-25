@@ -73,12 +73,30 @@ class KernelHttpTests(unittest.TestCase):
         self.assertEqual((409, "run_id_conflict"), (status, conflict["error"]))
         self.assertEqual((200, state), self.request("GET", path))
 
+    def test_provide_only_accepts_the_requested_artifact_in_its_own_project(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "evidence-invoice"
+        key = "invoice-clarification"
+        path = f"{RUNS}/{key}/provide"
+        payload = {"artifact": "line_items", "value": json.loads((example / "line-items.json").read_text("utf-8"))}
+        status, state = self.request("POST", RUNS, json.loads((example / "job.json").read_text("utf-8")), key=key)
+        self.assertEqual((200, "waiting_for_input", "line_items"),
+                         (status, state["status"], state["clarification"]["artifact"]))
+        self.assertEqual(404, self.request("POST", path, payload, project="other-project")[0])
+        for bad in ({}, {"artifact": "line_items"}, {**payload, "value": {}}, {**payload, "artifact": "handoff"}):
+            self.assertEqual(400, self.request("POST", path, bad)[0])
+        status, final = self.request("POST", path, payload)
+        self.assertEqual((200, "complete", 1), (status, final["status"], final["spent_units"]))
+        self.assertEqual((200, final), self.request("POST", path, payload))
+        changed = {**payload, "value": {**payload["value"], "items": []}}
+        self.assertEqual((409, {"error": "clarification_conflict"}), self.request("POST", path, changed))
+
     def test_local_session_and_residency_apply_to_every_member_route(self):
         key = "local-scope"
         path = f"{RUNS}/{key}"
         requests = [
             ("POST", RUNS, job()), ("GET", path, None), ("GET", path + "/events", None),
             ("POST", path + "/resume", {}), ("POST", path + "/reconcile", {}),
+            ("POST", path + "/provide", {"artifact": "line_items", "value": {}}),
         ]
         for method, url, body in requests:
             with self.subTest(method=method, path=url):

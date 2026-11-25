@@ -57,6 +57,10 @@ def main(argv=None):
     reconcile.add_argument("run_id")
     reconcile.add_argument("attempt_id")
     reconcile.add_argument("receipt")
+    provide = commands.add_parser("provide", help="validate a requested input and continue the waiting run")
+    provide.add_argument("run_id")
+    provide.add_argument("artifact", help="requested artifact name")
+    provide.add_argument("value_file", help="JSON file containing the requested value")
     args = parser.parse_args(argv)
     if args.command == "serve":
         from ..server import main as serve
@@ -79,13 +83,20 @@ def main(argv=None):
                     output = public_state(runtime.submit(args.id or uuid4().hex, job))
             elif args.command == "resume":
                 output = public_state(runtime.resume(args.run_id))
+            elif args.command == "provide":
+                output = public_state(runtime.provide(args.run_id, args.artifact, _read(args.value_file)))
             else:
                 output = public_state(runtime.reconcile(args.run_id, args.attempt_id, _read(args.receipt)))
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
         state = output.get("status") if isinstance(output, dict) else None
         if state == "needs_reconciliation":
             return 3
-        return 2 if state in {"blocked", "unreachable", "over_budget", "search_limit"} else 0
+        if state == "waiting_for_input":
+            return 4
+        if state in {"blocked", "unreachable", "over_budget", "search_limit",
+                     "evidence_action_rejected", "evidence_prerequisite_missing"}:
+            return 2
+        return 0
     except (OSError, ValueError, TypeError, KeyError) as error:
         print(str(error), file=sys.stderr)
         return 1
