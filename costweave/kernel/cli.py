@@ -61,7 +61,28 @@ def main(argv=None):
     provide.add_argument("run_id")
     provide.add_argument("artifact", help="requested artifact name")
     provide.add_argument("value_file", help="JSON file containing the requested value")
+    receipt = commands.add_parser("receipt-total", help="extract a proposed IDR total from a local receipt image")
+    receipt.add_argument("image", type=Path)
+    receipt.add_argument("--tessdata", required=True, type=Path, help="local directory containing eng.traineddata")
+    receipt.add_argument("--route", choices=("direct", "check", "original"), default="check")
     args = parser.parse_args(argv)
+    if args.command == "receipt-total":
+        from ..receipt_image_reader import read_total
+        try:
+            from PIL import Image
+            from tesserocr import PyTessBaseAPI
+        except ImportError:
+            print("Install costweave[receipt-ocr] to use receipt-total.", file=sys.stderr)
+            return 1
+        try:
+            with Image.open(args.image) as image, PyTessBaseAPI(path=str(args.tessdata.resolve()), lang="eng") as engine:
+                total = read_total(image, args.route, engine)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps({"status": "answered" if total is not None else "abstained", "route": args.route,
+                          "currency": "IDR", "amount_hundredths": total}, allow_nan=False))
+        return 0 if total is not None else 2
     if args.command == "serve":
         from ..server import main as serve
         serve(["--host", args.host, "--port", str(args.port)])
