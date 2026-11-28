@@ -16,6 +16,8 @@ python -m costweave events first-handoff
 
 同一份 SQLite 账本支持按证据选路、补件、BSAO 多步规划与并行执行。作业可以用 `planning_policy: "bsao"` 选择经济规划器，用 `max_parallel` 控制同时预留的尝试数。已验收的证据决定哪些操作可以执行，预算、风险和绝对截止时间约束实际派发与交付。外部付费执行器默认关闭。
 
+在 192 张此前未参与开发的小票上，新读取器配 BSAO 按时答对 58 张，误交付 3 张；校准选出的固定核验路线按时答对 115 张，误交付 27 张。两者都未达到预设门槛，BSAO 继续显式选用。[独立评测、算法消融与逐单结果](examples/unified-verification/README.md)
+
 ```sh
 python -m costweave beliefs status
 python -m scripts.run_paired_benchmark --seed 20261124 --bootstrap-samples 500
