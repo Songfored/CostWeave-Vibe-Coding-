@@ -395,14 +395,27 @@ def clipped_dr_empirical_bernstein(
     *,
     clip_max: float = 10.0,
     delta: float = 0.05,
+    score_bounds: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
-    """Compute Clipped Doubly-Robust mean utility gain and Empirical Bernstein LCB."""
+    """Bound the clipped-score mean on independent evaluation observations.
+
+    The protocol must supply a range covering both clipped and unclipped
+    population scores, including unobserved losses. Without it, only
+    descriptive statistics are available. Promotion rejects a sample with
+    any clipped weight. On the remaining samples the reported bound equals
+    the empirical bound computed on the original, unclipped scores.
+    """
     n = len(observations)
-    if n == 0:
-        return {"n": 0, "mean": 0.0, "lcb": -math.inf, "ucb": math.inf, "std": 0.0}
     if not 0.0 < delta < 1.0:
         raise ValueError("delta must be in (0.0, 1.0)")
+    if not math.isfinite(clip_max) or clip_max <= 0:
+        raise ValueError("clip_max must be finite and positive")
+    if score_bounds is not None:
+        low, high = score_bounds
+        if not math.isfinite(low) or not math.isfinite(high) or not math.isfinite(high - low) or high <= low:
+            raise ValueError("score_bounds must declare a finite increasing range")
     psis: list[float] = []
+    clipped = 0
     for obs in observations:
         y = float(obs["utility"])
         q_cand = float(obs.get("q_cand", 0.0))
@@ -411,26 +424,32 @@ def clipped_dr_empirical_bernstein(
             raw_w = float(obs["ips_weight"])
         else:
             chosen = bool(obs.get("action_matches", True))
-            log_p = max(1e-4, float(obs.get("propensity", 1.0)))
+            log_p = float(obs.get("propensity", 1.0))
             target_p = float(obs.get("target_propensity", 1.0 if chosen else 0.0))
+            if not 0.0 < log_p <= 1.0 or not 0.0 <= target_p <= 1.0:
+                raise ValueError("invalid logged or target propensity")
             raw_w = (target_p / log_p) if chosen else 0.0
-        w = min(float(clip_max), max(0.0, raw_w))
-        psis.append((q_cand - v_base) + w * (y - q_cand))
+        if not math.isfinite(raw_w) or raw_w < 0.0:
+            raise ValueError("importance weights must be finite and nonnegative")
+        clipped += int(raw_w > clip_max)
+        correction = y - q_cand
+        raw_score = (q_cand - v_base) + raw_w * correction
+        score = (q_cand - v_base) + min(clip_max, raw_w) * correction
+        if (not math.isfinite(raw_score) or not math.isfinite(score)
+                or (score_bounds is not None and not low <= min(raw_score, score) <= max(raw_score, score) <= high)):
+            raise ValueError("non-finite score or observation outside declared score_bounds")
+        psis.append(score)
 
-    mean_val = math.fsum(psis) / n
-    if n == 1:
-        return {"n": 1, "mean": mean_val, "lcb": -math.inf, "ucb": math.inf, "std": 0.0}
-    var_val = math.fsum((x - mean_val) ** 2 for x in psis) / (n - 1)
-    span = max(1e-9, max(psis) - min(psis))
+    mean_val = math.fsum(psis) / n if n else None
+    var_val = math.fsum((x - mean_val) ** 2 for x in psis) / (n - 1) if n > 1 else 0.0
+    stats = {"n": n, "mean": mean_val, "std": math.sqrt(var_val), "lcb": None, "ucb": None,
+             "score_bounds": list(score_bounds) if score_bounds is not None else None, "clipped_count": clipped}
+    if n < 2 or score_bounds is None:
+        return stats
+    span = high - low
     t = math.log(2.0 / delta)
     margin = math.sqrt((2.0 * var_val * t) / n) + (7.0 * span * t) / (3.0 * (n - 1))
-    return {
-        "n": n,
-        "mean": mean_val,
-        "lcb": mean_val - margin,
-        "ucb": mean_val + margin,
-        "std": math.sqrt(var_val),
-    }
+    return {**stats, "lcb": max(low, mean_val - margin), "ucb": min(high, mean_val + margin)}
 
 
 _BELIEF_SCHEMA = """
@@ -569,9 +588,12 @@ class BeliefStore:
         delta: float = 0.05,
         min_samples: int = 20,
         version_id: str | None = None,
+        score_bounds: tuple[float, float] | None = None,
     ) -> dict[str, Any]:
-        stats = clipped_dr_empirical_bernstein(observations, clip_max=clip_max, delta=delta)
-        promoted = bool(stats["n"] >= min_samples and math.isfinite(stats["lcb"]) and stats["lcb"] > 0.0)
+        stats = clipped_dr_empirical_bernstein(observations, clip_max=clip_max, delta=delta,
+                                               score_bounds=score_bounds)
+        promoted = (stats["n"] >= min_samples and stats["lcb"] is not None
+                    and stats["lcb"] > 0.0 and stats["clipped_count"] == 0)
         new_vid: str | None = None
         if promoted:
             new_vid = version_id or f"v-{uuid4().hex[:12]}"

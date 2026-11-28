@@ -47,10 +47,16 @@
         <p id="budget"></p>
         <p id="risk"></p>
         <p id="reason"></p>
+        <form id="clarification-form" hidden>
+          <label for="clarification-value" id="clarification-label">补充资料（JSON）</label>
+          <p id="clarification-note"></p>
+          <textarea id="clarification-value" rows="4" required spellcheck="false" aria-describedby="clarification-note"></textarea>
+          <button type="submit" class="secondary-button">提交资料并继续</button>
+        </form>
         <h3>已验收的目标产物</h3>
         <pre id="outputs">暂无产物</pre>
-        <h3>人工核对（Reconcile）</h3>
-        <form id="reconcile-form" class="reconcile-box">
+        <h3 id="reconcile-title" hidden>人工核对</h3>
+        <form id="reconcile-form" class="reconcile-box" hidden>
           <div class="identity-fields">
             <label>尝试编号<input id="rec-attempt" type="text" placeholder="attempt_id" autocomplete="off"></label>
             <label>核对结果

@@ -20,7 +20,7 @@ flowchart LR
 
 规划状态是已经可用的产物集合。一个操作需要的输入必须全部齐备；生产同一产物的多个操作构成候选路径。反向裁剪保留可能影响目标的操作，正向闭包给出可达性与一条可执行路径。接下来的有界搜索使用“每个缺失目标的最低直接生产报价之和”作下界。共享前置产物只需生产一次。
 
-`optimal=true` 表示在当前报价、当前可用产物以及所选操作均成功的条件下，完整计划费用最低。搜索额度用尽时，若已有预算内可行路径，返回该路径并标记 `optimal=false`；否则返回 `search_limit`。调用方可以区分搜索额度耗尽、预算不足和目标不可达。实际执行一次只提交下一项操作，拿到真实验收结果和计费回执后再规划。每个运行目前只有一个在途操作。v1 的并发调度与 P95 预测仍用于原工作流。
+对按报价搜索的策略，`optimal=true` 表示在当前输入与操作成功的假设下，完整计划报价最低。搜索额度耗尽后，已有可行解标记为 `optimal=false`，没有可行解时返回 `search_limit`。默认 `max_parallel=1`。启用 BSAO 并提高此上限可在同一账本并行预留，每次实际回执返回后重新规划。
 
 ### 为备用路线保留预算
 
@@ -29,6 +29,38 @@ flowchart LR
 当最低报价方案的下一步是收费试探时，内核会从当前已验收产物出发，只用备用操作，再算一次完成全部剩余目标的费用。如果能证明备用流程现在付得起，而试探失败并按完整报价扣费后就付不起，内核立即选择备用流程。试错后仍有足够预算、目前就付不起备用流程，或搜索额度内证据不足时，沿用原选择。每次搜索各自遵守 `search_limit`。后续决策使用最新的费用结算和验收结果。
 
 预览结果的 `fallback` 和派发事件的 `plan.fallback` 记录被评估的操作、失败后余额、找到的备用路径报价和选择原因。选择备用流程时，`decision` 为 `take_fallback`，`optimal` 为 `false`。可以通过 `python -m costweave events RUN_ID` 查看对应决策。
+
+### 按核验结果选择操作
+
+作业和目录请求可以通过有序的 `evidence_rules` 使用已验收报告中的字段。下面的规则要求先取得核验报告；金额一致时使用摘要，发现冲突时读取原始凭据。
+
+```json
+[
+  {"artifact":"check","field":"finding","equals":"agree","acquire":true,"operation":"post-summary"},
+  {"artifact":"check","field":"finding","equals":"disagree","operation":"open-archive"}
+]
+```
+
+规则按顺序处理，已具备目标产物的规则会跳过。`acquire: true` 会为缺失的报告搜索预算内的生产路径，每次发出一步，事件中的报价覆盖取得报告的路径。报告通过验收后，策略按字段的 JSON 标量类型和值匹配；匹配的操作只授权下一步及其报价。匹配操作已失败、缺少前置产物或预算不足时，运行会停止并记录原因。没有适用的规则时继续使用作业的常规规划策略。报告验收器决定哪些字段值有效。派发记录包含规则序号、策略版本和触发报告的摘要，取证阶段记录待取得的报告名。
+
+将操作换成 `"request":"line_items","reason":"请提供发票原始明细"` 即可请求补件。状态为 `waiting_for_input` 时，CLI 返回退出码 4，输出中给出所需产物与原因。通过 `costweave provide RUN_ID ARTIFACT VALUE.json`、产物运行台的补件表单，或向 `POST /api/v2/runs/{id}/provide` 发送 `{"artifact":"line_items","value":...}` 可以继续。资料须通过作业预先声明的验收器。等待期间可关闭进程，重复提交已验收的相同资料沿用原记录，已提交的资料内容发生变化会返回冲突。
+
+操作的 `when` 可用 `{"artifact":"check","path":["items",0,"valid"],"equals":true}` 声明前提。路径读取已验收的 JSON，区分布尔、整数和浮点数。在途操作的输出名称可以用于预测后续依赖，授权须等到实际报告通过验收。强制规则优先于经济选路。
+
+### 使用已校准的路线
+
+单一终产物也支持 `verification_policy`。作业指定一个已验收的观察产物及用于分组的字符串字段，并放入 `fit_verification_model` 返回的冻结模型。下面的 Python 片段展示作业的可选字段，其中 `frozen` 是真实小票实验的 `frozen.json` 内容。宿主为每条路线注册能独立完成终产物的操作，操作 ID 与模型中的路线名一致。
+
+```python
+verification_policy = {
+    "artifact": "signal", "field": "stratum", "model": frozen["model"],
+    "route_ms": {"direct": 400, "check": 850, "original": 1800},
+    "deadline_ms": 1200, "min_on_time_correct": 0.90,
+    "fallback_operation": None,
+}
+```
+
+首次提交时固定到期时间。决策从实际剩余时长、每条路线的硬报价和历史配对观测出发，记录每条路线被排除或选中的原因。样本不足时可以显式指定固定后备操作。证据已经显示质量下界不够时，直接停止。超时返回的结果仍结算本次尝试，终产物不会发布。外部调用结果未知时，任务仍保留预算等待对账。校准模型适用于一次完整路线的选择；路线返回后被拒绝时结束本次决定，失败子集需要另行校准。有关校准样本、时限和质量下界的定义，见[真实小票实验](../examples/verification-value/README.md)。
 
 ### 执行、验收与恢复
 
@@ -88,7 +120,7 @@ python -m costweave reconcile RUN_ID ATTEMPT_ID receipt.json
 ### 2. 期权价值并行波次调度与流式止损
 
 - **AND 并行与 OR 对冲**：`select_parallel_wave` 与 `Runtime` 通过 `ThreadPoolExecutor + wait(FIRST_COMPLETED)` 在 `max_parallel > 1` 时计算并行期权价值与临界截止期对冲，并严格遵循乐观续传原则，避免在兄弟任务运行中误触发高价兜底调用。
-- **零锁流式网关与精确对账**：`costweave/kernel/transports.py`（`SafeHTTPStreamTransport`、`OpenAICompatibleTransport`）及 `register_streaming_model_route`（默认 `live_enabled=False`）结合 `CancellationToken`，在兄弟分支失败或硬超时时 `< 50 ms` 中止 SSE 流并基于 `Decimal(..., ROUND_CEILING)` 按已消费与推理 Token 精确结算 `micro-USD`。SQLite 账本原生支持多槽位并发预留、可重入项目闸门及 `KernelStore.backup_and_verify()` 逻辑哈希校验。
+- **取消与对账**。流式适配器接受取消信号，实际中止时间取决于执行器和传输。首次提交固定绝对截止时间；两种契约都给出时限时取较早者。到期时停止新派发，已在途且恰在到期时结算的合格结果仍可发布。迟到回执结算费用，未知结果保留原预留，直到调用方按尝试编号对账。`KernelStore.backup_and_verify()` 校验备份的逻辑摘要。
 
 ### 3. 分层验证器 (`V0`/`V1`) 与 Split Conformal Risk Control (CRC)
 
@@ -102,11 +134,11 @@ python -m costweave reconcile RUN_ID ATTEMPT_ID receipt.json
   2. 上下文切片并行 Map-Reduce（`slice -> map -> collect -> reduce`，突破小窗模型整包长度限制）；
   3. 契约锁定子任务并行扇出与合成（`sub_* -> synth_*`）；
   4. 经 Split-CRC 校准的跨家族双弱模型并行共识（无 `V0` 时）。
-  支持命令行直接编译：`python -m costweave plan/run TASK.json --compile-models MODELS.json`。
-- **因子化 Laplace 2PL-IRT LCB 与 Clipped-DR 安全晋升**（`costweave/kernel/beliefs.py`）：16 维零额外调用特征提取器驱动 `LaplaceIRTModel`（置信下界估计各路由通过率）与 `OutputLengthForecaster`（对数线性输出长度与 P95 预留预测），并通过 `BeliefStore` 执行 Clipped Doubly-Robust + Empirical Bernstein 下置信界检验及漂移 Clopper-Pearson 自动回滚：
+  在 CLI 的 `plan` 或 `run` 子命令加 `--compile-models MODELS.json` 即可选用任务编译器。模型声明的执行器需在当前注册表中可用。可再加 `--belief-model MODEL.json`，编译器用该文件估计通过率和报价，并把所用模型的 SHA-256 写入作业与审计。
+- **学习与晋升**。`LaplaceIRTModel` 估计通过率，`OutputLengthForecaster` 估计输出长度。晋升需要事先给出覆盖原始及裁剪收益分数的上下界；样本范围和线上漂移都会影响证据。下例的数值仅适用于得分已知落在这个区间的任务。
   ```sh
   python -m costweave beliefs status
-  python -m costweave beliefs promote candidate.json observations.json
+  python -m costweave beliefs promote candidate.json observations.json --score-bounds -1 1
   python -m costweave beliefs rollback
   ```
 
@@ -118,14 +150,16 @@ python -m costweave reconcile RUN_ID ATTEMPT_ID receipt.json
 python -m scripts.run_paired_benchmark --seed 20261124 --bootstrap-samples 500
 ```
 
-在默认离线配对测试集（500 次 Bootstrap，`alpha=0.05`）上的对照结果如下（单位：micro-USD，`1 unit = \$1e-6`）：
+模拟账单、模拟延迟与结构验收分别记录。语义正确性依赖独立真值，外部轨迹缺项计为未知。集成前旧评分器把四项实际合计 700 的输入按 400 判为正确；它计算的节省比例不能证明同等质量下的真实成本收益。
 
-| 执行策略 | 总任务完成率 | 真实正确率 | 静默错误率 | 平均成本单位 | P95 延迟 (ms) | 预算越界次数 |
-|---|---:|---:|---:|---:|---:|---:|
-| `always_frontier` | 100.0% | 98.33% | 1.67% | 22,641.88 | 2133 | 0 |
-| `single_model_router` | 77.5% | 75.83% | 1.67% | 18,859.17 | 2133 | 0 |
-| `naive_cascade` | 100.0% | 98.33% | 1.67% | 20,299.19 | 2133 | 0 |
-| `v2_deterministic` | 100.0% | 98.33% | 1.67% | 3,696.80 | 2919 | 0 |
-| `costweave_next` | 100.0% | 99.17% | 0.83% | 3,959.45 | 1750 | 0 |
+### 发票核验与补件对照
 
-与 `always_frontier` 配对比较：`costweave_next` 平均降低成本 **82.51%**（95% CI `[77.52%, 86.08%]`），真实正确率持平略优（`+0.83%`，CI `[0.00%, +2.50%]`），长文档 Map-Reduce 关键路径 P95 延迟从 `2133 ms` 降至 `886 ms`。真实线上供应商质量与账单收益仍须使用 `--traces FILE.jsonl` 注入实际日志进行配对验证。
+运行 `python -m scripts.compare_invoice_evidence`。七个合成案例涵盖金额相符、来源相同、账单冲突、两份来源不同的资料同时出错、原件缺失和预算不足。三种策略共享操作、验收条件、输入和每单预算。独立核定的金额仅用于交付后评分。时间是预设的串行动作时长与补件等待时长，费用按所有尝试的整数测试报价累计，包括未交付的任务。
+
+| 策略 | 总费用 | 按时且正确交付 | 错误交付 |
+|---|---:|---:|---:|
+| 固定查原件 | 17 | 3/7 | 0 |
+| 最低报价 | 7 | 1/7 | 6 |
+| 按证据选路 | 18 | 3/7 | 1 |
+
+这批任务上，固定查原件花费更低、误交付更少。两份来源不同的资料一致但都出错时，按证据选路放行了错误摘要。固定和证据策略各发起两次补件，一次收到有效但逾期的回复，一次始终未获回复。

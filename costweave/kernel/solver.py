@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -90,9 +90,13 @@ def select_parallel_wave(
     elapsed_ms: int = 0,
 ) -> ParallelWavePlan:
     """Select an option-value-optimal parallel dispatch wave around primary_op_id."""
+    if any(op._guard is not None for op in job.operations) and not isinstance(available, Mapping):
+        raise ValueError("conditional operations require accepted values")
     ops_by_id = {op.id: op for op in job.operations}
     primary = ops_by_id[primary_op_id]
-    if job.max_parallel <= 1 or job.planning_policy != "bsao":
+    if primary.guard_state(available) != "satisfied":
+        return ParallelWavePlan(primary.id, (), "guard_unavailable")
+    if job.evidence_rules or job.verification_policy or job.max_parallel <= 1 or job.planning_policy != "bsao":
         return ParallelWavePlan(primary.id, (primary.id,), "serial_policy")
 
     avail = set(available)
@@ -118,7 +122,8 @@ def select_parallel_wave(
         and op.id not in exh
         and op.produces not in avail
         and op.produces not in produced
-        and avail.issuperset(op.requires)
+        and op.guard_state(available) == "satisfied"
+        and avail.issuperset(op.dependencies)
         and op.cost_units <= rem_budget
         and op.false_pass_risk <= rem_risk + 1e-12
         and (job.deadline_ms is None or elapsed_ms + op.latency_p50_ms <= job.deadline_ms)
@@ -156,7 +161,8 @@ def select_parallel_wave(
             if op.id != primary.id
             and op.id not in exh
             and op.produces == primary.produces
-            and avail.issuperset(op.requires)
+            and op.guard_state(available) == "satisfied"
+            and avail.issuperset(op.dependencies)
             and op.cost_units <= rem_budget
             and op.false_pass_risk <= rem_risk + 1e-12
             and elapsed_ms + op.latency_p95_ms <= job.deadline_ms
@@ -198,7 +204,7 @@ def relevant_operations(
         visited.add(artifact)
         for op in producers.get(artifact, ()):
             backward.append(op)
-            for req in op.requires:
+            for req in op.dependencies:
                 if req not in available:
                     pending.append(req)
 
@@ -206,7 +212,7 @@ def relevant_operations(
     while True:
         added = False
         for op in backward:
-            if op.produces not in reachable and reachable.issuperset(op.requires):
+            if op.produces not in reachable and reachable.issuperset(op.dependencies):
                 reachable.add(op.produces)
                 added = True
         if not added:
@@ -214,7 +220,7 @@ def relevant_operations(
 
     if not goals.issubset(reachable):
         return ()
-    return tuple(sorted((op for op in backward if reachable.issuperset(op.requires)), key=lambda op: op.id))
+    return tuple(sorted((op for op in backward if reachable.issuperset(op.dependencies)), key=lambda op: op.id))
 
 
 class BSAOPlanner:
@@ -224,7 +230,9 @@ class BSAOPlanner:
         self.job = job
         self.ops_by_id = {op.id: op for op in job.operations}
         self.goals = frozenset(job.goals)
-        self.risk_bins = risk_bins if job.max_risk_alpha < 1.0 else 0
+        if type(risk_bins) is not int or risk_bins < 1:
+            raise ValueError("risk_bins must be a positive integer")
+        self.risk_bins = risk_bins if any(op.false_pass_risk for op in job.operations) else 0
         if job.failure_penalty_units is not None:
             self.terminal_failure_penalty = float(job.failure_penalty_units)
         else:
@@ -235,10 +243,10 @@ class BSAOPlanner:
         self._ops = job.operations
         self._n_ops = len(self._ops)
         self._op_index = {op.id: i for i, op in enumerate(self._ops)}
-        art_names = sorted({a for op in self._ops for a in (*op.requires, op.produces)} | self.goals)
+        art_names = sorted({a for op in self._ops for a in (*op.dependencies, op.produces)} | self.goals)
         self._art_bit = {name: 1 << i for i, name in enumerate(art_names)}
         self._goal_mask = sum(self._art_bit[g] for g in self.goals)
-        self._op_req = [sum(self._art_bit[r] for r in op.requires) for op in self._ops]
+        self._op_req = [sum(self._art_bit[r] for r in op.dependencies) for op in self._ops]
         self._op_prod = [self._art_bit[op.produces] for op in self._ops]
         self._op_step_cost = [self._step_cost(op) for op in self._ops]
         self._op_priority = [
@@ -251,7 +259,7 @@ class BSAOPlanner:
         for i, op in enumerate(self._ops):
             self._prod_ops_of_art[self._op_prod[i]].append(i)
 
-        self._memo: dict[tuple[int, int, int, int], tuple[float, int | None]] = {}
+        self._memo: dict[tuple[int, int, int, int, int], tuple[float, int | None]] = {}
         self._states_examined = 0
         self._capped = False
 
@@ -416,7 +424,7 @@ class BSAOPlanner:
             total_rel_cost += self._ops[bit.bit_length() - 1].cost_units
         key_budget = budget if budget < total_rel_cost else total_rel_cost
 
-        state_key = (canonical_avail, rel_mask, key_budget, r_bin)
+        state_key = (canonical_avail, rel_mask, key_budget, r_bin, elapsed_ms if self.job.deadline_ms is not None else 0)
         if not is_root:
             cached = self._memo.get(state_key)
             if cached is not None:
@@ -617,15 +625,17 @@ class BSAOPlanner:
             _, next_idx = self._solve(curr_avail, curr_exh, rem_budget, curr_r_bin, curr_elapsed)
         return tuple(seq), total_quote
 
-    def _risk_feasible(self, rel_mask: int, avail_mask: int, r_bin: int) -> bool:
+    def _risk_feasible(self, rel_mask: int, avail_mask: int, r_bin: int) -> bool | None:
         memo: dict[tuple[int, int], bool] = {}
 
-        def dfs(a_mask: int, rb: int) -> bool:
+        def dfs(a_mask: int, rb: int) -> bool | None:
             if (self._goal_mask & ~a_mask) == 0:
                 return True
             key = (a_mask, rb)
             if key in memo:
                 return memo[key]
+            if len(memo) >= self.job.search_limit:
+                return None
             memo[key] = False
             eff_r = self._effective_risk(rb)
             rem = rel_mask
@@ -636,7 +646,10 @@ class BSAOPlanner:
                 if not (self._op_prod[i] & a_mask) and (self._op_req[i] & ~a_mask) == 0:
                     fpr = self._ops[i].false_pass_risk
                     if fpr <= eff_r + 1e-12:
-                        if dfs(a_mask | self._op_prod[i], self._quantize_risk(eff_r - fpr)):
+                        feasible = dfs(a_mask | self._op_prod[i], self._quantize_risk(eff_r - fpr))
+                        if feasible is None:
+                            return None
+                        if feasible:
                             memo[key] = True
                             return True
             return False
@@ -651,12 +664,27 @@ class BSAOPlanner:
         *,
         risk_remaining: float | None = None,
         elapsed_ms: int = 0,
+        anticipated: Collection[str] = (),
     ) -> BSAOResult:
-        avail_mask = sum(self._art_bit[name] for name in available if name in self._art_bit)
+        guarded = [op for op in self._ops if op._guard is not None]
+        pending = False
+        if guarded:
+            if not isinstance(available, Mapping):
+                raise ValueError("conditional operations require accepted values")
+            excluded = set(excluded)
+            for op in guarded:
+                state = op.guard_state(available)
+                if state == "falsified":
+                    excluded.add(op.id)
+                elif state == "pending" and op.id not in excluded:
+                    pending = True
+        names = set(available) | set(anticipated)
+        avail_mask = sum(self._art_bit[name] for name in names if name in self._art_bit)
         exh_mask = sum(1 << self._op_index[op_id] for op_id in excluded if op_id in self._op_index)
 
         if (self._goal_mask & ~avail_mask) == 0:
-            return BSAOResult(status="complete", operations=(), cost_units=0, optimal=True, states_examined=0)
+            status = "complete" if self.goals.issubset(available) else "awaiting_receipt"
+            return BSAOResult(status=status, operations=(), cost_units=0, optimal=status == "complete", states_examined=0)
 
         risk_val = self.job.max_risk_alpha if risk_remaining is None else max(0.0, float(risk_remaining))
         r_bin = self._quantize_risk(risk_val)
@@ -668,6 +696,10 @@ class BSAOPlanner:
                 expected_loss=self.terminal_failure_penalty,
             )
 
+        # A non-aligned risk bin rounds capacity down and may exclude feasible competitors.
+        scale = self.risk_bins / self.job.max_risk_alpha if self.job.max_risk_alpha else 0
+        approximate_risk = any(not math.isclose(value * scale, round(value * scale), abs_tol=1e-9)
+                               for value in (risk_val, *(op.false_pass_risk for op in self._ops)))
         self._memo.clear()
         self._states_examined = 0
         self._capped = False
@@ -676,6 +708,8 @@ class BSAOPlanner:
         audit = self._build_audit(avail_mask, exh_mask, remaining_units, r_bin, elapsed_ms, best_idx, best_loss)
 
         if best_idx is not None:
+            if anticipated and self._ops[best_idx].guard_state(available) != "satisfied":
+                return BSAOResult(status="awaiting_receipt", optimal=False, states_examined=self._states_examined)
             ops_seq, total_quote = self._trace_pass_sequence(
                 best_idx, avail_mask, exh_mask, remaining_units, r_bin, elapsed_ms,
             )
@@ -687,7 +721,7 @@ class BSAOPlanner:
                 status="ready",
                 operations=ops_seq,
                 cost_units=total_quote,
-                optimal=not self._capped,
+                optimal=not pending and not approximate_risk and not self._capped,
                 states_examined=self._states_examined,
                 expected_loss=best_loss,
                 audit=audit,
@@ -700,7 +734,7 @@ class BSAOPlanner:
         if self.job.failure_penalty_units is not None and has_feasible_path:
             return BSAOResult(
                 status="abstain",
-                optimal=not self._capped,
+                optimal=not pending and not approximate_risk and not self._capped,
                 states_examined=self._states_examined,
                 expected_loss=best_loss,
                 audit=audit,
@@ -708,14 +742,20 @@ class BSAOPlanner:
 
         if self._capped:
             status = "search_limit"
-        elif not self._risk_feasible(rel_mask, avail_mask, r_bin):
-            status = "risk_exceeded"
         else:
-            status = "over_budget"
+            risk_feasible = self._risk_feasible(rel_mask, avail_mask, r_bin)
+            if risk_feasible is None:
+                status = "search_limit"
+            elif not risk_feasible:
+                status = "risk_exceeded"
+            elif audit.alternatives and all(alt.reason == "deadline_exceeded" for alt in audit.alternatives):
+                status = "deadline_unreachable"
+            else:
+                status = "over_budget"
 
         return BSAOResult(
             status=status,
-            optimal=not self._capped if status != "search_limit" else False,
+            optimal=not pending and not approximate_risk and not self._capped if status != "search_limit" else False,
             states_examined=self._states_examined,
             expected_loss=self.terminal_failure_penalty,
             audit=audit,

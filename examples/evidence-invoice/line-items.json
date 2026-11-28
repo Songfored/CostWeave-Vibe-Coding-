@@ -1,0 +1,7 @@
+{
+  "source_document": "INV-17-original",
+  "items": [
+    {"quantity": 3, "unit_price_cents": 400},
+    {"quantity": 2, "unit_price_cents": 500}
+  ]
+}

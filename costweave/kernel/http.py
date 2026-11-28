@@ -47,6 +47,11 @@ def _build_audit_view(snapshot: dict, events: list[dict]) -> dict:
         "remaining_units": snapshot["job"]["budget_units"] - snapshot["spent_units"] - snapshot["held_units"],
         "max_risk_alpha": snapshot["job"].get("max_risk_alpha", 1.0),
         "risk_spent": snapshot.get("risk_spent", 0.0),
+        "risk_held": snapshot.get("risk_held", 0.0),
+        "deadline_at_ms": snapshot.get("deadline_at_ms"),
+        "clarification": snapshot.get("clarification"),
+        "belief_model_sha256": snapshot["job"].get("belief_model_sha256"),
+        "policy_events": [e for e in events if e["type"] in {"input_requested", "input_supplied", "run_finished"}],
         "active_attempts": snapshot.get("active_attempts", []),
         "decisions": decisions,
         "settlements": settled,
@@ -70,13 +75,17 @@ def dispatch(method, path, body, key, kernel, project_id):
         if not parts:
             result = runtime.submit(key, Job.from_dict(body))
         elif method == "GET" and len(parts) == 1:
-            result = store.snapshot(parts[0])
+            result = runtime.inspect(parts[0])
         elif method == "GET" and len(parts) == 2 and parts[1] == "events":
             return HTTPStatus.OK, {"events": store.events(parts[0])}
         elif method == "GET" and len(parts) == 2 and parts[1] == "audit":
-            return HTTPStatus.OK, _build_audit_view(store.snapshot(parts[0]), store.events(parts[0]))
+            return HTTPStatus.OK, _build_audit_view(runtime.inspect(parts[0]), store.events(parts[0]))
         elif method == "POST" and len(parts) == 2 and parts[1] == "resume" and body == {}:
             result = runtime.resume(parts[0])
+        elif method == "POST" and len(parts) == 2 and parts[1] == "provide":
+            if not isinstance(body, dict) or set(body) != {"artifact", "value"} or not isinstance(body["artifact"], str):
+                raise ValueError("supply the requested artifact name and its value")
+            result = runtime.provide(parts[0], body["artifact"], body["value"])
         elif method == "POST" and len(parts) == 2 and parts[1] == "reconcile":
             if not isinstance(body, dict) or set(body) != {"attempt_id", "receipt"} or not isinstance(body["attempt_id"], str):
                 raise ValueError("supply an attempt_id and a receipt")
@@ -85,6 +94,8 @@ def dispatch(method, path, body, key, kernel, project_id):
             return HTTPStatus.NOT_FOUND, {"error": "resource_not_found"}
         return HTTPStatus.OK, public_state(result)
     except RunConflictError:
+        if len(parts) == 2 and parts[1] == "provide":
+            return HTTPStatus.CONFLICT, {"error": "clarification_conflict"}
         return HTTPStatus.CONFLICT, {"error": "run_id_conflict"}
     except KeyError:
         return HTTPStatus.NOT_FOUND, {"error": "run_or_attempt_not_found"}

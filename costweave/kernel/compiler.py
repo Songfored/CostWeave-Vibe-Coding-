@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_CEILING
+import hashlib
 import math
 import re
 from typing import Any
@@ -161,6 +162,11 @@ class TaskSpec:
     consensus_mode: str = "exact_canonical"
     consensus_threshold: float = 1.0
     search_limit: int = 10_000
+    evidence_rules: tuple[dict, ...] = ()
+    acceptance: dict[str, dict] = field(default_factory=dict)
+    operation_guards: dict[str, dict] = field(default_factory=dict)
+    planning_policy: str | None = None
+    verification_policy: dict | None = None
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> TaskSpec:
@@ -192,6 +198,11 @@ class TaskSpec:
             consensus_mode=str(raw.get("consensus_mode", "exact_canonical")),
             consensus_threshold=float(raw.get("consensus_threshold", 1.0)),
             search_limit=int(raw.get("search_limit", 10_000)),
+            evidence_rules=tuple(raw.get("evidence_rules", ())),
+            acceptance=dict(raw.get("acceptance", {})),
+            operation_guards=dict(raw.get("operation_guards", {})),
+            planning_policy=raw.get("planning_policy"),
+            verification_policy=raw.get("verification_policy"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -215,6 +226,11 @@ class TaskSpec:
             "consensus_mode": self.consensus_mode,
             "consensus_threshold": self.consensus_threshold,
             "search_limit": self.search_limit,
+            **({"evidence_rules": list(self.evidence_rules)} if self.evidence_rules else {}),
+            **({"acceptance": self.acceptance} if self.acceptance else {}),
+            **({"operation_guards": self.operation_guards} if self.operation_guards else {}),
+            **({"planning_policy": self.planning_policy} if self.planning_policy is not None else {}),
+            **({"verification_policy": self.verification_policy} if self.verification_policy is not None else {}),
         }
 
 
@@ -367,6 +383,8 @@ def compile_task_hypergraph(
 
     def add_op(op: Operation) -> None:
         if op.id not in seen_op_ids:
+            if op.id in task.operation_guards:
+                op = Operation.from_dict({**op.to_dict(), "when": task.operation_guards[op.id]})
             seen_op_ids.add(op.id)
             operations.append(op)
 
@@ -830,6 +848,15 @@ def compile_task_hypergraph(
         if count > 1 and art not in acceptance:
             acceptance[art] = {"validator": "present", "config": {}}
 
+    if unused := task.operation_guards.keys() - seen_op_ids:
+        raise ValueError(f"guards refer to unknown compiled operations: {sorted(unused)}")
+    for artifact, contract in task.acceptance.items():
+        if artifact in acceptance and acceptance[artifact] != contract:
+            raise ValueError(f"conflicting compiled acceptance contract for {artifact!r}")
+        acceptance[artifact] = contract
+    model_digest = None
+    if beliefs is not None and hasattr(beliefs, "to_dict"):
+        model_digest = hashlib.sha256(canonical_json(beliefs.to_dict()).encode("utf-8")).hexdigest()
     return Job(
         goals=(task.goal_name,),
         inputs=task.inputs,
@@ -837,7 +864,11 @@ def compile_task_hypergraph(
         operations=operations,
         search_limit=task.search_limit,
         acceptance=acceptance,
-        planning_policy="bsao",
+        planning_policy=(task.planning_policy if task.planning_policy is not None
+                         else "lowest_cost" if task.verification_policy is not None else "bsao"),
+        evidence_rules=task.evidence_rules,
+        verification_policy=task.verification_policy,
+        belief_model_sha256=model_digest,
         max_risk_alpha=task.max_risk_alpha,
         failure_penalty_units=task.failure_penalty_units,
         corruption_penalty_units=task.corruption_penalty_units,

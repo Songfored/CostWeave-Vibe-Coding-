@@ -1,0 +1,2505 @@
+{
+  "metadata": {
+    "source": "naver-clova-ix/cord-v2",
+    "revision": "7f0115a4b758a71d6473b8d085751692da2fef98",
+    "source_sha256": "51c65f1788faff392abe2a0b55b023eb23e9be551c509138eaa3a832514224e7",
+    "ocr": "tesseract 5.5.4",
+    "eng_sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+    "elapsed_ms": "measured warm single-process OCR and extraction, excluding shared decode",
+    "cost_units": "illustrative quotes, no provider charges",
+    "excluded": [
+      {
+        "id": "cord-holdout-009",
+        "reason": "no unambiguous single annotated total"
+      },
+      {
+        "id": "cord-holdout-037",
+        "reason": "no unambiguous single annotated total"
+      },
+      {
+        "id": "cord-holdout-039",
+        "reason": "no unambiguous single annotated total"
+      },
+      {
+        "id": "cord-holdout-057",
+        "reason": "no unambiguous single annotated total"
+      },
+      {
+        "id": "cord-holdout-076",
+        "reason": "no unambiguous single annotated total"
+      }
+    ]
+  },
+  "records": [
+    {
+      "id": "cord-holdout-000",
+      "group": "8612d04b70f430f3aef07fbbd5200e382dcc4152b344cc2eff9f735f05a257c8",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6000000,
+          "cost_units": 1,
+          "elapsed_ms": 47
+        },
+        "check": {
+          "answer": 6000000,
+          "cost_units": 2,
+          "elapsed_ms": 59
+        },
+        "original": {
+          "answer": 6000000,
+          "cost_units": 4,
+          "elapsed_ms": 96
+        }
+      },
+      "truth": 6000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-001",
+      "group": "5852cbe48df03646524e717e987eb3d0ac329a52fd192070b5fda1222a053789",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3100000,
+          "cost_units": 1,
+          "elapsed_ms": 33
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 50
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 89
+        }
+      },
+      "truth": 9100000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-002",
+      "group": "571ac6af26e75de8c06747a8c536c778f19a4562879090813571eddc74603d34",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2800000,
+          "cost_units": 1,
+          "elapsed_ms": 48
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 72
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 154
+        }
+      },
+      "truth": 2800000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-003",
+      "group": "8f73f0c4803ea8815040a50e3389d4f3fa15e8c28cb6d50ea9854f6f6c22bd63",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1100000,
+          "cost_units": 1,
+          "elapsed_ms": 49
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 60
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 134
+        }
+      },
+      "truth": 1100000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-004",
+      "group": "8f3eee7068c96e86cdb2e4b5c53085cb5e1439462edd55c373548cb1962801ad",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 39
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 32
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 71
+        }
+      },
+      "truth": 17460000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-005",
+      "group": "0b63b666b54ea615d1d05733ee2c6fc24f20e1a6c77b333872fa80fff28b2c48",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3100000,
+          "cost_units": 1,
+          "elapsed_ms": 34
+        },
+        "check": {
+          "answer": 3100000,
+          "cost_units": 2,
+          "elapsed_ms": 112
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 226
+        }
+      },
+      "truth": 3100000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-006",
+      "group": "1c091eb7436b3e5a813eb6492c0350ef4eb14e3fdad78d42da35df669c757292",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4600,
+          "cost_units": 1,
+          "elapsed_ms": 50
+        },
+        "check": {
+          "answer": 4600,
+          "cost_units": 2,
+          "elapsed_ms": 101
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 199
+        }
+      },
+      "truth": 4600000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-007",
+      "group": "810d3545f4105b19757c4b8b35934a477cde8cd1875302d9092315d2f960ef93",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 28
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 42
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 54
+        }
+      },
+      "truth": 11100000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-008",
+      "group": "58716693a6c0733358e66e64d7064a5a845424280bb55f9b5fa137b1af8c92fe",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 5000000,
+          "cost_units": 1,
+          "elapsed_ms": 26
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 61
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 87
+        }
+      },
+      "truth": 5000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-010",
+      "group": "2a5d18c199bdbb75010a54430429cf694b35bdca8bf560d1d0db1fbb090dedb8",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1700000,
+          "cost_units": 1,
+          "elapsed_ms": 91
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 108
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 179
+        }
+      },
+      "truth": 1700000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-011",
+      "group": "d92479ab212713e7a65e56aacc5e68c0713597476608cbc394d997971043010b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 62
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 42
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 95
+        }
+      },
+      "truth": 23000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-012",
+      "group": "b5f8a3a9a5431b8e38a8e5a16011d6a5a457f7ae4c4ef31da77e589c0b1ad882",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 185400,
+          "cost_units": 1,
+          "elapsed_ms": 46
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 45
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 65
+        }
+      },
+      "truth": 12000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-013",
+      "group": "ca4bf89562b3f55c2c91968ca221a629e48386744a5322596d9c7345648ada13",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 94
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 92
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 149
+        }
+      },
+      "truth": 5130000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-014",
+      "group": "9dcf1f9f86c909b762767cb07d1cc0db30773d556154ce42e0210f65270ee39d",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 28143500,
+          "cost_units": 1,
+          "elapsed_ms": 129
+        },
+        "check": {
+          "answer": 28143500,
+          "cost_units": 2,
+          "elapsed_ms": 221
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 517
+        }
+      },
+      "truth": 28143500,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-015",
+      "group": "f1cd67a7d67d04ba8d5b685553b1b5addbf2039d5954ab08c92139c0ad88a796",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 56
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 58
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 84
+        }
+      },
+      "truth": 6300000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-016",
+      "group": "eef326565b3945217a69afd84c893afdffd03a2f487943661c2423e6d6ec0d7d",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 7000000,
+          "cost_units": 1,
+          "elapsed_ms": 110
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 126
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 314
+        }
+      },
+      "truth": 7000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-017",
+      "group": "4322ab5ec4f0b1365e08af0c31288e65e8cbd2c8eb5241adfb329244acbbb30b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 9100000,
+          "cost_units": 1,
+          "elapsed_ms": 45
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 106
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 270
+        }
+      },
+      "truth": 9100000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-018",
+      "group": "88c35bbd2e2a634e89f2c5bfd30f7b530b1082c1f4e6e7cb3cb913f0b46c3868",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 54
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 21
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 19
+        }
+      },
+      "truth": 15600000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-019",
+      "group": "b076921ed83bdf900cab539f219cac8dddfaa4a99c13f7d66d7303d9f8c4c8c7",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 11
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 31
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 55
+        }
+      },
+      "truth": 17600000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-020",
+      "group": "6213439292eb4c2ad7e04afab6bb5bc7d1d5925d18dc392c36f233d394ca7c19",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 69
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 67
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 150
+        }
+      },
+      "truth": 37785900,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-021",
+      "group": "f4ec833b7b577f39211046770ae40e89f24c2486fe425898a06849384dea5c0f",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3500000,
+          "cost_units": 1,
+          "elapsed_ms": 129
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 161
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 257
+        }
+      },
+      "truth": 3800000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-022",
+      "group": "707ccec39b2fc656f51ecc7294078228e727c10a9b6fbf417be86e7c58d70bb2",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4000,
+          "cost_units": 1,
+          "elapsed_ms": 68
+        },
+        "check": {
+          "answer": 4000,
+          "cost_units": 2,
+          "elapsed_ms": 113
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 152
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-023",
+      "group": "fd95d923b0bbed4f81238a7932b1088b4f12335689d333d455704404577c4490",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6300800,
+          "cost_units": 1,
+          "elapsed_ms": 43
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 67
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 166
+        }
+      },
+      "truth": 6300000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-024",
+      "group": "57989ab2c73a37b1c80d1774a07ed3e8adfbc1145566d3f7efb683c1bfe48824",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 195
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 100
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 299
+        }
+      },
+      "truth": 11800000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-025",
+      "group": "abad751ddbbe3188195a9f502110df589cd39ae49bdf394596bab6f69ff8d81c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1600000,
+          "cost_units": 1,
+          "elapsed_ms": 99
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 55
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 225
+        }
+      },
+      "truth": 4300000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-026",
+      "group": "ca18f6b8a3b43f3d5b916d382fe2f8e482e318c023884dca8dca3ecc1ab5d562",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 41
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 57
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 125
+        }
+      },
+      "truth": 13800000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-027",
+      "group": "d7d49831952ad7b7b20b67fc306b73542ad8cf34c32f0e1e6cf99a0c81bc2cdd",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6160000,
+          "cost_units": 1,
+          "elapsed_ms": 114
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 58
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 192
+        }
+      },
+      "truth": 6160000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-028",
+      "group": "d94cc999dbef6b8384afd158cf4757b4df2bd8fadfc8ba4f077b618dc9c32dc0",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 42619500,
+          "cost_units": 1,
+          "elapsed_ms": 116
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 120
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 297
+        }
+      },
+      "truth": 42619500,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-029",
+      "group": "1f065c268473d727282005e57441c55c3249afe0da54f3bc08823d0cbe730610",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2818200,
+          "cost_units": 1,
+          "elapsed_ms": 126
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 137
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 322
+        }
+      },
+      "truth": 14590000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-030",
+      "group": "52879816c28ebc3a7bc777c31685fb71f36bc4d1f7d7dc9c0b743fc5aced84de",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 35
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 74
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 81
+        }
+      },
+      "truth": 3150000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-031",
+      "group": "0052502fe9b8b69cb503076cce7b866101b6047ddbf9074660fb49954f90882c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 11388600,
+          "cost_units": 1,
+          "elapsed_ms": 56
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 130
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 263
+        }
+      },
+      "truth": 11388600,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-032",
+      "group": "1ff069117e26f1742907192475affdfb5b997e12dc6a1209156d1d10c1c9b94e",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 7800000,
+          "cost_units": 1,
+          "elapsed_ms": 45
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 81
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 263
+        }
+      },
+      "truth": 2400000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-033",
+      "group": "c0561fcfa9cd1aea727ae12b63aaadf6e9d721e1bc9510686b53f8622e42a1d5",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6700000,
+          "cost_units": 1,
+          "elapsed_ms": 100
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 62
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 191
+        }
+      },
+      "truth": 14812700,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-034",
+      "group": "09ad2a1a4d2275e69ba57b605ca2139679523303595f313f28a86566931a0b8b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 10000,
+          "cost_units": 1,
+          "elapsed_ms": 37
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 14
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 65
+        }
+      },
+      "truth": 9350000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-035",
+      "group": "453a4ad5aadf63b2a7efdfa0915d45fd72c426254ab8f7c84d5621d56445794c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 500,
+          "cost_units": 1,
+          "elapsed_ms": 117
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 131
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 325
+        }
+      },
+      "truth": 5400000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-036",
+      "group": "d01a1be5ce3dac70b0ddddb246a17c32c077360cb00eee25b42a4dac7be13a8d",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4000000,
+          "cost_units": 1,
+          "elapsed_ms": 151
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 102
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 520
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-038",
+      "group": "b7afc72ae79e1c0b23b46c83ae89031bb08ce5aec5e532e7a6f74b9511dc7fda",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 33
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 113
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 295
+        }
+      },
+      "truth": 66432900,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-040",
+      "group": "58a6ddce5023e3ce90f9b2fd094ff9db3c31a89f9524bd57374f86610227a7f5",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 5400000,
+          "cost_units": 1,
+          "elapsed_ms": 97
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 13
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 107
+        }
+      },
+      "truth": 6800000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-041",
+      "group": "994b983a7f51670ca67b35bbaf9a11c8852abf1711651448d4ce39f8f8119d6f",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 36500000,
+          "cost_units": 1,
+          "elapsed_ms": 93
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 143
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 275
+        }
+      },
+      "truth": 36500000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-042",
+      "group": "6918a74b515e404d304d33266638698b9054d531eef63689c5ab5f754ce8c94a",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 34
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 116
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 202
+        }
+      },
+      "truth": 1650000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-043",
+      "group": "8866ed24092f986e451e7a1bc7caac6c3deff6014376a08d445b25597311bb9c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 32
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 120
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 282
+        }
+      },
+      "truth": 16500000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-044",
+      "group": "a5063e010cce24d1b1b91592706533c9741f44391c016b7f4c06f8552328f437",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4000000,
+          "cost_units": 1,
+          "elapsed_ms": 53
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 47
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 165
+        }
+      },
+      "truth": 3000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-045",
+      "group": "67503d672ef23dc9805f78218172feece7f6138716651bf2a5cb3100cec5fe54",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 0,
+          "cost_units": 1,
+          "elapsed_ms": 70
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 110
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 202
+        }
+      },
+      "truth": 8800000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-046",
+      "group": "1e237ed0ae2f24fe952a86558cf1742c67527de3d2b249e0a2a13452017fcb2e",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4000000,
+          "cost_units": 1,
+          "elapsed_ms": 79
+        },
+        "check": {
+          "answer": 4000000,
+          "cost_units": 2,
+          "elapsed_ms": 86
+        },
+        "original": {
+          "answer": 4000000,
+          "cost_units": 4,
+          "elapsed_ms": 227
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-047",
+      "group": "568bd64dc2b183936b66699327edb7f74878d6a6fed434f920945f55a1015c9b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6300000,
+          "cost_units": 1,
+          "elapsed_ms": 142
+        },
+        "check": {
+          "answer": 6300000,
+          "cost_units": 2,
+          "elapsed_ms": 240
+        },
+        "original": {
+          "answer": 6300000,
+          "cost_units": 4,
+          "elapsed_ms": 409
+        }
+      },
+      "truth": 6300000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-048",
+      "group": "d686ae743789cf4c8366f064c078527f814e50b7447d85442829aef9f3943708",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2500000,
+          "cost_units": 1,
+          "elapsed_ms": 70
+        },
+        "check": {
+          "answer": 2500000,
+          "cost_units": 2,
+          "elapsed_ms": 72
+        },
+        "original": {
+          "answer": 2500000,
+          "cost_units": 4,
+          "elapsed_ms": 182
+        }
+      },
+      "truth": 2500000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-049",
+      "group": "586d99b4bbdaed4f0aa9f9514eaa1bb0d306d270490eed8ddace08e6cdf804ac",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 15
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 38
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 65
+        }
+      },
+      "truth": 2300000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-050",
+      "group": "2fbca7b3f73887475bb8c178eac690ff7af83ee90cac3d6e2a2e983d4aa38e85",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1900,
+          "cost_units": 1,
+          "elapsed_ms": 161
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 267
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 443
+        }
+      },
+      "truth": 1950000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-051",
+      "group": "d7bb9ae6973048a5fccafd2559315523040d6450e6bf678c42c42f58508b9d88",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 33400000,
+          "cost_units": 1,
+          "elapsed_ms": 49
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 186
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 276
+        }
+      },
+      "truth": 33400000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-052",
+      "group": "37e9b779d3316249de7c622d77a46abf9ddc684f2cf55cd33bcecc311ee1cef7",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 6000000,
+          "cost_units": 1,
+          "elapsed_ms": 95
+        },
+        "check": {
+          "answer": 4000000,
+          "cost_units": 2,
+          "elapsed_ms": 157
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 252
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-053",
+      "group": "def32b0764325a94ef34f733308bbc477d15bda95928eec41bcf541fef346c5d",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 12358500,
+          "cost_units": 1,
+          "elapsed_ms": 98
+        },
+        "check": {
+          "answer": 400,
+          "cost_units": 2,
+          "elapsed_ms": 227
+        },
+        "original": {
+          "answer": 400,
+          "cost_units": 4,
+          "elapsed_ms": 446
+        }
+      },
+      "truth": 12358500,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-054",
+      "group": "d29880f5c28ce8e8ab6ba2783231ecf216a71a3c8d61245183f66299b739065d",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1000000,
+          "cost_units": 1,
+          "elapsed_ms": 97
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 117
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 321
+        }
+      },
+      "truth": 1000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-055",
+      "group": "07ae62e2d56b156014acc0f4e0b701b8d0890b36b4a7a934852429418f743d7b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3200000,
+          "cost_units": 1,
+          "elapsed_ms": 40
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 63
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 229
+        }
+      },
+      "truth": 5400000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-056",
+      "group": "bd0f59b52e491495518284f614d567f839b31c27c6067e53c79557cd1cf8c387",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 100100,
+          "cost_units": 1,
+          "elapsed_ms": 138
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 149
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 417
+        }
+      },
+      "truth": 899900,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-058",
+      "group": "0f6a25eb66f3aac732d270cb3bfc6e89c4d435eccd9a343d380b1c7799253886",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 20
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 86
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 237
+        }
+      },
+      "truth": 6050000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-059",
+      "group": "e0dde2c7e46f02fedae4671b4908b84f097f7b047b6d50bee9beb6f59e06f088",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2100,
+          "cost_units": 1,
+          "elapsed_ms": 307
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 243
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 1112
+        }
+      },
+      "truth": 68050000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-060",
+      "group": "69bc755f567870a719b4e87df673d01c9cb29c9d2e12c9e7b060f5aea49538de",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2625000,
+          "cost_units": 1,
+          "elapsed_ms": 140
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 135
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 298
+        }
+      },
+      "truth": 2625000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-061",
+      "group": "d353b8f5a91a1fb031bbde6b91b2143b7282067cd0f8569000b901de79487bf6",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 300,
+          "cost_units": 1,
+          "elapsed_ms": 129
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 153
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 292
+        }
+      },
+      "truth": 2450000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-062",
+      "group": "bd0c6740660e5ca298761938570aed67136866eee672d92ca8e77a11d632ec36",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 0,
+          "cost_units": 1,
+          "elapsed_ms": 53
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 59
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 149
+        }
+      },
+      "truth": 4800000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-063",
+      "group": "dd39eb958a1042cd9fc81690c37c70d0cc3c913ab1fe59fd4b59cb93cd915f64",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3800000,
+          "cost_units": 1,
+          "elapsed_ms": 74
+        },
+        "check": {
+          "answer": 5700000,
+          "cost_units": 2,
+          "elapsed_ms": 90
+        },
+        "original": {
+          "answer": 5700000,
+          "cost_units": 4,
+          "elapsed_ms": 213
+        }
+      },
+      "truth": 5700000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-064",
+      "group": "ab257a9dfc56f9c33a30274351a42cfc82700f81ff1b80aef07e511b15570cc0",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 37
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 75
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 158
+        }
+      },
+      "truth": 1600000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-065",
+      "group": "dda62a3fee5393ff52b18d3ea0dedd847ffcc711ae2543f7d38b9a51b70a1698",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1300000,
+          "cost_units": 1,
+          "elapsed_ms": 130
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 78
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 263
+        }
+      },
+      "truth": 1300000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-066",
+      "group": "c1107b942305c7f4399c346b734905e6cfeab64bcfa9fce2f35780f23ee8e586",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 756400,
+          "cost_units": 1,
+          "elapsed_ms": 60
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 94
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 169
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-067",
+      "group": "973f21ee745adfd47d11fdcc1574afa54612f6f57dfbcda09c58aa32c1d5225a",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 30
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 17
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 47
+        }
+      },
+      "truth": 950000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-068",
+      "group": "e7f54a6d84378dfc718d38432883e0673d30b46ff3ca59ba32ba1b47e4c762b0",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 58
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 31
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 68
+        }
+      },
+      "truth": 2000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-069",
+      "group": "c9a3e92bfd1cfd408bee1695517066e5cbd4bb100d43a10fd1cb4462c30e5fb1",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 7400000,
+          "cost_units": 1,
+          "elapsed_ms": 70
+        },
+        "check": {
+          "answer": 7400000,
+          "cost_units": 2,
+          "elapsed_ms": 161
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 437
+        }
+      },
+      "truth": 7400000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-070",
+      "group": "ca0698c4e0e39499e2b5f2ac1ecac60498fc7554a03f5f298d2eeace5af34fe2",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 156593800,
+          "cost_units": 1,
+          "elapsed_ms": 197
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 290
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 577
+        }
+      },
+      "truth": 156593800,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-071",
+      "group": "2c73d02e1528bd76ecdfeae8e3e56fa2eaee5997f0473be80a56738e59350dff",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 20020000,
+          "cost_units": 1,
+          "elapsed_ms": 95
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 57
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 118
+        }
+      },
+      "truth": 19800000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-072",
+      "group": "0000fb66d5cf4154d84d87f00c363cbdb62f805418aedbaca6e6fbc7cb8c32e8",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 128
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 53
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 234
+        }
+      },
+      "truth": 1750000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-073",
+      "group": "f7d3da827f59c0623be946b217e9f551c7fb792cabb11b06241595bfad37faf0",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2200000,
+          "cost_units": 1,
+          "elapsed_ms": 84
+        },
+        "check": {
+          "answer": 2200000,
+          "cost_units": 2,
+          "elapsed_ms": 130
+        },
+        "original": {
+          "answer": 2200000,
+          "cost_units": 4,
+          "elapsed_ms": 232
+        }
+      },
+      "truth": 2200000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-074",
+      "group": "06f9f2830f735ba3395ceeae8c4069cbc8542b3f7f828293f5c43522077389cb",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 83026400,
+          "cost_units": 1,
+          "elapsed_ms": 177
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 203
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 618
+        }
+      },
+      "truth": 33026400,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-075",
+      "group": "30005de028db6cf9f6bee01d7dcfbf07360186636f840c511ba40659b4b83184",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 40
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 20
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 53
+        }
+      },
+      "truth": 28200000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-077",
+      "group": "88b51b28d0f0f0ac44a3562cd32c5e7fc197f759249bc24b83734fea0ae5fbe4",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1700000,
+          "cost_units": 1,
+          "elapsed_ms": 83
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 138
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 278
+        }
+      },
+      "truth": 1700000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-078",
+      "group": "5c3cce99134902f5a5c39900bc96856ca711d85debc1d1804095660e5c13581f",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 105
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 115
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 552
+        }
+      },
+      "truth": 3000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-079",
+      "group": "027f8ee65ccc34bad7908f1b5624b5128014e3a799499053fbf0d7f95fdfae16",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2200000,
+          "cost_units": 1,
+          "elapsed_ms": 76
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 51
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 135
+        }
+      },
+      "truth": 2200000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-080",
+      "group": "e37ed26e77e90f45a0ad33dcb9844c61808ad75e1f4f161debaeb1c45822c3f8",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2500000,
+          "cost_units": 1,
+          "elapsed_ms": 55
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 27
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 49
+        }
+      },
+      "truth": 2500000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-081",
+      "group": "1a4f42860f78a058e3df460125ed3904e1e918ac5914414b7c19455b6e94d4fa",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 3000000,
+          "cost_units": 1,
+          "elapsed_ms": 95
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 121
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 312
+        }
+      },
+      "truth": 5000000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-082",
+      "group": "5f93bc30f680281efbdf8f6fdc173df91130d18129cda84de83bef34a15c3a6b",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 38500000,
+          "cost_units": 1,
+          "elapsed_ms": 194
+        },
+        "check": {
+          "answer": 38500000,
+          "cost_units": 2,
+          "elapsed_ms": 142
+        },
+        "original": {
+          "answer": 38500000,
+          "cost_units": 4,
+          "elapsed_ms": 362
+        }
+      },
+      "truth": 38500000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-083",
+      "group": "28a8c9e154f9971aaae01212e395618460e610da9eca8f82d05b9b5277eb8c7c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2500000,
+          "cost_units": 1,
+          "elapsed_ms": 34
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 35
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 133
+        }
+      },
+      "truth": 2300000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-084",
+      "group": "a4116bc24ae37dffbc8d2dff00b671651f39ce63f624247f84af886c3070ebe1",
+      "split": "holdout",
+      "stratum": "tall",
+      "actions": {
+        "direct": {
+          "answer": 3960000,
+          "cost_units": 1,
+          "elapsed_ms": 126
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 86
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 296
+        }
+      },
+      "truth": 3960000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-085",
+      "group": "6d7603d5045a6b875a17b1dcfa403625e7d53056d792980deecbc6a6aa7b3836",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 19745000,
+          "cost_units": 1,
+          "elapsed_ms": 204
+        },
+        "check": {
+          "answer": 45000,
+          "cost_units": 2,
+          "elapsed_ms": 308
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 721
+        }
+      },
+      "truth": 19745000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-086",
+      "group": "90cfa5080f92be13fef22693172ca6c775d4f75758136d00e1a3a0ceb2cb7d12",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 200,
+          "cost_units": 1,
+          "elapsed_ms": 96
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 55
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 113
+        }
+      },
+      "truth": 2200000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-087",
+      "group": "6fab317555c829586943f96fbfda8ec2021f4c2fcd60db666ca7ffac4521aaea",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 70
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 62
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 100
+        }
+      },
+      "truth": 4015000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-088",
+      "group": "cac2fe7129ff76dbfb047c827e0598ed0b8891f947507600fa7f0c5a48f605d6",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 4700000,
+          "cost_units": 1,
+          "elapsed_ms": 89
+        },
+        "check": {
+          "answer": 4700000,
+          "cost_units": 2,
+          "elapsed_ms": 158
+        },
+        "original": {
+          "answer": 4700000,
+          "cost_units": 4,
+          "elapsed_ms": 291
+        }
+      },
+      "truth": 4700000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-089",
+      "group": "6b4557206c3f9ad821bbdcb5c18aa5a7467de1b8a00673d584735e169a0fbb87",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 7000000,
+          "cost_units": 1,
+          "elapsed_ms": 97
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 101
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 237
+        }
+      },
+      "truth": 4000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-090",
+      "group": "ccff186ccabcd127b9ce54bb470c8a060abaaaea6db0de0c8493bc05e80ceec4",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2950000,
+          "cost_units": 1,
+          "elapsed_ms": 260
+        },
+        "check": {
+          "answer": 2950000,
+          "cost_units": 2,
+          "elapsed_ms": 167
+        },
+        "original": {
+          "answer": 2950000,
+          "cost_units": 4,
+          "elapsed_ms": 534
+        }
+      },
+      "truth": 2950000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-091",
+      "group": "39001a5a99707a64f2eb3bee5cb2104d0f39025f76e11b7932c1b8a43137f2e4",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 2100000,
+          "cost_units": 1,
+          "elapsed_ms": 60
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 30
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 71
+        }
+      },
+      "truth": 2100000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-092",
+      "group": "131598f69d0706df9e3c7fe7758cecbc4ca53f0a23bae428477adf582179cd04",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 240900000,
+          "cost_units": 1,
+          "elapsed_ms": 60
+        },
+        "check": {
+          "answer": 24000000,
+          "cost_units": 2,
+          "elapsed_ms": 61
+        },
+        "original": {
+          "answer": 24000000,
+          "cost_units": 4,
+          "elapsed_ms": 99
+        }
+      },
+      "truth": 24000000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-093",
+      "group": "fa9b5f2a3fd62199e328487d1b7408d6f57846083b2efb082492fc9113321af4",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 1799900,
+          "cost_units": 1,
+          "elapsed_ms": 87
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 80
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 229
+        }
+      },
+      "truth": 1799900,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-094",
+      "group": "428dff4d7fe1b8a2a89258d341229d313681aac84718885d3f225a0a8b0261a9",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 0,
+          "cost_units": 1,
+          "elapsed_ms": 228
+        },
+        "check": {
+          "answer": 0,
+          "cost_units": 2,
+          "elapsed_ms": 123
+        },
+        "original": {
+          "answer": 0,
+          "cost_units": 4,
+          "elapsed_ms": 449
+        }
+      },
+      "truth": 14006300,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-095",
+      "group": "2421927a28224bf7bf5b952e22640a53c13bef95b1b78ab49f4ff7a0e118ce6c",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 31
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 68
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 121
+        }
+      },
+      "truth": 6179900,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-096",
+      "group": "ecf08ab2350db2a2861495846cb761ee07307591b708c8042cf8967763e81dc7",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": null,
+          "cost_units": 1,
+          "elapsed_ms": 85
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 135
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 204
+        }
+      },
+      "truth": 4100000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-097",
+      "group": "4c2016fa28f5a8e5b6acfd762928eb9da2d16777aebb7120216b7c8df4b52bb4",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 5500000,
+          "cost_units": 1,
+          "elapsed_ms": 78
+        },
+        "check": {
+          "answer": 5500000,
+          "cost_units": 2,
+          "elapsed_ms": 98
+        },
+        "original": {
+          "answer": 5500000,
+          "cost_units": 4,
+          "elapsed_ms": 247
+        }
+      },
+      "truth": 5500000,
+      "budget_units": 4,
+      "deadline_ms": 1200
+    },
+    {
+      "id": "cord-holdout-098",
+      "group": "d7f3c76c6562fe034942b11fc161e39b3a468c6f426042be2dc73e05dc1d4ca6",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 69000,
+          "cost_units": 1,
+          "elapsed_ms": 199
+        },
+        "check": {
+          "answer": null,
+          "cost_units": 2,
+          "elapsed_ms": 123
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 522
+        }
+      },
+      "truth": 25069000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    },
+    {
+      "id": "cord-holdout-099",
+      "group": "250d56fd7a00f4eab720a28d1a5a20b741803b791d865d0bdc66511c0fa07b4a",
+      "split": "holdout",
+      "stratum": "normal",
+      "actions": {
+        "direct": {
+          "answer": 7500000,
+          "cost_units": 1,
+          "elapsed_ms": 201
+        },
+        "check": {
+          "answer": 7500000,
+          "cost_units": 2,
+          "elapsed_ms": 200
+        },
+        "original": {
+          "answer": null,
+          "cost_units": 4,
+          "elapsed_ms": 439
+        }
+      },
+      "truth": 7500000,
+      "budget_units": 4,
+      "deadline_ms": 5000
+    }
+  ]
+}

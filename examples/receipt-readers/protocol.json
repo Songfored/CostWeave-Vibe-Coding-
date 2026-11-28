@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "dataset": "NAVER CLOVA CORD v2 at 7f0115a4b758a71d6473b8d085751692da2fef98",
+  "task": "Extract the final printed receipt total from pixels, as integer hundredths of IDR.",
+  "split": "Develop on the old official validation data only. New calibration: complete official train shards 0 and 1. New holdout: complete official train shard 2. Do not inspect holdout records or labels before the old and new models and fixed comparators are committed. No model trained on CORD images is used. Shard 3 is unused.",
+  "overlap": "Exclude duplicates by original bytes or decoded RGB pixels against both historical files, earlier calibration rows and earlier evaluation rows. Exclude missing or ambiguous gold using the frozen previous reference parser. Apply exclusions to both readers and record reasons. Document-disjoint, not necessarily merchant-disjoint.",
+  "minimum_evidence": "The same raw pixels, area stratum, unsigned prices, latency estimates, budgets, deadlines and adjudication apply to both readers. The scheduler and empirical confidence method are unchanged.",
+  "signal": "Only image height >= 2 * width determines tall vs normal before dispatch.",
+  "min_support": 12,
+  "alpha": 0.05,
+  "max_error_rate": 0.1,
+  "max_false_delivery_rate": 0.1,
+  "min_on_time_correct_rate": 0.7,
+  "fallback_operation": "original",
+  "quotes": {
+    "direct": 1,
+    "check": 2,
+    "original": 4
+  },
+  "route_ms": {
+    "direct": 400,
+    "check": 850,
+    "original": 1800
+  },
+  "budget_units": 4,
+  "deadline_assignment": "First byte of the original image SHA-256 even: 1200 ms; odd: 5000 ms.",
+  "timing": "Measure elapsed wall time from decoded image to final extracted amount, one thread, preinitialized engines. Interleave old/new on each action, alternate first reader by image hash independent of labels and deadline. Keep OCR and per-route preprocessing inside the timer. Shared image decoding, evaluation and policy replay are outside.",
+  "primary": "Each fixed arm must have false deliveries / all scoreable cases <= 0.10 and on-time correct deliveries / all >= 0.70. Compare frozen fixed and adaptive policies at these gates by total attempted test units / on-time correct. Report corrections/regressions and the per-case union of feasible correct actions.",
+  "fixed_selection": "For each reader version independently, select the qualifying fixed route with lowest cost per timely correct document on calibration, breaking ties by lower false-delivery rate, higher timely-correct rate then route ID. Without qualifiers, compare descriptively against the highest timely-correct rate, then lower false-delivery rate, cost and ID. No holdout threshold changes.",
+  "cost": "Quoted integer test units, not provider charges. No paid API or human service is called."
+}

@@ -11,6 +11,7 @@ from costweave.kernel.beliefs import (
     FEATURE_DIM,
     BeliefEngine,
     BeliefStore,
+    clipped_dr_empirical_bernstein,
     LaplaceIRTModel,
     OutputLengthForecaster,
     extract_features,
@@ -139,7 +140,9 @@ class KernelBeliefTests(unittest.TestCase):
                     }
                     for _ in range(30)
                 ]
-                rep_good = store.evaluate_and_promote(cand_good, good_obs, version_id="v1-calibrated")
+                # Bounds come from the utility/weight contract, prior to evaluation.
+                rep_good = store.evaluate_and_promote(cand_good, good_obs, score_bounds=(-10, 15),
+                                                      version_id="v1-calibrated")
                 self.assertTrue(rep_good["promoted"])
                 self.assertEqual("v1-calibrated", store.active_version()["version_id"])
                 loaded = store.load_active_engine()
@@ -163,6 +166,25 @@ class KernelBeliefTests(unittest.TestCase):
             )
             self.assertEqual(0, proc.returncode, proc.stderr)
             self.assertEqual("v0-baseline", json.loads(proc.stdout)["version_id"])
+
+    def test_rare_unobserved_losses_require_predeclared_support(self) -> None:
+        same_scores = [{"utility": 0.01}] * 20
+        store = BeliefStore(":memory:")
+        try:
+            no_bounds = store.evaluate_and_promote(BeliefEngine(), same_scores)
+            self.assertFalse(no_bounds["promoted"])
+            self.assertIsNone(no_bounds["stats"]["lcb"])
+            rare_loss = store.evaluate_and_promote(BeliefEngine(), same_scores, score_bounds=(-1, 1))
+            self.assertLess(rare_loss["stats"]["lcb"], 0.0)
+            self.assertFalse(rare_loss["promoted"])
+            with self.assertRaisesRegex(ValueError, "outside declared"):
+                clipped_dr_empirical_bernstein([{"utility": -2}], score_bounds=(-1, 1))
+            clipped = store.evaluate_and_promote(BeliefEngine(), [{"utility": 1, "ips_weight": 12}] * 200,
+                                                 score_bounds=(-12, 12), clip_max=10)
+            self.assertGreater(clipped["stats"]["lcb"], 0)
+            self.assertFalse(clipped["promoted"])
+        finally:
+            store.close()
 
 
 if __name__ == "__main__":

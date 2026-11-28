@@ -14,13 +14,25 @@ python -m costweave events first-handoff
 
 ### Kernel v2.0（CostWeave Next 随机超图执行内核）
 
-在保留上述 v0.6.9 兼容路径的前提下，`costweave/kernel/` 已升级至 `2.0.0`（默认外部付费调用仍为关闭）：支持 **BSAO\* 随机 AND/OR 超图动态规划**、`max_parallel > 1` 期权价值并行波次调度、SSE 极速中止与 `micro-USD` 整数结算、`V0`/`V1` 跨家族正交共识与 Split Conformal Risk Control、`compile_task_hypergraph` 任务编译器，以及 **Laplace 2PL-IRT LCB + Clipped-DR** 安全学习与回滚。
+同一份 SQLite 账本支持按证据选路、补件、BSAO 多步规划与并行执行。作业可以用 `planning_policy: "bsao"` 选择经济规划器，用 `max_parallel` 控制同时预留的尝试数。已验收的证据决定哪些操作可以执行，预算、风险和绝对截止时间约束实际派发与交付。外部付费执行器默认关闭。
 
 ```sh
-python -m costweave plan examples/tasks/coding_fanout.json --compile-models examples/tasks/coding_fanout.json
 python -m costweave beliefs status
 python -m scripts.run_paired_benchmark --seed 20261124 --bootstrap-samples 500
 ```
+
+
+发票补件示例会暂停并指出缺少的资料。第二条命令验收明细后继续同一次运行。第三条命令在独立核定金额的七个本地案例上比较固定查原件、最低报价和按证据选路三种策略。
+
+```sh
+python -m costweave run examples/evidence-invoice/job.json --id invoice-17
+python -m costweave provide invoice-17 line_items examples/evidence-invoice/line-items.json
+python -m scripts.compare_invoice_evidence
+```
+
+核验选择器可从同一批任务的多条执行结果估算收益，将报价、剩余时限和按时正确率下界用于实际派发。首轮 CORD 真实小票实验中，三条读取路线与自适应策略均未达到预设的质量和交付门槛。[首轮实验和复现方法](examples/verification-value/README.md)
+
+新版小票读取器按文字位置重建票面行，并用实收、找零、小计、折扣和税费交叉核对应付总额。在同一批 191 张可评分小票上，直接读取按时答对数由 78 升至 110，错误交付由 73 降至 53。各条路线仍未同时达到两项交付标准。可用 `python -m costweave receipt-total` 在本机读取一张印尼盾小票。[命令用法和新旧版对照实验](examples/receipt-readers/README.md)
 
 > 面向多模型、多智能体工作流的成本感知控制平面：先理解和拆解任务，再在质量、成本、时间与风险约束下选择模型、规划并行执行、验收结果，并从可审计证据中持续校准决策。
 

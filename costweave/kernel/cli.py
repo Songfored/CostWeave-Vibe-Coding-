@@ -53,6 +53,7 @@ def main(argv=None):
         command.add_argument("job")
         command.add_argument("--catalog", help="compile this goal request against a JSON recipe catalog")
         command.add_argument("--compile-models", help="compile a TaskSpec JSON against a ModelSpec list JSON")
+        command.add_argument("--belief-model", type=Path, help="frozen BeliefEngine JSON to use with --compile-models")
     run.add_argument("--id", help="stable ID for idempotent submission")
     for name in ("resume", "show", "events"):
         commands.add_parser(name).add_argument("run_id")
@@ -66,8 +67,35 @@ def main(argv=None):
     beliefs_promote = beliefs_sub.add_parser("promote")
     beliefs_promote.add_argument("candidate")
     beliefs_promote.add_argument("observations")
+    beliefs_promote.add_argument("--score-bounds", nargs=2, type=float, metavar=("LOW", "HIGH"),
+                                help="predeclared support of the gain score; required for promotion")
     beliefs_sub.add_parser("rollback")
+    provide = commands.add_parser("provide", help="validate a requested input and continue the waiting run")
+    provide.add_argument("run_id")
+    provide.add_argument("artifact", help="requested artifact name")
+    provide.add_argument("value_file", help="JSON file containing the requested value")
+    receipt = commands.add_parser("receipt-total", help="extract a proposed IDR total from a local receipt image")
+    receipt.add_argument("image", type=Path)
+    receipt.add_argument("--tessdata", required=True, type=Path, help="local directory containing eng.traineddata")
+    receipt.add_argument("--route", choices=("direct", "check", "original"), default="check")
     args = parser.parse_args(argv)
+    if args.command == "receipt-total":
+        from ..receipt_image_reader import read_total
+        try:
+            from PIL import Image
+            from tesserocr import PyTessBaseAPI
+        except ImportError:
+            print("Install costweave[receipt-ocr] to use receipt-total.", file=sys.stderr)
+            return 1
+        try:
+            with Image.open(args.image) as image, PyTessBaseAPI(path=str(args.tessdata.resolve()), lang="eng") as engine:
+                total = read_total(image, args.route, engine)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps({"status": "answered" if total is not None else "abstained", "route": args.route,
+                          "currency": "IDR", "amount_hundredths": total}, allow_nan=False))
+        return 0 if total is not None else 2
     if args.command == "serve":
         from ..server import main as serve
         serve(["--host", args.host, "--port", str(args.port)])
@@ -80,7 +108,8 @@ def main(argv=None):
             elif args.belief_action == "promote":
                 cand = BeliefEngine.from_dict(_read(args.candidate))
                 obs = _read(args.observations)
-                output = bstore.evaluate_and_promote(cand, obs)
+                bounds = tuple(args.score_bounds) if args.score_bounds else None
+                output = bstore.evaluate_and_promote(cand, obs, score_bounds=bounds)
             else:
                 output = bstore.rollback()
             print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
@@ -95,10 +124,14 @@ def main(argv=None):
         if args.command == "events":
             output = store.events(args.run_id)
         elif args.command == "show":
-            output = public_state(store.snapshot(args.run_id))
+            output = public_state(Runtime(store).inspect(args.run_id))
         else:
             runtime = Runtime(store, _registry(args.registry))
             if args.command in {"plan", "run"}:
+                if args.belief_model and not args.compile_models:
+                    raise ValueError("--belief-model requires --compile-models")
+                if args.compile_models and args.catalog:
+                    raise ValueError("choose either --catalog or --compile-models")
                 data = _read(args.job)
                 if args.compile_models:
                     models_raw = _read(args.compile_models)
@@ -106,7 +139,8 @@ def main(argv=None):
                         models_raw = models_raw["models"]
                     task_raw = data["task"] if isinstance(data, dict) and "task" in data else data
                     models_seq = [ModelSpec.from_dict(m) for m in models_raw]
-                    job = compile_task_hypergraph(TaskSpec.from_dict(task_raw), models_seq)
+                    beliefs = BeliefEngine.from_dict(_read(args.belief_model)) if args.belief_model else None
+                    job = compile_task_hypergraph(TaskSpec.from_dict(task_raw), models_seq, beliefs=beliefs)
                 elif args.catalog:
                     job = compile_request(data, _read(args.catalog))
                 else:
@@ -117,13 +151,22 @@ def main(argv=None):
                     output = public_state(runtime.submit(args.id or uuid4().hex, job))
             elif args.command == "resume":
                 output = public_state(runtime.resume(args.run_id))
+            elif args.command == "provide":
+                output = public_state(runtime.provide(args.run_id, args.artifact, _read(args.value_file)))
             else:
                 output = public_state(runtime.reconcile(args.run_id, args.attempt_id, _read(args.receipt)))
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
         state = output.get("status") if isinstance(output, dict) else None
         if state == "needs_reconciliation":
             return 3
-        return 2 if state in {"blocked", "unreachable", "over_budget", "search_limit"} else 0
+        if state == "waiting_for_input":
+            return 4
+        if state in {"blocked", "unreachable", "over_budget", "search_limit", "unavailable", "risk_exceeded", "abstain",
+                     "evidence_action_rejected", "evidence_prerequisite_missing", "deadline_expired",
+                     "deadline_unreachable", "quality_threshold_not_met", "insufficient_evidence",
+                     "no_eligible_verification_route", "verification_route_failed"}:
+            return 2
+        return 0
     except (OSError, ValueError, TypeError, KeyError) as error:
         print(str(error), file=sys.stderr)
         return 1

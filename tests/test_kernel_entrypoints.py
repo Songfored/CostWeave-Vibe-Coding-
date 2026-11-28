@@ -14,6 +14,7 @@ from costweave.kernel.store import KernelStore, RunConflictError
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "artifact-runtime"
+EVIDENCE = ROOT / "examples" / "evidence-invoice"
 
 
 def read(name):
@@ -21,6 +22,39 @@ def read(name):
 
 
 class KernelEntrypointTests(unittest.TestCase):
+    def test_catalog_preserves_requested_inputs_and_evidence_only_operations(self):
+        job = json.loads((EVIDENCE / "job.json").read_text(encoding="utf-8"))
+        catalog = {key: job.pop(key) for key in ("operations", "acceptance")}
+        catalog["operations"].append({"id": "record", "requires": ["check"], "produces": "note",
+                                      "executor": "collect", "validator": "present", "cost_units": 0})
+        job["evidence_rules"].append({"artifact": "check", "field": "finding", "equals": "special",
+                                      "operation": "record"})
+        compiled = compile_request(job, catalog)
+        self.assertEqual({"record", "assemble-handoff"}, {op.id for op in compiled.operations})
+        self.assertIn("line_items", compiled.acceptance)
+        self.assertEqual(job["evidence_rules"], compiled.to_dict()["evidence_rules"])
+
+    def test_cli_provides_requested_input_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "invoice.db"
+            def invoke(*args, code):
+                result = subprocess.run([sys.executable, "-X", "utf8", "-B", "-m", "costweave",
+                                         "--db", str(db), *map(str, args)], cwd=ROOT,
+                                        capture_output=True, encoding="utf-8", timeout=20)
+                self.assertEqual(code, result.returncode, result.stderr)
+                return json.loads(result.stdout)
+            preview = invoke("plan", EVIDENCE / "job.json", code=4)
+            self.assertEqual("waiting_for_input", preview["status"])
+            self.assertFalse(db.exists())
+            waiting = invoke("run", EVIDENCE / "job.json", "--id", "invoice", code=4)
+            self.assertEqual("line_items", waiting["clarification"]["artifact"])
+            self.assertEqual(waiting, invoke("resume", "invoice", code=4))
+            args = ("provide", "invoice", "line_items", EVIDENCE / "line-items.json")
+            final = invoke(*args, code=0)
+            self.assertEqual(("complete", 1), (final["status"], final["spent_units"]))
+            self.assertIn("line_items", final["outputs"]["handoff"])
+            self.assertEqual(final, invoke(*args, code=0))
+
     def test_legacy_jobs_keep_identity_when_default_policy_and_roles_are_explicit(self):
         legacy = {
             "goals": ["receipt"], "inputs": {}, "budget_units": 2, "search_limit": 10000,

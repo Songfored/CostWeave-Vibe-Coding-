@@ -3,7 +3,7 @@
 from collections import defaultdict
 from collections.abc import Mapping
 
-from .contracts import MAX_OPERATIONS, Job, Operation, _fields, _names
+from .contracts import MAX_OPERATIONS, Job, Operation, _fields, _names, parse_evidence_rules
 
 
 def compile_request(request: Mapping, catalog: Mapping) -> Job:
@@ -12,7 +12,7 @@ def compile_request(request: Mapping, catalog: Mapping) -> Job:
         {"goals", "inputs", "budget_units"},
         {
             "search_limit", "planning_policy", "max_risk_alpha", "failure_penalty_units",
-            "corruption_penalty_units", "deadline_ms", "latency_weight_units_per_sec", "max_parallel",
+            "corruption_penalty_units", "deadline_ms", "latency_weight_units_per_sec", "max_parallel", "evidence_rules", "verification_policy",
         },
         "goal request",
     )
@@ -27,10 +27,14 @@ def compile_request(request: Mapping, catalog: Mapping) -> Job:
     if len({op.id for op in ops}) != len(ops):
         raise ValueError("catalog operation IDs must be unique")
 
-    # First eliminate recipes whose required external inputs are unavailable.
-    available = set(request["inputs"])
+    evidence = parse_evidence_rules(request.get("evidence_rules", []))
+    verification = request.get("verification_policy")
+    requested = {rule.request for rule in evidence if rule.request is not None}
+    actions = {rule.operation for rule in evidence if rule.operation is not None}
+    # Compilation includes possible future inputs. Dispatch still requires their actual acceptance.
+    available = set(request["inputs"]) | requested
     while True:
-        generated = {op.produces for op in ops if available.issuperset(op.requires)}
+        generated = {op.produces for op in ops if available.issuperset(op.dependencies)}
         if generated <= available:
             break
         available.update(generated)
@@ -40,18 +44,27 @@ def compile_request(request: Mapping, catalog: Mapping) -> Job:
     # Walk backward from requested outputs, retaining every viable alternative.
     producers = defaultdict(list)
     for op in ops:
-        if available.issuperset(op.requires):
+        if available.issuperset(op.dependencies):
             producers[op.produces].append(op)
-    pending = list(goals)
+    pending = list(goals) + [rule.artifact for rule in evidence] + list(requested)
+    if verification is not None:
+        if not isinstance(verification, dict) or not isinstance(verification.get("artifact"), str):
+            raise ValueError("verification_policy requires an observation artifact")
+        pending.append(verification["artifact"])
     required = set(request["inputs"])
-    selected = []
+    selected = {op.id: op for op in ops if op.id in actions}
+    for op in selected.values():
+        if not available.issuperset(op.dependencies):
+            raise ValueError(f"catalog cannot satisfy prerequisites for evidence operation {op.id!r}")
+        pending.append(op.produces)
+        pending.extend(op.dependencies)
     while pending:
         artifact = pending.pop()
         if artifact in required:
             continue
         required.add(artifact)
         for op in producers[artifact]:
-            selected.append(op)
-            pending.extend(op.requires)
+            selected[op.id] = op
+            pending.extend(op.dependencies)
     rules = {key: rule for key, rule in catalog["acceptance"].items() if key in required}
-    return Job.from_dict({**request, "operations": [op.to_dict() for op in selected], "acceptance": rules})
+    return Job.from_dict({**request, "operations": [op.to_dict() for op in selected.values()], "acceptance": rules})
