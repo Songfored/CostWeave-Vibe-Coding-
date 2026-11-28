@@ -1,0 +1,18 @@
+{
+  "version": "unified-receipt-v1",
+  "source_revision": "7f0115a4b758a71d6473b8d085751692da2fef98",
+  "source_file": "train-00003-of-00004-2d0cd200555ed7fd.parquet",
+  "source_sha256": "1ffd9de8d6fbcee7630fd4cdfedff05b9b7fabc0fae4fc17557c5fe7cf178748",
+  "calibration": "390 paired scoreable receipts on upstream train shards 0 and 1. Use the two readers and their fixed comparators from commit 9066d59. Shard 2, validation and test are historical only. All earlier sources are used for raw and RGB deduplication including excluded rows.",
+  "task": "Extract the independently annotated total in integer hundredths of IDR. One final output, max_parallel=1, budget=4, quotes and deadline estimates inherited from receipt-readers/protocol.json. The hash-assigned 1200/5000ms deadlines include all attempted actions. Charge every attempt.",
+  "policy_inputs": "Before dispatch all policies know only the stratum, frozen calibration, common quotes, duration estimates and budget/deadline. Each selected action observes only its own answer or abstention after measured time. Truth is used only in calibration and final scoring. A missing answer is an observable failed operation for BSAO; a wrong non-null answer cannot trigger a retry.",
+  "route_fit": "Per reader and stratum, estimate acceptance probability as (non-null+1)/(n+2) and marginal false acceptance as (wrong+1)/(n+2). Use pooled calibration when n<12. These are planning estimates, not certified bounds. Fixed and existing adaptive decisions reuse their original frozen calibration.",
+  "failure_penalty_units": 20,
+  "corruption_penalty_units": 40,
+  "min_support": 12,
+  "max_risk_alpha": 0.1,
+  "execution": "Equal serial resources. Fixed, original adaptive and BSAO operate on the same three measured complete actions. Isolate reader change separately by holding the fixed direct policy constant for old and new. Fees are illustrative integer units; timing is measured local warm OCR, excluding shared decode and provider queues.",
+  "quality": "Gate both candidate and calibration-selected comparator at >=70% timely correct per scoreable document and <=10% erroneous deliveries per scoreable document. Report abstention, spend and cost per timely correct; undefined cost when no timely correct. Only enable if both passed calibration and independent gates and the paired 95% cost difference interval favors BSAO. Otherwise retain existing default.",
+  "bootstrap_seed": 20261127,
+  "bootstrap_draws": 2000
+}

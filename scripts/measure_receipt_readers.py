@@ -19,6 +19,7 @@ CALIBRATION = (
     ("train-00001-of-00004-7dbbe248962764c5.parquet", "cce4def16a0d6a6c75f80be712f7494c56c318a8829b712f5c62650155c9e58e"),
 )
 HOLDOUT = (("train-00002-of-00004-688fe1305a55e5cc.parquet", "591e2db8fe8b1d364b054f46e8c375b7f00e72578914ba46a573b6858162cab2"),)
+INDEPENDENT = (("train-00003-of-00004-2d0cd200555ed7fd.parquet", "1ffd9de8d6fbcee7630fd4cdfedff05b9b7fabc0fae4fc17557c5fe7cf178748"),)
 READERS = {"old": extract, "new": read_total}
 
 
@@ -49,8 +50,9 @@ def measure(split, directory, output):
         raise ValueError("unexpected OCR language data")
     if os.environ.get("OMP_THREAD_LIMIT") != "1":
         raise ValueError("set OMP_THREAD_LIMIT=1 to match the registered timing protocol")
-    earlier = PRIOR if split == "calibration" else (*PRIOR, *CALIBRATION)
-    sources = CALIBRATION if split == "calibration" else HOLDOUT
+    partitions = {"calibration": (PRIOR, CALIBRATION), "holdout": ((*PRIOR, *CALIBRATION), HOLDOUT),
+                  "independent": ((*PRIOR, *CALIBRATION, *HOLDOUT), INDEPENDENT)}
+    earlier, sources = partitions[split]
     seen_raw, seen_pixels = set(), set()
     for spec in earlier:
         for row in rows(directory, spec, labels=False):
@@ -78,7 +80,7 @@ def measure(split, directory, output):
                     if duplicate:
                         skipped.append({"id": cid, "reason": "duplicate document"})
                         continue
-                    common = {"id": cid, "group": group, "split": split,
+                    common = {"id": cid, "group": group, "split": "calibration" if split == "calibration" else "holdout",
                               "stratum": "tall" if image.height >= 2 * image.width else "normal",
                               "budget_units": 4, "deadline_ms": 1200 if int(group[:2], 16) % 2 == 0 else 5000}
                     choices = {version: {} for version in READERS}
@@ -110,7 +112,7 @@ def measure(split, directory, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("split", choices=("calibration", "holdout"))
+    parser.add_argument("split", choices=("calibration", "holdout", "independent"))
     parser.add_argument("source_dir", type=Path)
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
