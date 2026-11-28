@@ -9,7 +9,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from costweave.catalog_store import CatalogStore
+from costweave.kernel.http import _build_audit_view
 from costweave.kernel.ports import default_registry
+from costweave.kernel.store import KernelStore
 from costweave.server import build_server
 
 
@@ -24,6 +26,20 @@ def job(value="approved", executor="literal"):
                         "produces": "verdict", "cost_units": 3, "validator": "present",
                         "config": {"value": value}}],
     }
+
+
+class AuditViewTests(unittest.TestCase):
+    def test_audit_hides_returned_values_before_validation(self):
+        store = KernelStore(":memory:")
+        self.addCleanup(store.close)
+        store.create("pending", job())
+        attempt = store.claim("pending", "produce")
+        store.record_result("pending", attempt, "unverified")
+        state = store.snapshot("pending")
+        audit = _build_audit_view(state, store.events("pending"))
+        self.assertEqual("returned", audit["active_attempts"][0]["phase"])
+        self.assertNotIn("value", audit["active_attempts"][0])
+        self.assertNotIn("unverified", json.dumps(audit))
 
 
 class KernelHttpTests(unittest.TestCase):

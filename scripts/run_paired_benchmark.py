@@ -499,25 +499,31 @@ def _run_one_case(
         store.close()
 
     settled = [ev for ev in events if ev["type"] == "attempt_settled"]
-    known_charges = [obs.units for obs in measurements.values() if obs.units is not None]
-    # Non-model transforms are local operations charged by the actual replay ledger.
-    known_charges.extend(ev["actual_units"] for ev in settled if ev["attempt_id"] not in measurements)
-    observed_cost = sum(known_charges)
-    cost_known = all(obs.units is not None for obs in measurements.values())
+    attributable_attempts = set()
     incomplete_outcome = any(obs.missing_outcome for obs in measurements.values())
     unpriced_previous = False
     for ev in events:
         if ev["type"] == "attempt_settled":
             obs = measurements.get(ev["attempt_id"])
             unpriced_previous |= obs is not None and obs.units is None
-        elif ev["type"] == "attempt_claimed" and unpriced_previous:
-            # The replay reserved the quote for an unreported charge, so the next
-            # choice has no factual remaining-budget input.
-            incomplete_outcome = True
+        elif ev["type"] == "attempt_claimed":
+            if unpriced_previous:
+                # Dispatch now depends on an unknown remaining budget. Its
+                # counterfactual outcome and invoice cannot be attributed.
+                incomplete_outcome = True
+            else:
+                attributable_attempts.add(ev["attempt_id"])
 
+    known_charges = [obs.units for aid, obs in measurements.items()
+                     if aid in attributable_attempts and obs.units is not None]
+    # Local transforms have a ledger charge and do not require a provider receipt.
+    known_charges.extend(ev["actual_units"] for ev in settled
+                         if ev["attempt_id"] in attributable_attempts and ev["attempt_id"] not in measurements)
+    observed_cost = sum(known_charges)
+    cost_known = all(obs.units is not None for obs in measurements.values())
     quotes = {op.id: op.cost_units for op in job.operations}
     quote_overruns = [ev["op_id"] for ev in events if ev["type"] == "attempt_claimed"
-                      and ev["attempt_id"] in measurements
+                      and ev["attempt_id"] in attributable_attempts and ev["attempt_id"] in measurements
                       and measurements[ev["attempt_id"]].units is not None
                       and measurements[ev["attempt_id"]].units > quotes[ev["op_id"]]]
     # An excess invoice is retained above as observed expenditure. The kernel
@@ -540,7 +546,7 @@ def _run_one_case(
             correct = obs.correct if obs else None
     if observed_cost > job.budget_units:
         overrun = True
-    elif not cost_known or incomplete_outcome:
+    elif not cost_known or unresolved:
         overrun = None
     else:
         overrun = False
@@ -551,7 +557,7 @@ def _run_one_case(
         "completed": completed,
         "ground_truth_ok": correct,
         "silent_corruption": None if correct is None else bool(completed and not correct),
-        "cost_units": observed_cost if cost_known and not incomplete_outcome else None,
+        "cost_units": observed_cost if cost_known and not unresolved else None,
         "observed_cost_units": observed_cost,
         "quote_overruns": quote_overruns,
         "budget_overrun": overrun,
@@ -606,7 +612,11 @@ def _summarize(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     latency = sorted(row["latency_ms"] for row in rows if row["latency_ms"] is not None)
     return {
         "cases": n, "observed_cases": coverage,
-        "verified_completion_rate": rate("completed"), "completion_rate": rate("completed"),
+        "schema_completion_rate": rate("completed"), "completion_rate": rate("completed"),
+        "verified_completion_rate": rate("completed"),  # Historical name for the acceptance contract.
+        "known_correct_deliveries": correct,
+        "known_wrong_deliveries": sum(row["silent_corruption"] is True for row in rows),
+        "needs_reconciliation": sum(row["needs_reconciliation"] for row in rows),
         "ground_truth_pass_rate": rate("ground_truth_ok"), "silent_corruption_rate": rate("silent_corruption"),
         "total_cost_units": cost if cost_complete else None,
         "units_per_correct_delivery": round(cost / correct, 4)
@@ -713,9 +723,16 @@ def run_benchmark(
             ("decomposed_routes", "costweave_next_serial", "costweave_next_no_decomposition_serial"),
             ("decision_policy", "costweave_next_serial", "matched_lowest_cost_serial"),
         ):
+            active_rows, control_rows = per_policy[active], per_policy[control]
             ablations[dimension] = {
                 "active": active, "control": control,
-                "paired": _paired_comparison(per_policy[active], per_policy[control], bootstrap_samples, seed),
+                "paired": _paired_comparison(active_rows, control_rows, bootstrap_samples, seed),
+                "by_family": {
+                    fam: _paired_comparison([r for r in active_rows if r["family"] == fam],
+                                            [r for r in control_rows if r["family"] == fam],
+                                            bootstrap_samples, seed)
+                    for fam in families
+                },
             }
 
     return {
@@ -732,6 +749,10 @@ def run_benchmark(
         "by_family": dict(by_family),
         "provenance": "external_trace" if traces_path is not None else "synthetic_fixture",
         "latency_basis": "projected from recorded dispatch and settlement order; excludes queueing",
+        "cost_basis": "observed_cost_units includes charges through pause; full-run cost requires a resolved path",
+        "semantic_basis": ("independent final reference or a label from the accepted final producer"
+                           if traces_path is not None else
+                           "source clause ids, amounts and total; module manifest; fixture compliance label"),
         "paired_vs_always_frontier": paired,
         "ablations": ablations,
         "records": per_policy,

@@ -189,10 +189,10 @@ def _resource_plan(operations, available, goals, budget, limit, remaining_ms, ri
     return Plan(status, states_examined=admitted)
 
 
-def _after_mandatory(job, artifacts, excluded, forced, budget, remaining_ms, risk):
+def _after_mandatory(job, artifacts, excluded, forced, budget, remaining_ms, risk, required=()):
     """Optimistic completion assuming accepted future outputs and feasible authorized clarifications."""
     available = set(artifacts)
-    goals = set(job.goals)
+    goals = set(job.goals) | set(required)
     operations = {op.id: op for op in job.operations}
     # A future report can authorize input we cannot yet request. Never expose that value to a predicate.
     potential_requests = [rule for rule in job.evidence_rules if rule.request and rule.artifact not in artifacts]
@@ -262,14 +262,33 @@ def _evidence_choice(job, artifacts, excluded, remaining_units, remaining_ms, ri
                                          remaining_ms, risk)
             evidence = EvidenceDecision(index, rule.artifact, rule.field, None, None, None, None,
                                         kind="acquire", path=rule.path)
-            if acquisition.status == "ready":
-                # Only the next acquisition step is binding. A different producer may be needed later.
-                first = operations[acquisition.operations[0]]
-                continuation = _after_mandatory(job, artifacts, excluded, [first], remaining_units,
-                                                remaining_ms, risk)
-                if continuation.status not in ("ready", "complete"):
-                    return replace(continuation, evidence=evidence)
-            return replace(acquisition, optimal=False, evidence=evidence)
+            if acquisition.status != "ready":
+                return replace(acquisition, optimal=False, evidence=evidence)
+            # The cheapest way to acquire a report can strand an otherwise affordable goal.
+            # Try other immediately executable report ancestors when that first step is ruled out.
+            first_id = acquisition.operations[0]
+            choices = [operations[first_id], *(candidate for candidate in producers
+                       if candidate.id != first_id and available.issuperset(candidate.dependencies))]
+            failures = []
+            for first in choices[:job.search_limit]:
+                completion = _after_mandatory(job, artifacts, excluded, [first], remaining_units,
+                                              remaining_ms, risk, required=goal)
+                if completion.status not in ("ready", "complete"):
+                    failures.append(completion)
+                    continue
+                if first.id == first_id:
+                    return replace(acquisition, optimal=False, evidence=evidence)
+                tail = _resource_plan([candidate for candidate in producers if candidate.produces != first.produces],
+                                      available | {first.produces}, goal, remaining_units - first.cost_units,
+                                      job.search_limit, None if remaining_ms is None else remaining_ms - first.latency_p50_ms,
+                                      risk - first.false_pass_risk)
+                if tail.status in ("ready", "complete"):
+                    return Plan("ready", (first.id, *tail.operations), first.cost_units + tail.cost_units,
+                                evidence=evidence, states_examined=completion.states_examined + tail.states_examined)
+                failures.append(tail)
+            if len(choices) > job.search_limit or any(fail.status == "search_limit" for fail in failures):
+                return Plan("search_limit", evidence=evidence)
+            return replace(failures[0], evidence=evidence)
         if not rule.matches(artifacts):
             continue
         digest = hashlib.sha256(canonical_json(artifacts[rule.artifact]).encode("utf-8")).hexdigest()

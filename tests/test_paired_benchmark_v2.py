@@ -48,7 +48,8 @@ class PairedBenchmarkAndReleaseV2Tests(unittest.TestCase):
             task, _ = _case_family_prompt(family, 4)
 
             def graph(policy):
-                return _policy_job(policy, task, BENCHMARK_MODELS, beliefs=None, crc_res=crc).to_dict()
+                job = _policy_job(policy, task, BENCHMARK_MODELS, beliefs=None, crc_res=crc)
+                return {**job.to_dict(), "max_parallel": job.max_parallel, "planning_policy": job.planning_policy}
 
             base, serial = graph("costweave_next"), graph("costweave_next_serial")
             self.assertEqual({**base, "max_parallel": 1}, serial)
@@ -111,6 +112,18 @@ class PairedBenchmarkAndReleaseV2Tests(unittest.TestCase):
         self.assertIsNone(summary["total_cost_units"])
         self.assertIsNone(report["paired_vs_always_frontier"]["cost_reduction_pct"])
 
+    def test_unpriced_failed_attempt_makes_followup_route_and_spend_unknown(self) -> None:
+        report = self._external_report([{"outcomes": {
+            "direct_cheap-text": {"fail_known": True, "latency_ms": 2},
+            "direct_frontier": {"value": {"ok": True}, "actual_units": 1000,
+                                "ground_truth_ok": True, "latency_ms": 6},
+        }}])
+        cascade = report["records"]["naive_cascade"][0]
+        self.assertTrue(cascade["missing_outcome"])
+        self.assertIsNone(cascade["completed"])
+        self.assertIsNone(cascade["cost_units"])
+        self.assertEqual(0, cascade["observed_cost_units"])
+
     def test_external_reference_and_unclipped_overquote_receipt(self) -> None:
         report = self._external_report([
             {"reference": {"value": {"ok": False}}, "outcomes": {"direct_frontier": {
@@ -122,10 +135,12 @@ class PairedBenchmarkAndReleaseV2Tests(unittest.TestCase):
         self.assertFalse(wrong["ground_truth_ok"])
         self.assertTrue(excessive["needs_reconciliation"])
         self.assertIsNone(excessive["ground_truth_ok"])
-        self.assertEqual(75_000, excessive["cost_units"])
+        self.assertEqual(75_000, excessive["observed_cost_units"])
+        self.assertIsNone(excessive["cost_units"])
         self.assertTrue(excessive["budget_overrun"])
         self.assertEqual(["direct_frontier"], excessive["quote_overruns"])
-        self.assertEqual(75_002, report["policies"]["always_frontier"]["total_cost_units"])
+        self.assertEqual(75_002, report["policies"]["always_frontier"]["observed_cost_units"])
+        self.assertIsNone(report["policies"]["always_frontier"]["total_cost_units"])
         with self.assertRaisesRegex(ValueError, "ground_truth_ok"):
             self._external_report([{"outcomes": {"direct_frontier": {"ground_truth_ok": "false"}}}])
 

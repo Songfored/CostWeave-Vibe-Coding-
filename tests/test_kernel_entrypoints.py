@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -6,7 +7,9 @@ import tempfile
 import unittest
 
 from costweave.kernel.catalog import compile_request
-from costweave.kernel.contracts import Job
+from costweave.kernel.beliefs import BeliefEngine
+from costweave.kernel.compiler import ModelSpec
+from costweave.kernel.contracts import Job, canonical_json
 from costweave.kernel.ports import default_registry
 from costweave.kernel.runtime import Runtime, public_state
 from costweave.kernel.store import KernelStore, RunConflictError
@@ -22,6 +25,32 @@ def read(name):
 
 
 class KernelEntrypointTests(unittest.TestCase):
+    def test_cli_compiles_and_persists_explicit_belief_model(self):
+        model = BeliefEngine(lcb_z=0.5)
+        task = {"goal_name": "result", "prompt": "collect", "inputs": {"n": 5}, "budget_units": 10}
+        specs = [{"id": "local", "executor": "collect", "provider_family": "fixture",
+                  "input_price_per_mtok_usd": 0, "output_price_per_mtok_usd": 0}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, value in (("task", task), ("models", specs), ("belief", model.to_dict())):
+                (root / name).write_text(json.dumps(value), encoding="utf-8")
+            args = [sys.executable, "-X", "utf8", "-B", "-m", "costweave", "--db", str(root / "db"),
+                    "run", str(root / "task"), "--id", "pinned", "--compile-models", str(root / "models"),
+                    "--belief-model", str(root / "belief")]
+            result = subprocess.run(args, cwd=ROOT, capture_output=True, encoding="utf-8", timeout=20)
+            self.assertEqual(0, result.returncode, result.stderr or result.stdout)
+            self.assertEqual({"result": {"n": 5}}, json.loads(result.stdout)["outputs"])
+            store = KernelStore(root / "db")
+            try:
+                job = store.snapshot("pinned")["job"]
+            finally:
+                store.close()
+        expected = hashlib.sha256(canonical_json(model.to_dict()).encode()).hexdigest()
+        self.assertEqual(expected, job["belief_model_sha256"])
+        probability, _, _ = model.predict_route(
+            ModelSpec.from_dict(specs[0]), "collect", {"n": 5}, prompt_tokens=1)
+        self.assertAlmostEqual(probability, job["operations"][0]["pass_prob"])
+
     def test_catalog_preserves_requested_inputs_and_evidence_only_operations(self):
         job = json.loads((EVIDENCE / "job.json").read_text(encoding="utf-8"))
         catalog = {key: job.pop(key) for key in ("operations", "acceptance")}

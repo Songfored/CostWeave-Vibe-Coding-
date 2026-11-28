@@ -447,7 +447,8 @@ def clipped_dr_empirical_bernstein(
     if n < 2 or score_bounds is None:
         return stats
     span = high - low
-    t = math.log(2.0 / delta)
+    # Allocate delta across both displayed one-sided bounds.
+    t = math.log(4.0 / delta)
     margin = math.sqrt((2.0 * var_val * t) / n) + (7.0 * span * t) / (3.0 * (n - 1))
     return {**stats, "lcb": max(low, mean_val - margin), "ucb": min(high, mean_val + margin)}
 

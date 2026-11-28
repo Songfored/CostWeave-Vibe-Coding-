@@ -102,7 +102,16 @@ function showAudit(audit) {
     const plan = d.plan || {};
     const ops = (plan.operations || []).join(" -> ");
     const altCount = plan.audit && Array.isArray(plan.audit.alternatives) ? plan.audit.alternatives.length : 0;
-    return `#${d.seq} 选择 ${d.op_id} (${ops}) | 方案数=${altCount}`;
+    const parts = [`#${d.seq} 选择 ${d.op_id} (${ops})`];
+    if (plan.audit) parts.push(`备选 ${altCount}`);
+    if (plan.evidence) {
+      const e = plan.evidence;
+      parts.push(`规则 ${e.rule_index + 1} · ${e.artifact}`);
+      if (e.artifact_sha256) parts.push("证据 SHA-256 " + e.artifact_sha256);
+    }
+    if (plan.verification) parts.push(plan.verification.selected_reason);
+    if (plan.fallback) parts.push(plan.fallback.decision);
+    return parts.join(" | ");
   });
   byId("audit-view").textContent = lines.join("\n");
 }

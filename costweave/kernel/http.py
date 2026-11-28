@@ -52,7 +52,7 @@ def _build_audit_view(snapshot: dict, events: list[dict]) -> dict:
         "clarification": snapshot.get("clarification"),
         "belief_model_sha256": snapshot["job"].get("belief_model_sha256"),
         "policy_events": [e for e in events if e["type"] in {"input_requested", "input_supplied", "run_finished"}],
-        "active_attempts": snapshot.get("active_attempts", []),
+        "active_attempts": public_state(snapshot)["active_attempts"],
         "decisions": decisions,
         "settlements": settled,
     }

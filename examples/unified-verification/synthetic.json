@@ -1,0 +1,1211 @@
+{
+  "seed": 20261124,
+  "bootstrap_samples": 500,
+  "cases": 120,
+  "crc_calibration": {
+    "sample_count": 140,
+    "admissible": true,
+    "threshold": 0.0,
+    "risk_ucb": 0.021171
+  },
+  "policies": {
+    "always_frontier": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 78,
+      "known_wrong_deliveries": 42,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.65,
+      "silent_corruption_rate": 0.35,
+      "total_cost_units": 2717025,
+      "units_per_correct_delivery": 34833.6538,
+      "mean_cost_units": 22641.88,
+      "observed_cost_units": 2717025,
+      "p95_latency_ms": 2133,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "single_model_router": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 0.775,
+      "completion_rate": 0.775,
+      "verified_completion_rate": 0.775,
+      "known_correct_deliveries": 51,
+      "known_wrong_deliveries": 42,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.425,
+      "silent_corruption_rate": 0.35,
+      "total_cost_units": 2263100,
+      "units_per_correct_delivery": 44374.5098,
+      "mean_cost_units": 18859.17,
+      "observed_cost_units": 2263100,
+      "p95_latency_ms": 2133,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "naive_cascade": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 78,
+      "known_wrong_deliveries": 42,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.65,
+      "silent_corruption_rate": 0.35,
+      "total_cost_units": 2435903,
+      "units_per_correct_delivery": 31229.5256,
+      "mean_cost_units": 20299.19,
+      "observed_cost_units": 2435903,
+      "p95_latency_ms": 2133,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "v2_deterministic": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 78,
+      "known_wrong_deliveries": 42,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.65,
+      "silent_corruption_rate": 0.35,
+      "total_cost_units": 650144,
+      "units_per_correct_delivery": 8335.1795,
+      "mean_cost_units": 5417.87,
+      "observed_cost_units": 650144,
+      "p95_latency_ms": 2919,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "costweave_next": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 79,
+      "known_wrong_deliveries": 41,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.6583,
+      "silent_corruption_rate": 0.3417,
+      "total_cost_units": 475134,
+      "units_per_correct_delivery": 6014.3544,
+      "mean_cost_units": 3959.45,
+      "observed_cost_units": 475134,
+      "p95_latency_ms": 1750,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "costweave_next_serial": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 79,
+      "known_wrong_deliveries": 41,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.6583,
+      "silent_corruption_rate": 0.3417,
+      "total_cost_units": 474979,
+      "units_per_correct_delivery": 6012.3924,
+      "mean_cost_units": 3958.16,
+      "observed_cost_units": 474979,
+      "p95_latency_ms": 2010,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    },
+    "costweave_next_no_decomposition_serial": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 110,
+        "ground_truth_ok": 110,
+        "silent_corruption": 110,
+        "cost_units": 110,
+        "latency_ms": 110,
+        "budget_overrun": 110
+      },
+      "schema_completion_rate": null,
+      "completion_rate": null,
+      "verified_completion_rate": null,
+      "known_correct_deliveries": 79,
+      "known_wrong_deliveries": 31,
+      "needs_reconciliation": 10,
+      "ground_truth_pass_rate": null,
+      "silent_corruption_rate": null,
+      "total_cost_units": null,
+      "units_per_correct_delivery": null,
+      "mean_cost_units": null,
+      "observed_cost_units": 2451974,
+      "p95_latency_ms": null,
+      "budget_overruns": null,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 10
+    },
+    "matched_lowest_cost_serial": {
+      "cases": 120,
+      "observed_cases": {
+        "completed": 120,
+        "ground_truth_ok": 120,
+        "silent_corruption": 120,
+        "cost_units": 120,
+        "latency_ms": 120,
+        "budget_overrun": 120
+      },
+      "schema_completion_rate": 1.0,
+      "completion_rate": 1.0,
+      "verified_completion_rate": 1.0,
+      "known_correct_deliveries": 79,
+      "known_wrong_deliveries": 41,
+      "needs_reconciliation": 0,
+      "ground_truth_pass_rate": 0.6583,
+      "silent_corruption_rate": 0.3417,
+      "total_cost_units": 478621,
+      "units_per_correct_delivery": 6058.4937,
+      "mean_cost_units": 3988.51,
+      "observed_cost_units": 478621,
+      "p95_latency_ms": 3026,
+      "budget_overruns": 0,
+      "observed_budget_overruns": 0,
+      "quote_overruns": 0
+    }
+  },
+  "by_family": {
+    "coding_fanout": {
+      "always_frontier": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 254865,
+        "units_per_correct_delivery": 6371.625,
+        "mean_cost_units": 6371.62,
+        "observed_cost_units": 254865,
+        "p95_latency_ms": 1450,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "single_model_router": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 0.325,
+        "completion_rate": 0.325,
+        "verified_completion_rate": 0.325,
+        "known_correct_deliveries": 13,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.325,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 7468,
+        "units_per_correct_delivery": 574.4615,
+        "mean_cost_units": 186.7,
+        "observed_cost_units": 7468,
+        "p95_latency_ms": 260,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "naive_cascade": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 180271,
+        "units_per_correct_delivery": 4506.775,
+        "mean_cost_units": 4506.77,
+        "observed_cost_units": 180271,
+        "p95_latency_ms": 1710,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "v2_deterministic": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 143034,
+        "units_per_correct_delivery": 3575.85,
+        "mean_cost_units": 3575.85,
+        "observed_cost_units": 143034,
+        "p95_latency_ms": 4369,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 130476,
+        "units_per_correct_delivery": 3261.9,
+        "mean_cost_units": 3261.9,
+        "observed_cost_units": 130476,
+        "p95_latency_ms": 1676,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 130321,
+        "units_per_correct_delivery": 3258.025,
+        "mean_cost_units": 3258.03,
+        "observed_cost_units": 130321,
+        "p95_latency_ms": 1976,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_no_decomposition_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 152266,
+        "units_per_correct_delivery": 3806.65,
+        "mean_cost_units": 3806.65,
+        "observed_cost_units": 152266,
+        "p95_latency_ms": 2030,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "matched_lowest_cost_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 40,
+        "known_wrong_deliveries": 0,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 1.0,
+        "silent_corruption_rate": 0.0,
+        "total_cost_units": 133963,
+        "units_per_correct_delivery": 3349.075,
+        "mean_cost_units": 3349.07,
+        "observed_cost_units": 133963,
+        "p95_latency_ms": 3026,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      }
+    },
+    "compliance_open": {
+      "always_frontier": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 38,
+        "known_wrong_deliveries": 2,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.95,
+        "silent_corruption_rate": 0.05,
+        "total_cost_units": 211680,
+        "units_per_correct_delivery": 5570.5263,
+        "mean_cost_units": 5292.0,
+        "observed_cost_units": 211680,
+        "p95_latency_ms": 1450,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "single_model_router": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 38,
+        "known_wrong_deliveries": 2,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.95,
+        "silent_corruption_rate": 0.05,
+        "total_cost_units": 5152,
+        "units_per_correct_delivery": 135.5789,
+        "mean_cost_units": 128.8,
+        "observed_cost_units": 5152,
+        "p95_latency_ms": 260,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "naive_cascade": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 38,
+        "known_wrong_deliveries": 2,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.95,
+        "silent_corruption_rate": 0.05,
+        "total_cost_units": 5152,
+        "units_per_correct_delivery": 135.5789,
+        "mean_cost_units": 128.8,
+        "observed_cost_units": 5152,
+        "p95_latency_ms": 260,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "v2_deterministic": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 38,
+        "known_wrong_deliveries": 2,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.95,
+        "silent_corruption_rate": 0.05,
+        "total_cost_units": 211680,
+        "units_per_correct_delivery": 5570.5263,
+        "mean_cost_units": 5292.0,
+        "observed_cost_units": 211680,
+        "p95_latency_ms": 1450,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 39,
+        "known_wrong_deliveries": 1,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.975,
+        "silent_corruption_rate": 0.025,
+        "total_cost_units": 49228,
+        "units_per_correct_delivery": 1262.2564,
+        "mean_cost_units": 1230.7,
+        "observed_cost_units": 49228,
+        "p95_latency_ms": 1750,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 39,
+        "known_wrong_deliveries": 1,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.975,
+        "silent_corruption_rate": 0.025,
+        "total_cost_units": 49228,
+        "units_per_correct_delivery": 1262.2564,
+        "mean_cost_units": 1230.7,
+        "observed_cost_units": 49228,
+        "p95_latency_ms": 2010,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_no_decomposition_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 39,
+        "known_wrong_deliveries": 1,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.975,
+        "silent_corruption_rate": 0.025,
+        "total_cost_units": 49228,
+        "units_per_correct_delivery": 1262.2564,
+        "mean_cost_units": 1230.7,
+        "observed_cost_units": 49228,
+        "p95_latency_ms": 2010,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "matched_lowest_cost_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 39,
+        "known_wrong_deliveries": 1,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.975,
+        "silent_corruption_rate": 0.025,
+        "total_cost_units": 49228,
+        "units_per_correct_delivery": 1262.2564,
+        "mean_cost_units": 1230.7,
+        "observed_cost_units": 49228,
+        "p95_latency_ms": 2010,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      }
+    },
+    "long_doc_mapreduce": {
+      "always_frontier": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 2250480,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 56262.0,
+        "observed_cost_units": 2250480,
+        "p95_latency_ms": 2133,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "single_model_router": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 2250480,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 56262.0,
+        "observed_cost_units": 2250480,
+        "p95_latency_ms": 2133,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "naive_cascade": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 2250480,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 56262.0,
+        "observed_cost_units": 2250480,
+        "p95_latency_ms": 2133,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "v2_deterministic": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 295430,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 7385.75,
+        "observed_cost_units": 295430,
+        "p95_latency_ms": 1237,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 295430,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 7385.75,
+        "observed_cost_units": 295430,
+        "p95_latency_ms": 1237,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 295430,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 7385.75,
+        "observed_cost_units": 295430,
+        "p95_latency_ms": 1237,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      },
+      "costweave_next_no_decomposition_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 30,
+          "ground_truth_ok": 30,
+          "silent_corruption": 30,
+          "cost_units": 30,
+          "latency_ms": 30,
+          "budget_overrun": 30
+        },
+        "schema_completion_rate": null,
+        "completion_rate": null,
+        "verified_completion_rate": null,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 30,
+        "needs_reconciliation": 10,
+        "ground_truth_pass_rate": null,
+        "silent_corruption_rate": null,
+        "total_cost_units": null,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": null,
+        "observed_cost_units": 2250480,
+        "p95_latency_ms": null,
+        "budget_overruns": null,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 10
+      },
+      "matched_lowest_cost_serial": {
+        "cases": 40,
+        "observed_cases": {
+          "completed": 40,
+          "ground_truth_ok": 40,
+          "silent_corruption": 40,
+          "cost_units": 40,
+          "latency_ms": 40,
+          "budget_overrun": 40
+        },
+        "schema_completion_rate": 1.0,
+        "completion_rate": 1.0,
+        "verified_completion_rate": 1.0,
+        "known_correct_deliveries": 0,
+        "known_wrong_deliveries": 40,
+        "needs_reconciliation": 0,
+        "ground_truth_pass_rate": 0.0,
+        "silent_corruption_rate": 1.0,
+        "total_cost_units": 295430,
+        "units_per_correct_delivery": null,
+        "mean_cost_units": 7385.75,
+        "observed_cost_units": 295430,
+        "p95_latency_ms": 1237,
+        "budget_overruns": 0,
+        "observed_budget_overruns": 0,
+        "quote_overruns": 0
+      }
+    }
+  },
+  "provenance": "synthetic_fixture",
+  "latency_basis": "projected from recorded dispatch and settlement order; excludes queueing",
+  "cost_basis": "observed_cost_units includes charges through pause; full-run cost requires a resolved path",
+  "semantic_basis": "source clause ids, amounts and total; module manifest; fixture compliance label",
+  "paired_vs_always_frontier": {
+    "cost_reduction_pct_observed_pairs": 120,
+    "cost_reduction_pct": {
+      "mean_difference": 82.51271151351202,
+      "lower": 77.51687867519541,
+      "upper": 86.08334567152738,
+      "samples": 500,
+      "seed": 20261124
+    },
+    "ground_truth_pass_diff_observed_pairs": 120,
+    "ground_truth_pass_diff": {
+      "mean_difference": 0.008333333333333333,
+      "lower": 0.0,
+      "upper": 0.025,
+      "samples": 500,
+      "seed": 20261124
+    },
+    "p95_latency_change_pct_observed_pairs": 120,
+    "p95_latency_change_pct": {
+      "mean_difference": -17.955930614158465,
+      "lower": -21.425222691045477,
+      "upper": 9.23581809657759,
+      "samples": 500,
+      "seed": 20261124
+    }
+  },
+  "ablations": {
+    "parallel_capacity": {
+      "active": "costweave_next",
+      "control": "costweave_next_serial",
+      "paired": {
+        "cost_reduction_pct_observed_pairs": 120,
+        "cost_reduction_pct": {
+          "mean_difference": -0.03263302167043175,
+          "lower": -0.1064772516503974,
+          "upper": 0.0,
+          "samples": 500,
+          "seed": 20261124
+        },
+        "ground_truth_pass_diff_observed_pairs": 120,
+        "ground_truth_pass_diff": {
+          "mean_difference": 0.0,
+          "lower": 0.0,
+          "upper": 0.0,
+          "samples": 500,
+          "seed": 20261124
+        },
+        "p95_latency_change_pct_observed_pairs": 120,
+        "p95_latency_change_pct": {
+          "mean_difference": -12.935323383084576,
+          "lower": -15.182186234817813,
+          "upper": 0.0,
+          "samples": 500,
+          "seed": 20261124
+        }
+      },
+      "by_family": {
+        "coding_fanout": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": -0.11893708611812372,
+            "lower": -0.3668031332086992,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": -15.182186234817813,
+            "lower": -15.182186234817813,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "compliance_open": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": -12.935323383084576,
+            "lower": -12.935323383084576,
+            "upper": -12.935323383084576,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "long_doc_mapreduce": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          }
+        }
+      }
+    },
+    "decomposed_routes": {
+      "active": "costweave_next_serial",
+      "control": "costweave_next_no_decomposition_serial",
+      "paired": {
+        "cost_reduction_pct_observed_pairs": 110,
+        "cost_reduction_pct": null,
+        "ground_truth_pass_diff_observed_pairs": 110,
+        "ground_truth_pass_diff": null,
+        "p95_latency_change_pct_observed_pairs": 110,
+        "p95_latency_change_pct": null
+      },
+      "by_family": {
+        "coding_fanout": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 14.412278512602944,
+            "lower": 2.7609786584805427,
+            "upper": 29.132595799262468,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": -2.6600985221674875,
+            "lower": -2.6600985221674875,
+            "upper": 29.55665024630542,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "compliance_open": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "long_doc_mapreduce": {
+          "cost_reduction_pct_observed_pairs": 30,
+          "cost_reduction_pct": null,
+          "ground_truth_pass_diff_observed_pairs": 30,
+          "ground_truth_pass_diff": null,
+          "p95_latency_change_pct_observed_pairs": 30,
+          "p95_latency_change_pct": null
+        }
+      }
+    },
+    "decision_policy": {
+      "active": "costweave_next_serial",
+      "control": "matched_lowest_cost_serial",
+      "paired": {
+        "cost_reduction_pct_observed_pairs": 120,
+        "cost_reduction_pct": {
+          "mean_difference": 0.7609361060212568,
+          "lower": -5.227551142591348,
+          "upper": 5.425677632315294,
+          "samples": 500,
+          "seed": 20261124
+        },
+        "ground_truth_pass_diff_observed_pairs": 120,
+        "ground_truth_pass_diff": {
+          "mean_difference": 0.0,
+          "lower": 0.0,
+          "upper": 0.0,
+          "samples": 500,
+          "seed": 20261124
+        },
+        "p95_latency_change_pct_observed_pairs": 120,
+        "p95_latency_change_pct": {
+          "mean_difference": -33.57567746199604,
+          "lower": -34.699272967614014,
+          "upper": -33.18038428448523,
+          "samples": 500,
+          "seed": 20261124
+        }
+      },
+      "by_family": {
+        "coding_fanout": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 2.7186611228473536,
+            "lower": -23.05008554463417,
+            "upper": 17.04926794103756,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": -34.699272967614014,
+            "lower": -47.94459338695264,
+            "upper": -34.699272967614014,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "compliance_open": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          }
+        },
+        "long_doc_mapreduce": {
+          "cost_reduction_pct_observed_pairs": 40,
+          "cost_reduction_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "ground_truth_pass_diff_observed_pairs": 40,
+          "ground_truth_pass_diff": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          },
+          "p95_latency_change_pct_observed_pairs": 40,
+          "p95_latency_change_pct": {
+            "mean_difference": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "samples": 500,
+            "seed": 20261124
+          }
+        }
+      }
+    }
+  }
+}
